@@ -2,10 +2,126 @@
 
 ## Prerequisites
 
-- **Node.js** 20+ (LTS recommended)
-- **pnpm** 9+ (`corepack enable && corepack prepare pnpm@latest`)
-- **PostgreSQL** 15+ (or use Docker — see below)
-- **Google Cloud** project with OAuth 2.0 credentials and Calendar API enabled
+| Tool | Version | Install |
+|---|---|---|
+| Node.js | 20+ | [nodejs.org](https://nodejs.org) |
+| pnpm | 9+ | `corepack enable && corepack prepare pnpm@latest` |
+| OrbStack or Docker Desktop | latest | [orbstack.dev](https://orbstack.dev) |
+| Google Cloud project | — | [console.cloud.google.com](https://console.cloud.google.com) |
+
+---
+
+## 1. Clone and configure
+
+```bash
+git clone <repo-url> event-calendar
+cd event-calendar
+```
+
+Copy the env template:
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in your values:
+
+```env
+AUTH_SECRET=        # run: openssl rand -base64 32
+AUTH_URL=http://localhost:3000
+GOOGLE_CLIENT_ID=   # from Google Cloud Console (see §3 below)
+GOOGLE_CLIENT_SECRET=
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/event_calendar
+```
+
+> **Note:** `DATABASE_URL` already matches the docker-compose Postgres — no change needed if you use `dev.sh`.
+
+---
+
+## 2. Start with one command
+
+```bash
+./dev.sh
+```
+
+This script:
+1. Runs `pnpm install`
+2. Starts the Postgres container (`docker-compose up db -d`)
+3. Waits until Postgres is ready
+4. Runs `pnpm db:push` (syncs the schema)
+5. Starts Next.js dev server → **http://localhost:3000**
+
+> **First run** takes ~30 s to pull the `postgres:17-alpine` image.  
+> **Subsequent runs** are instant — the DB container and volume persist.
+
+---
+
+## 3. Google OAuth setup
+
+Google login and Calendar sync require OAuth credentials.
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com)
+2. Select your project → **APIs & Services → Credentials**
+3. Click your OAuth 2.0 Client ID (or create one: **+ Create Credentials → OAuth client ID → Web application**)
+4. Under **Authorised redirect URIs** add:
+   ```
+   http://localhost:3000/api/auth/callback/google
+   ```
+5. Copy the **Client ID** and **Client Secret** into your `.env`
+6. Enable the **Google Calendar API**: APIs & Services → Library → search "Google Calendar API" → Enable
+
+---
+
+## 4. Useful commands
+
+```bash
+# Dev
+pnpm dev            # Start Next.js (assumes DB is already up)
+pnpm build          # Production build
+pnpm start          # Start production server
+
+# Database
+pnpm db:push        # Sync Prisma schema → DB (no migration files)
+pnpm db:studio      # Open Prisma Studio at http://localhost:5555
+
+# Database container
+docker-compose up db -d     # Start Postgres only
+docker-compose stop db      # Stop Postgres
+docker-compose down -v      # Remove containers + data volume (destructive)
+
+# Tests
+pnpm test           # Run all tests once
+pnpm test:watch     # Watch mode
+pnpm test:coverage  # With coverage report
+```
+
+---
+
+## 5. Project structure
+
+```
+src/
+├── app/
+│   ├── page.tsx                  # Calendar page (Server Component)
+│   ├── login/                    # Login page
+│   ├── register/                 # Register page
+│   ├── settings/                 # Settings + appearance
+│   ├── google/connect/           # Post-Google-login sync flow
+│   └── api/                      # REST API routes (backend)
+│       ├── auth/register/        # POST /api/auth/register
+│       ├── calendars/            # GET/POST/PUT/DELETE /api/calendars
+│       ├── events/               # GET/POST/PUT/DELETE /api/events
+│       └── google/sync/          # GET/POST /api/google/sync
+├── components/                   # UI components
+├── context/ThemeContext.tsx       # Theme (dark/light/accent/density)
+├── lib/
+│   ├── auth.ts                   # NextAuth v5 config
+│   ├── prisma.ts                 # Prisma client
+│   ├── google-calendar.ts        # Google Calendar API helpers
+│   └── theme.ts                  # Theme constants
+└── types/                        # Shared TypeScript types
+```
+
 
 ---
 
