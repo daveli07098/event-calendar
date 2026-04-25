@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Download, Loader2, RefreshCw } from "lucide-react";
+import { Separator } from "@/components/ui/separator";
+import { Download, Loader2, RefreshCw, Unlink } from "lucide-react";
 
 interface GoogleCalendarImportProps {
   onImported: () => void;
@@ -24,6 +25,34 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [hasGoogleLinked, setHasGoogleLinked] = useState<boolean | null>(null);
+  const [unlinking, setUnlinking] = useState(false);
+
+  // Check if user has a Google account linked on mount
+  useEffect(() => {
+    fetch("/api/google/account")
+      .then((r) => setHasGoogleLinked(r.ok))
+      .catch(() => setHasGoogleLinked(false));
+  }, []);
+
+  const unlinkGoogle = async () => {
+    if (!confirm("Unlink your Google account? You can reconnect at any time, but synced calendars will stop updating.")) return;
+    setUnlinking(true);
+    try {
+      const res = await fetch("/api/google/account", { method: "DELETE" });
+      if (res.ok) {
+        setHasGoogleLinked(false);
+        setGoogleCalendars([]);
+        setError(null);
+        onImported(); // refresh calendars (clears G badge)
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to unlink");
+      }
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
   const fetchGoogleCalendars = async () => {
     setLoading(true);
@@ -93,20 +122,7 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
       </div>
 
       {error && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-destructive">{error}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="self-start"
-            onClick={() =>
-              signIn("google", { callbackUrl: "/settings" })
-            }
-          >
-            <RefreshCw className="size-3.5 mr-1.5" />
-            Reconnect Google Account
-          </Button>
-        </div>
+        <p className="text-sm text-destructive">{error}</p>
       )}
 
       {googleCalendars.length > 0 && (
@@ -145,6 +161,57 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
             </div>
           ))}
         </div>
+      )}
+    </div>
+
+      {/* Unlink section */}
+      {hasGoogleLinked !== null && (
+        <>
+          <Separator />
+          <div className="flex items-center justify-between pt-1">
+            {hasGoogleLinked ? (
+              <>
+                <div>
+                  <p className="text-sm font-medium">Google Account linked</p>
+                  <p className="text-xs text-muted-foreground">
+                    Remove access to stop syncing and importing
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={unlinkGoogle}
+                  disabled={unlinking}
+                  className="text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                >
+                  {unlinking ? (
+                    <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Unlink className="size-3.5 mr-1.5" />
+                  )}
+                  Unlink Google Account
+                </Button>
+              </>
+            ) : (
+              <>
+                <div>
+                  <p className="text-sm font-medium">No Google Account linked</p>
+                  <p className="text-xs text-muted-foreground">
+                    Connect to import and sync Google Calendar events
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => signIn("google", { callbackUrl: "/settings" })}
+                >
+                  <RefreshCw className="size-3.5 mr-1.5" />
+                  Connect Google Account
+                </Button>
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

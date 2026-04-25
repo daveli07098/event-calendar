@@ -5,6 +5,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2026-04-27] — Session: Google sync + account management
+### Added
+- feat(calendar): per-calendar Google sync button + unlink Google account ([bcf01e7])
+  - `POST /api/calendars/[id]/sync` — re-runs full Google Calendar event import for a linked calendar; only owner can trigger; returns count of synced events
+  - `GET /api/google/account` — returns 200/404 to tell the UI if Google is linked
+  - `DELETE /api/google/account` — unlinks Google OAuth; clears `googleCalendarId` on all user calendars; permanent but reversible via reconnect
+  - RefreshCw icon button per Google-linked calendar row in Settings (spins while syncing, shows synced count in alert)
+  - GoogleCalendarImport card: persistent "Google Account linked / No Google Account linked" footer with Unlink / Connect buttons; replaces old static text + error-only reconnect button
+
 ## [2026-04-27] — Session: ICS export + Google account management
 ### Added
 - feat(calendar): ICS export + Google account reconnect and deduplication ([61872bf])

@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
 import { ICSImport } from "@/components/settings/ICSImport";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
-import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown } from "lucide-react";
+import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown, RefreshCw } from "lucide-react";
 import {
   Popover,
   PopoverTrigger,
@@ -90,6 +90,23 @@ export function SettingsClient({ user }: SettingsClientProps) {
 
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null);
   const [shareCalendar, setShareCalendar] = useState<CalendarType | null>(null);
+  const [syncingCalendarId, setSyncingCalendarId] = useState<string | null>(null);
+
+  const syncCalendar = async (cal: CalendarType) => {
+    setSyncingCalendarId(cal.id);
+    try {
+      const res = await fetch(`/api/calendars/${cal.id}/sync`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Synced ${data.importedEvents} events from Google Calendar.`);
+        fetchCalendars();
+      } else {
+        alert(data.error || "Sync failed");
+      }
+    } finally {
+      setSyncingCalendarId(null);
+    }
+  };
 
   const leaveCalendar = async (id: string) => {
     if (!confirm("Leave this calendar? You will lose access to its events.")) return;
@@ -210,7 +227,20 @@ export function SettingsClient({ user }: SettingsClientProps) {
                   />
 
                   {cal.googleCalendarId && (
-                    <span className="text-xs text-muted-foreground px-1">G</span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => syncCalendar(cal)}
+                      disabled={syncingCalendarId === cal.id}
+                      className="size-8"
+                      title="Sync from Google Calendar"
+                    >
+                      <RefreshCw
+                        className={`size-4 ${
+                          syncingCalendarId === cal.id ? "animate-spin" : ""
+                        }`}
+                      />
+                    </Button>
                   )}
 
                   {/* Share badge */}
@@ -346,11 +376,6 @@ export function SettingsClient({ user }: SettingsClientProps) {
           </CardHeader>
           <CardContent>
             <GoogleCalendarImport onImported={fetchCalendars} />
-            <Separator className="my-4" />
-            <p className="text-xs text-muted-foreground">
-              Your Google account is connected via the sign-in you used. Events
-              are imported as read-only copies.
-            </p>
           </CardContent>
         </Card>
 
