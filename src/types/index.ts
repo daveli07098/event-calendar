@@ -1,11 +1,30 @@
+export interface CalendarMemberType {
+  id: string;
+  calendarId: string;
+  userId: string;
+  role: "editor" | "viewer";
+  joinedAt: string;
+  user?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    image: string | null;
+  };
+}
+
 export interface CalendarType {
   id: string;
-  userId: string;
+  userId: string;    // owner id
   name: string;
   color: string;
   isDefault: boolean;
   isVisible: boolean;
   googleCalendarId: string | null;
+  shareToken: string | null;
+  shareMode: "collaborative" | "broadcast" | null;
+  // For member (non-owner) calendars
+  memberRole?: "editor" | "viewer";
+  members?: CalendarMemberType[];
   createdAt: string;
   updatedAt: string;
 }

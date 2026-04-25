@@ -11,6 +11,7 @@ import {
 import {
   ACCENT_COLORS,
   DEFAULT_THEME,
+  FONT_OPTIONS,
   RADIUS_VALUES,
   STORAGE_KEY,
   type Theme,
@@ -53,6 +54,10 @@ function applyTheme(theme: Theme, isDark: boolean) {
   // --- border radius ---
   root.style.setProperty("--radius", RADIUS_VALUES[theme.radius].value);
 
+  // --- font ---
+  const fontVar = FONT_OPTIONS[theme.font ?? "geist"].variable;
+  root.style.setProperty("--font-sans", `var(${fontVar})`);
+
   // --- density via data attribute (CSS selects [data-density="compact"]) ---
   root.dataset.density = theme.density;
 }
@@ -71,7 +76,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Boot: load from localStorage and apply
+  // Boot: load from localStorage (fast, for instant paint) → then authoritative fetch from server
   useEffect(() => {
     let stored: Theme = DEFAULT_THEME;
     try {
@@ -80,8 +85,21 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore parse errors
     }
+    // Apply cached theme immediately so there's no flash
     setThemeState(stored);
     applyAndPersist(stored);
+
+    // Then fetch the server-stored theme (source of truth across browsers)
+    fetch("/api/user/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.theme && typeof data.theme === "object") {
+          const serverTheme: Theme = { ...DEFAULT_THEME, ...(data.theme as Partial<Theme>) };
+          setThemeState(serverTheme);
+          applyAndPersist(serverTheme);
+        }
+      })
+      .catch(() => {/* keep localStorage value on network error */});
 
     // Re-apply when OS dark/light preference changes (system mode only)
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -100,6 +118,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setThemeState((prev) => {
         const next = { ...prev, ...patch };
         applyAndPersist(next);
+        // Persist to server (best-effort — don't block the UI)
+        fetch("/api/user/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ theme: next }),
+        }).catch(() => {/* ignore — localStorage is the fallback */});
         return next;
       });
     },

@@ -156,7 +156,28 @@ export function EventModal({
             <Switch
               id="allDay"
               checked={allDay}
-              onCheckedChange={setAllDay}
+              onCheckedChange={(checked) => {
+                setAllDay(checked);
+                if (!checked) {
+                  // Switching to timed — keep the date but add current time
+                  const now = new Date();
+                  const dateBase = startTime.slice(0, 10); // "YYYY-MM-DD"
+                  const hh = String(now.getHours()).padStart(2, "0");
+                  const mm = String(now.getMinutes()).padStart(2, "0");
+                  const newStart = `${dateBase}T${hh}:${mm}`;
+                  const endBase = endTime.slice(0, 10);
+                  const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+                  const eh = String(oneHourLater.getHours()).padStart(2, "0");
+                  const em = String(oneHourLater.getMinutes()).padStart(2, "0");
+                  const newEnd = `${endBase}T${eh}:${em}`;
+                  setStartTime(newStart);
+                  setEndTime(newEnd);
+                } else {
+                  // Switching to all-day — strip time
+                  setStartTime(startTime.slice(0, 10));
+                  setEndTime(endTime.slice(0, 10));
+                }
+              }}
             />
             <Label htmlFor="allDay">All day</Label>
           </div>
@@ -186,7 +207,20 @@ export function EventModal({
             <Label htmlFor="calendar">Calendar</Label>
             <Select value={calendarId} onValueChange={(v) => { if (v) setCalendarId(v); }}>
               <SelectTrigger>
-                <SelectValue />
+                {(() => {
+                  const selected = calendars.find((c) => c.id === calendarId);
+                  return selected ? (
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="size-2 rounded-full shrink-0"
+                        style={{ backgroundColor: selected.color }}
+                      />
+                      <span>{selected.name}</span>
+                    </div>
+                  ) : (
+                    <SelectValue placeholder="Select calendar" />
+                  );
+                })()}
               </SelectTrigger>
               <SelectContent>
                 {calendars.map((cal) => (

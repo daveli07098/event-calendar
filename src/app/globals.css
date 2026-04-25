@@ -12,20 +12,79 @@
   --fc-neutral-text-color: var(--muted-foreground);
 }
 
-.fc .fc-button-primary {
-  background-color: var(--primary);
-  border-color: var(--primary);
-  font-size: 0.875rem;
+/* ── Toolbar buttons — clean, minimal, shadcn-style ── */
+.fc .fc-button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--radius-md);
+  box-shadow: none;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1.4;
 }
 
-.fc .fc-button-primary:not(:disabled).fc-button-active,
-.fc .fc-button-primary:not(:disabled):active {
-  background-color: color-mix(in srgb, var(--primary) 80%, black);
-  border-color: color-mix(in srgb, var(--primary) 80%, black);
+.fc .fc-button:hover:not(:disabled) {
+  background: var(--muted);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.fc .fc-button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* View switcher group — pill style */
+.fc .fc-button-group {
+  gap: 2px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  border: none;
+}
+
+.fc .fc-button-group .fc-button {
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted-foreground);
+  padding: 0.2rem 0.65rem;
+}
+
+.fc .fc-button-group .fc-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--background) 60%, transparent);
+  color: var(--foreground);
+}
+
+.fc .fc-button-group .fc-button-primary:not(:disabled).fc-button-active {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px oklch(0 0 0 / 12%);
+  border: none;
+}
+
+/* prev/next/today standalone buttons */
+.fc .fc-prev-button,
+.fc .fc-next-button,
+.fc .fc-today-button {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.fc .fc-today-button:not(:disabled) {
+  font-weight: 500;
+}
+
+.fc .fc-today-button:disabled {
+  opacity: 0.4;
 }
 
 .fc .fc-toolbar-title {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
   font-weight: 600;
 }
 
@@ -34,6 +93,93 @@
   padding: 1px 4px;
   font-size: 0.8rem;
   cursor: pointer;
+}
+
+/* ── Timed events in month grid: no fill, just a dot + text ── */
+.fc .fc-daygrid-event.fc-event-timed-dot {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0;
+}
+
+/* Custom event content layouts */
+.ec-allday-event {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: 0 2px;
+  width: 100%;
+}
+
+.ec-allday-event .ec-event-title {
+  font-size: 0.78rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Timed event in month grid: dot · title · time */
+.ec-timed-event {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  padding: 1px 4px;
+  color: var(--foreground);
+}
+
+.ec-timed-event .ec-event-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.ec-timed-event .ec-event-title {
+  font-size: 0.78rem;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+  color: var(--foreground);
+}
+
+.ec-timed-event .ec-event-time {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Timed event in timeGrid (week/day) */
+.ec-timegrid-event {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 1px 2px;
+  height: 100%;
+}
+
+.ec-timegrid-event .ec-event-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.ec-timegrid-event .ec-event-time {
+  font-size: 0.68rem;
+  font-weight: 400;
+  opacity: 0.82;
+  white-space: nowrap;
+  line-height: 1.3;
 }
 
 .fc .fc-daygrid-day-number {
@@ -88,6 +234,7 @@
 }
 
 :root {
+  --font-sans: var(--font-geist-sans);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -172,6 +319,17 @@
 [data-density="compact"] .fc .fc-event {
   padding: 0 3px;
   font-size: 0.72rem;
+}
+
+[data-density="compact"] .ec-allday-event .ec-event-title,
+[data-density="compact"] .ec-timed-event .ec-event-title,
+[data-density="compact"] .ec-timegrid-event .ec-event-title {
+  font-size: 0.7rem;
+}
+
+[data-density="compact"] .ec-timed-event .ec-event-time,
+[data-density="compact"] .ec-timegrid-event .ec-event-time {
+  font-size: 0.62rem;
 }
 
 [data-density="compact"] .fc .fc-daygrid-day-number {

@@ -6,7 +6,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- feat(infra): Docker multi-stage build, docker-compose with PostgreSQL, .dockerignore
+- feat(db): Switch to PostgreSQL via `@prisma/adapter-pg`; `prisma.ts` uses `PrismaPg` driver adapter; `DATABASE_URL` points to postgres
+- feat(db): Prisma migration `20260425172814_add_user_theme_settings` — adds theme/appearance columns to User model
+- feat(calendars): Calendar sharing — `ShareCalendarDialog`, `/api/calendars/[id]/share`, `/api/calendars/[id]/members` routes; `CalendarMember` model; share modes (view/collaborative)
+- feat(calendars): ICS import — `/api/ics/import` route; `ICSImport` settings component
+- feat(calendars): `/api/join` route and `/join` page for accepting calendar share invites
+- feat(events): `accessibleCalendarIds` helper — events GET returns owned + shared calendars; POST guards write access via `canWriteToCalendar`
+- feat(events): Day detail panel (`DayDetailPanel`) — click a day cell to see events for that day
+- feat(settings): `/api/user/settings` route for persisting user preferences
+- feat(auth): Default calendar auto-created on `createUser` event (Google sign-in) and on `/api/auth/register`
+- fix(events): Remove duplicate `POST` export in `/api/events/route.ts` (caused build error)
+- fix(auth): Stale-session safeguard in `page.tsx` — auto signs out when JWT user no longer exists in DB; imports `signOut` from auth
+
+### Changed
+- refactor(infra): Docker multi-stage build, docker-compose with PostgreSQL, .dockerignore
 - docs: Getting-started guide covering local dev, Docker, and Google OAuth setup
 - feat(testing): Vitest test suite — 49 tests across 7 suites (API routes, lib, components)
 - feat(auth): Email/password registration and login with bcryptjs; Credentials provider in NextAuth v5;  JWT session strategy; `/register` page

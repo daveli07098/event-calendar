@@ -4,9 +4,11 @@ import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import {
   ACCENT_COLORS,
+  FONT_OPTIONS,
   RADIUS_VALUES,
   type ThemeAccent,
   type ThemeDensity,
+  type ThemeFont,
   type ThemeMode,
   type ThemeRadius,
 } from "@/lib/theme";
@@ -128,6 +130,32 @@ export function AppearanceSettings() {
                 >
                   {d.desc}
                 </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Font */}
+      <div>
+        <p className="text-sm font-medium mb-3">Font</p>
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(FONT_OPTIONS) as ThemeFont[]).map((key) => {
+            const f = FONT_OPTIONS[key];
+            const isSelected = (theme.font ?? "geist") === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setTheme({ font: key })}
+                style={{ fontFamily: `var(${f.variable})` }}
+                className={cn(
+                  "px-3 py-2 rounded-md border text-sm transition-colors",
+                  isSelected
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background hover:bg-muted",
+                )}
+              >
+                {f.label}
               </button>
             );
           })}

@@ -2,6 +2,31 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+/** Returns all calendar IDs the user can read (owned + shared memberships) */
+async function accessibleCalendarIds(userId: string): Promise<string[]> {
+  const [owned, memberships] = await Promise.all([
+    prisma.calendar.findMany({ where: { userId }, select: { id: true } }),
+    prisma.calendarMember.findMany({ where: { userId }, select: { calendarId: true } }),
+  ]);
+  return [
+    ...owned.map((c) => c.id),
+    ...memberships.map((m) => m.calendarId),
+  ];
+}
+
+/** Returns true if user may write to this calendar (owner or editor on collaborative) */
+async function canWriteToCalendar(calendarId: string, userId: string): Promise<boolean> {
+  const calendar = await prisma.calendar.findUnique({
+    where: { id: calendarId },
+    include: { members: { where: { userId } } },
+  });
+  if (!calendar) return false;
+  if (calendar.userId === userId) return true;
+  // Editor on collaborative calendar
+  if (calendar.shareMode === "collaborative" && calendar.members[0]?.role === "editor") return true;
+  return false;
+}
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -19,9 +44,11 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const calIds = await accessibleCalendarIds(session.user.id);
+
   const events = await prisma.event.findMany({
     where: {
-      calendar: { userId: session.user.id },
+      calendarId: { in: calIds },
       startTime: { lte: new Date(end) },
       endTime: { gte: new Date(start) },
     },
@@ -52,13 +79,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Verify the calendar belongs to the user
-  const calendar = await prisma.calendar.findFirst({
-    where: { id: calendarId, userId: session.user.id },
-  });
-
-  if (!calendar) {
-    return NextResponse.json({ error: "Calendar not found" }, { status: 404 });
+  if (!(await canWriteToCalendar(calendarId, session.user.id))) {
+    return NextResponse.json({ error: "Calendar not found or no write access" }, { status: 404 });
   }
 
   const event = await prisma.event.create({

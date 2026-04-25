@@ -2,19 +2,30 @@ export type ThemeMode = "light" | "dark" | "system";
 export type ThemeAccent = "slate" | "blue" | "green" | "purple" | "rose" | "orange";
 export type ThemeRadius = "none" | "sm" | "default" | "lg";
 export type ThemeDensity = "comfortable" | "compact";
+export type ThemeFont = "geist" | "inter" | "roboto" | "poppins" | "lato";
 
 export interface Theme {
   mode: ThemeMode;
   accent: ThemeAccent;
   radius: ThemeRadius;
   density: ThemeDensity;
+  font: ThemeFont;
 }
 
 export const DEFAULT_THEME: Theme = {
   mode: "system",
-  accent: "slate",
+  accent: "blue",
   radius: "default",
   density: "comfortable",
+  font: "geist",
+};
+
+export const FONT_OPTIONS: Record<ThemeFont, { label: string; variable: string; stack: string }> = {
+  geist:   { label: "Geist",   variable: "--font-geist-sans", stack: "Geist, system-ui, sans-serif" },
+  inter:   { label: "Inter",   variable: "--font-inter",      stack: "Inter, system-ui, sans-serif" },
+  roboto:  { label: "Roboto",  variable: "--font-roboto",     stack: "Roboto, system-ui, sans-serif" },
+  poppins: { label: "Poppins", variable: "--font-poppins",    stack: "Poppins, system-ui, sans-serif" },
+  lato:    { label: "Lato",    variable: "--font-lato",       stack: "Lato, system-ui, sans-serif" },
 };
 
 export const ACCENT_COLORS: Record<

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, ChevronLeft, ChevronRight, Settings } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Settings, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
@@ -110,6 +110,7 @@ export function CalendarSidebar({
 
       {/* Calendar list */}
       <div className="flex-1 overflow-auto p-3">
+        {/* My Calendars */}
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             My Calendars
@@ -123,8 +124,8 @@ export function CalendarSidebar({
             <Plus className="size-3" />
           </Button>
         </div>
-        <div className="flex flex-col gap-1">
-          {calendars.map((cal) => (
+        <div className="flex flex-col gap-1 mb-3">
+          {calendars.filter((c) => !c.memberRole).map((cal) => (
             <div
               key={cal.id}
               className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent group"
@@ -137,16 +138,50 @@ export function CalendarSidebar({
               {cal.googleCalendarId && (
                 <span className="text-[10px] text-muted-foreground">G</span>
               )}
+              {cal.shareMode && (
+                <Users className="size-3 text-muted-foreground shrink-0" />
+              )}
               <Switch
                 checked={cal.isVisible}
-                onCheckedChange={(checked) =>
-                  onCalendarToggle(cal.id, checked)
-                }
+                onCheckedChange={(checked) => onCalendarToggle(cal.id, checked)}
                 className="scale-75"
               />
             </div>
           ))}
         </div>
+
+        {/* Shared with me */}
+        {calendars.some((c) => c.memberRole) && (
+          <>
+            <div className="flex items-center gap-1 mb-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Shared with me
+              </span>
+            </div>
+            <div className="flex flex-col gap-1">
+              {calendars.filter((c) => c.memberRole).map((cal) => (
+                <div
+                  key={cal.id}
+                  className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent group"
+                >
+                  <div
+                    className="size-3 rounded-sm shrink-0"
+                    style={{ backgroundColor: cal.color }}
+                  />
+                  <span className="text-sm flex-1 truncate">{cal.name}</span>
+                  <span className="text-[10px] text-muted-foreground capitalize">
+                    {cal.memberRole}
+                  </span>
+                  <Switch
+                    checked={cal.isVisible}
+                    onCheckedChange={(checked) => onCalendarToggle(cal.id, checked)}
+                    className="scale-75"
+                  />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Settings link */}
