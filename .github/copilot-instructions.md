@@ -65,6 +65,18 @@ Create a new `## [YYYY-MM-DD]` block if today's date isn't already there. Then `
 - A bug fix is applied and verified
 - That's it — file touched or logical unit done = commit. No other judgment required.
 
+### Ordering — commit BEFORE writing the summary text:
+The commit step must execute **before** producing the final explanation paragraph.
+Correct order per response:
+1. Make the code change (replace_string_in_file / create_file)
+2. `get_errors` to verify
+3. `git add` + `git commit` + update CHANGELOG + `git commit --amend --no-edit`
+4. **Then** write the explanation to the user
+
+This ordering prevents short/simple fixes from "accidentally" finishing the response
+before the commit checklist runs. If step 4 is reached without step 3 having run,
+something went wrong — go back and commit before sending the reply.
+
 ### What does NOT trigger a commit:
 - Response was read-only (searches, reads, explanations only)
 - User explicitly says "don't commit yet"
