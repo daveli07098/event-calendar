@@ -7,9 +7,9 @@
 **Tech stack:**
 - Next.js 16.2 (App Router) with React 19
 - TypeScript, Tailwind CSS v4, shadcn/ui
-- Prisma 7 + SQLite (dev) via `prisma.config.ts`
-- NextAuth v5 (beta) — `src/lib/auth.ts`
-- FullCalendar 6 — `@fullcalendar/react`, daygrid, timegrid, list
+- Prisma 7 + PostgreSQL via `@prisma/adapter-pg` (docker-compose runs the DB on port 5432)
+- NextAuth v5 (beta) — `src/lib/auth.ts`; JWT session strategy; Credentials + Google providers
+- Custom calendar UI (no FullCalendar) — `CalendarView`, `DayDetailPanel`, `CalendarSidebar`
 - Google Calendar API via `googleapis` — `src/lib/google-calendar.ts`
 - pnpm workspace
 
@@ -36,13 +36,14 @@ Never invoke without explicit user request:
 
 ## Session Wrap — Changelog Workflow
 
-After any non-trivial session (debug, fix, feature, refactor, research, or findings):
+After **any non-trivial session** (debug, fix, feature, refactor, research, or findings),
+**always** — without waiting to be asked:
 
 1. Evaluate what changed or was discovered
 2. Commit all modified source files with a conventional commit message
 3. Append an entry to `CHANGELOG.md` in Keep a Changelog format
 
-**Trigger phrases (run without asking):** "wrap up", "commit findings", "save and commit",
+**Also run immediately on these phrases:** "wrap up", "commit findings", "save and commit",
 "update changelog", "log our changes", "write up what we did", "commit the fix".
 
 ## Safety
