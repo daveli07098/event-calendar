@@ -11,6 +11,21 @@ _No unreleased changes._
 
 ---
 
+## [2026-04-26] — Session: Auto-commit rules + feature commits
+
+### Added
+- feat(calendars): `/api/calendars/[id]/share` — generate share links with view/collaborative modes ([b1fdb74])
+- feat(calendars): `/api/calendars/[id]/duplicate` — duplicate a calendar with all its events ([b1fdb74])
+- feat(calendars): `ShareCalendarDialog` — UI for generating and copying share links; share action in sidebar context menu ([b1fdb74])
+- feat(events): Event edit/delete in `EventModal`; CalendarView and settings improvements ([7aa72ec])
+
+### Maintenance
+- chore(instructions): Make auto-commit mechanical — file edited or logical unit complete = commit, remove "more work coming" loophole ([39689ef])
+- chore(instructions): Restructure CHANGELOG to use dated session blocks with commit SHAs ([aa563c1])
+- chore(instructions): Fix stale tech stack reference and clarify auto-commit trigger ([308fbfc], [c8b8aa3])
+
+---
+
 ## [2026-04-26] — Session: Agent instructions + build fixes
 
 ### Fixed
