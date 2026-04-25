@@ -5,9 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
-
-_No unreleased changes._
+## [2026-04-27] — Session: Event creation animation
+### Added
+- feat(calendar): spring bounce animation for newly created events ([195bc39])
+  - `newEventId` state tracks the just-created event for 2 s
+  - `eventClassNames` callback adds `fc-event-new` to the FC event wrapper
+  - `@keyframes eventBirth` — spring bounce scale-in with slight rise (cubic-bezier spring curve)
+  - `@keyframes eventShine` — white ring expands outward and fades on event appear
 
 ---
 

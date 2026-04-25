@@ -32,6 +32,7 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
+  const [newEventId, setNewEventId] = useState<string | null>(null);
   const [selectedRange, setSelectedRange] = useState<{
     start: string;
     end: string;
@@ -190,6 +191,8 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
       if (res.ok) {
         const created = await res.json();
         setEvents((prev) => [...prev, created]);
+        setNewEventId(created.id);
+        setTimeout(() => setNewEventId(null), 2000);
       }
     }
     setModalOpen(false);
@@ -283,11 +286,16 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
             events={fcEvents}
             eventContent={renderEventContent}
             eventClassNames={(arg) => {
+              const classes: string[] = [];
               // Timed events in month grid: transparent background, dot style
               if (!arg.event.allDay && arg.view.type.startsWith("dayGrid")) {
-                return ["fc-event-timed-dot"];
+                classes.push("fc-event-timed-dot");
               }
-              return [];
+              // Birth animation for newly created events
+              if (arg.event.id === newEventId) {
+                classes.push("fc-event-new");
+              }
+              return classes;
             }}
             select={handleDateSelect}
             dateClick={handleDateClick}
