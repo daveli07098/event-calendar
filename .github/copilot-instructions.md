@@ -45,7 +45,13 @@ Never invoke without explicit user request:
 **How to commit:**
 1. `git add` all modified/new source files related to the change
 2. Write a conventional commit message: `feat:`, `fix:`, `refactor:`, `chore:` etc.
-3. Append a one-line entry to `CHANGELOG.md` under `## [Unreleased]`
+3. Append a one-line entry to `CHANGELOG.md` under the current dated session block:
+   ```
+   ## [YYYY-MM-DD] — Session: <topic>
+   ### Added / Fixed / Changed / Maintenance
+   - type(scope): description ([short-sha])
+   ```
+   Create a new dated block if today's date isn't already there.
 4. Commit (local only — never push without explicit user request)
 
 **Do NOT commit:**
