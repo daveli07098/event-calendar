@@ -34,16 +34,26 @@ Never invoke without explicit user request:
 - MCP server tools
 - External API calls
 
-## Session Wrap — Changelog Workflow
+## Auto-Commit Rule
 
-After **any non-trivial session** (debug, fix, feature, refactor, research, or findings),
-**always** — without waiting to be asked:
+**Commit immediately and automatically — without being asked — whenever:**
+- A feature is fully implemented (new route, component, or behaviour works end-to-end)
+- A bug or build error is fixed and verified
+- A refactor or cleanup is complete
+- Any source file is modified as the direct result of completing a user request
 
-1. Evaluate what changed or was discovered
-2. Commit all modified source files with a conventional commit message
-3. Append an entry to `CHANGELOG.md` in Keep a Changelog format
+**How to commit:**
+1. `git add` all modified/new source files related to the change
+2. Write a conventional commit message: `feat:`, `fix:`, `refactor:`, `chore:` etc.
+3. Append a one-line entry to `CHANGELOG.md` under `## [Unreleased]`
+4. Commit (local only — never push without explicit user request)
 
-**Also run immediately on these phrases:** "wrap up", "commit findings", "save and commit",
+**Do NOT commit:**
+- Mid-implementation (only on completion)
+- Lock files or generated files alone (bundle with the feature commit)
+- When the user is still iterating ("hmm, let me think…")
+
+**Also run on these phrases:** "wrap up", "commit findings", "save and commit",
 "update changelog", "log our changes", "write up what we did", "commit the fix".
 
 ## Safety
