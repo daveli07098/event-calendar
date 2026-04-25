@@ -1,10 +1,22 @@
-import NextAuth from "next-auth";
+import NextAuth, { type DefaultSession } from "next-auth";
 import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
+import { compare } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+
+declare module "next-auth" {
+  interface Session {
+    user: { id: string } & DefaultSession["user"];
+  }
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
+  session: { strategy: "jwt" },
+  pages: {
+    signIn: "/login",
+  },
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
@@ -18,13 +30,51 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         },
       },
     }),
+    Credentials({
+      name: "credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+      },
+      async authorize(credentials) {
+        const email = credentials?.email as string | undefined;
+        const password = credentials?.password as string | undefined;
+
+        if (!email || !password) return null;
+
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user?.password) return null;
+
+        const valid = await compare(password, user.password);
+        if (!valid) return null;
+
+        return { id: user.id, name: user.name, email: user.email, image: user.image };
+      },
+    }),
   ],
   callbacks: {
-    async session({ session, user }) {
-      if (session.user) {
-        session.user.id = user.id;
+    async jwt({ token, user, account, isNewUser }) {
+      if (user) token.id = user.id;
+      // Flag brand-new Google sign-ups so we can redirect to the sync picker
+      if (account?.provider === "google" && isNewUser) {
+        token.newGoogleUser = true;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session.user && token.id) {
+        session.user.id = token.id as string;
+      }
+      if (token.newGoogleUser) {
+        (session as Record<string, unknown>).newGoogleUser = true;
       }
       return session;
+    },
+    async redirect({ url, baseUrl }) {
+      // After Google sign-in NextAuth passes ?callbackUrl — honour it
+      if (url.startsWith(baseUrl)) return url;
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      return baseUrl;
     },
   },
   events: {

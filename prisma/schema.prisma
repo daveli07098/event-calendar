@@ -43,6 +43,7 @@ model User {
   email         String?    @unique
   emailVerified DateTime?
   image         String?
+  password      String?    // hashed — null for OAuth-only users
   accounts      Account[]
   sessions      Session[]
   calendars     Calendar[]
