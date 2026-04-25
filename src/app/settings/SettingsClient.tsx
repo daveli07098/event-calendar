@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
+import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import type { CalendarType } from "@/types";
 
@@ -142,6 +143,19 @@ export function SettingsClient({ user }: SettingsClientProps) {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Appearance */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Appearance</CardTitle>
+            <CardDescription>
+              Customize the look and feel of your calendar
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AppearanceSettings />
           </CardContent>
         </Card>
 

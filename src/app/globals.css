@@ -167,3 +167,32 @@
     @apply font-sans;
   }
 }
+
+/* ── Compact density overrides ── */
+[data-density="compact"] .fc .fc-event {
+  padding: 0 3px;
+  font-size: 0.72rem;
+}
+
+[data-density="compact"] .fc .fc-daygrid-day-number {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+}
+
+[data-density="compact"] .fc .fc-toolbar-title {
+  font-size: 1rem;
+}
+
+[data-density="compact"] .fc .fc-col-header-cell-cushion {
+  font-size: 0.72rem;
+  padding: 2px 4px;
+}
+
+[data-density="compact"] .fc .fc-timegrid-slot-label {
+  font-size: 0.72rem;
+}
+
+[data-density="compact"] .fc .fc-list-event td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
