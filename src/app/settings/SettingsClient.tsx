@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
 import { ICSImport } from "@/components/settings/ICSImport";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
-import { ArrowLeft, Trash2, Share2, LogOut, Copy } from "lucide-react";
+import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown } from "lucide-react";
 import {
   Popover,
   PopoverTrigger,
@@ -105,6 +105,13 @@ export function SettingsClient({ user }: SettingsClientProps) {
       const data = await res.json();
       alert(data.error || "Failed to duplicate");
     }
+  };
+
+  const exportCalendar = (cal: CalendarType) => {
+    const a = document.createElement("a");
+    a.href = `/api/calendars/${cal.id}/export`;
+    a.download = `${cal.name}.ics`;
+    a.click();
   };
 
   // Split owned vs joined
@@ -233,6 +240,17 @@ export function SettingsClient({ user }: SettingsClientProps) {
                     title="Duplicate calendar"
                   >
                     <Copy className="size-4" />
+                  </Button>
+
+                  {/* Export to ICS */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => exportCalendar(cal)}
+                    className="size-8"
+                    title="Export as .ics (Google Calendar, Apple Calendar, Outlook)"
+                  >
+                    <FileDown className="size-4" />
                   </Button>
 
                   {!cal.isDefault && (

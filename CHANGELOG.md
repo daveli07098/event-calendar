@@ -5,6 +5,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2026-04-27] — Session: ICS export + Google account management
+### Added
+- feat(calendar): ICS export + Google account reconnect and deduplication ([61872bf])
+  - `GET /api/calendars/[id]/export` — RFC 5545 compliant ICS download (works in Google Calendar, Apple Calendar, Outlook)
+    - Proper line folding at 75 chars, text escaping, UTC datetimes
+    - All-day events use `VALUE=DATE` with exclusive DTEND
+    - Auth-gated: owner + members can export
+  - FileDown button (per owned calendar in Settings) → instant `.ics` download
+  - `allowDangerousEmailAccountLinking: true` on Google provider — prevents duplicate user records when same email is used for credentials + Google OAuth
+  - `signIn` callback deduplication — if a Google sign-in would create/use an OAuth-only user but a credentials user with the same email exists, the Google Account is transferred to the credentials user (one canonical identity)
+  - "Reconnect Google Account" button appears in Google Calendar Import card when token fetch fails — triggers fresh Google OAuth flow → updates stored tokens
+
 ## [2026-04-27] — Session: Event creation animation
 ### Added
 - feat(calendar): spring bounce animation for newly created events ([195bc39])

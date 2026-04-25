@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, RefreshCw } from "lucide-react";
 
 interface GoogleCalendarImportProps {
   onImported: () => void;
@@ -92,7 +93,20 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
       </div>
 
       {error && (
-        <p className="text-sm text-destructive">{error}</p>
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-destructive">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="self-start"
+            onClick={() =>
+              signIn("google", { callbackUrl: "/settings" })
+            }
+          >
+            <RefreshCw className="size-3.5 mr-1.5" />
+            Reconnect Google Account
+          </Button>
+        </div>
       )}
 
       {googleCalendars.length > 0 && (
