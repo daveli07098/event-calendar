@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, ChevronLeft, ChevronRight, Settings, Users } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Settings, Users, Megaphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
@@ -139,7 +139,9 @@ export function CalendarSidebar({
                 <span className="text-[10px] text-muted-foreground">G</span>
               )}
               {cal.shareMode && (
-                <Users className="size-3 text-muted-foreground shrink-0" />
+                cal.shareMode === "broadcast"
+                  ? <Megaphone className="size-3 text-muted-foreground shrink-0" />
+                  : <Users className="size-3 text-muted-foreground shrink-0" />
               )}
               <Switch
                 checked={cal.isVisible}

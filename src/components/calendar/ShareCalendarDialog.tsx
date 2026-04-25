@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
@@ -92,50 +91,62 @@ export function ShareCalendarDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+      <DialogContent className="sm:max-w-[520px] gap-0 p-0 overflow-hidden">
+        {/* Header */}
+        <div className="px-6 pt-6 pb-4 pr-12">
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold leading-tight">
             <span
-              className="size-4 rounded-full shrink-0"
+              className="size-3.5 rounded-full shrink-0"
               style={{ backgroundColor: calendar.color }}
             />
-            Share &ldquo;{calendar.name}&rdquo;
+            <span className="truncate">Share &ldquo;{calendar.name}&rdquo;</span>
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="mt-1 text-sm text-muted-foreground">
             Choose how others can access this calendar.
           </DialogDescription>
-        </DialogHeader>
+        </div>
 
-        <div className="space-y-4 pt-1">
+        {/* Body — scrollable if content grows */}
+        <div className="px-6 pb-6 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
           {/* Mode selector */}
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => enableSharing("collaborative")}
-              disabled={saving}
-              className={`rounded-lg border p-3 text-left text-sm transition-colors ${
+              disabled={saving || currentMode === "collaborative"}
+              title={currentMode === "collaborative" ? "Already collaborative" : undefined}
+              className={`rounded-lg border p-3.5 text-left text-sm transition-colors ${
                 currentMode === "collaborative"
-                  ? "border-primary bg-primary/5"
+                  ? "border-primary bg-primary/10 ring-1 ring-primary"
                   : "border-border hover:border-primary/50"
               }`}
             >
-              <p className="font-medium mb-0.5">Collaborative</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="font-semibold mb-1">Collaborative</p>
+              <p className="text-xs text-muted-foreground leading-snug">
                 Anyone with link can add &amp; edit events
               </p>
+              {currentMode === "broadcast" && (
+                <p className="text-[10px] text-primary mt-1.5 font-medium">Viewers promoted to editors</p>
+              )}
             </button>
             <button
               onClick={() => enableSharing("broadcast")}
-              disabled={saving}
-              className={`rounded-lg border p-3 text-left text-sm transition-colors ${
-                currentMode === "broadcast"
-                  ? "border-primary bg-primary/5"
+              disabled={saving || currentMode === "collaborative"}
+              title={currentMode === "collaborative" ? "Cannot downgrade — stop sharing first" : undefined}
+              className={`rounded-lg border p-3.5 text-left text-sm transition-colors ${
+                currentMode === "collaborative"
+                  ? "border-border opacity-40 cursor-not-allowed"
+                  : currentMode === "broadcast"
+                  ? "border-primary bg-primary/10 ring-1 ring-primary"
                   : "border-border hover:border-primary/50"
               }`}
             >
-              <p className="font-medium mb-0.5">Broadcast</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="font-semibold mb-1">Broadcast</p>
+              <p className="text-xs text-muted-foreground leading-snug">
                 Anyone with link can only view events
               </p>
+              {currentMode === "collaborative" && (
+                <p className="text-[10px] text-muted-foreground mt-1.5">Stop sharing to enable</p>
+              )}
             </button>
           </div>
 

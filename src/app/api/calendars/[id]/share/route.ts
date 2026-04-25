@@ -44,6 +44,23 @@ export async function POST(
 
   // Generate a new 16-byte URL-safe token
   const shareToken = randomBytes(16).toString("hex");
+
+  // Rule: collaborative → broadcast is blocked (members are editors, can't silently downgrade)
+  if (calendar.shareMode === "collaborative" && mode === "broadcast") {
+    return NextResponse.json(
+      { error: "Cannot downgrade a collaborative calendar to broadcast. Stop sharing first." },
+      { status: 409 }
+    );
+  }
+
+  // Rule: broadcast → collaborative — promote all viewers to editors
+  if (calendar.shareMode === "broadcast" && mode === "collaborative") {
+    await prisma.calendarMember.updateMany({
+      where: { calendarId: id, role: "viewer" },
+      data: { role: "editor" },
+    });
+  }
+
   const updated = await prisma.calendar.update({
     where: { id },
     data: { shareToken, shareMode: mode },
