@@ -2,6 +2,19 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* ── Event reminder animations ── */
+@keyframes reminderEnter {
+  from { opacity: 0; transform: translateX(120%) scale(0.85); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes reminderExit {
+  from { opacity: 1; transform: translateX(0) scale(1); }
+  to   { opacity: 0; transform: translateX(120%) scale(0.85); }
+}
+@keyframes reminderBar {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
 /* FullCalendar base styles */
 .fc {
   --fc-border-color: var(--border);

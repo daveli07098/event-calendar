@@ -46,11 +46,18 @@ export async function GET(req: NextRequest) {
 
   const calIds = await accessibleCalendarIds(session.user.id);
 
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+
+  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+    return NextResponse.json({ error: "Invalid start or end date" }, { status: 400 });
+  }
+
   const events = await prisma.event.findMany({
     where: {
       calendarId: { in: calIds },
-      startTime: { lte: new Date(end) },
-      endTime: { gte: new Date(start) },
+      startTime: { lte: endDate },
+      endTime: { gte: startDate },
     },
     include: { calendar: true },
     orderBy: { startTime: "asc" },

@@ -21,6 +21,7 @@ import { Plus } from "lucide-react";
 import type { CalendarType, EventType, EventFormData } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
+import { EventReminder } from "@/components/calendar/EventReminder";
 
 interface CalendarViewProps {
   initialEvents: EventType[];
@@ -254,6 +255,11 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
 
   return (
     <>
+      {/* Event reminder toasts */}
+      <EventReminder
+        events={events.filter((e) => !e.allDay)}
+        calendars={calendars}
+      />
       {/* Calendar + optional day-detail panel side by side */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 min-w-0 p-4">

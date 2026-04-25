@@ -14,8 +14,24 @@ _No unreleased changes._
 ## [2026-04-26] — Session: Auto-commit rules + feature commits
 
 ### Added
+- feat(calendar): event reminder toasts + browser notifications (10-min warning + "starting now") with slide animations ([8e0d71c])
+- feat(calendar): `EventReminder` component with progress bar and auto-dismiss ([8e0d71c])
+- feat(calendars): `/api/calendars/[id]/duplicate` — duplicate a calendar with all its events ([8e0d71c])
+
+### Fixed
+- fix(events): `+` in timezone offset parsed as space causing `Invalid Date` in Prisma query ([8e0d71c])
+- fix(events): removed duplicate `PUT`/`DELETE` exports in `/api/events/[id]/route.ts` ([8e0d71c])
+- fix(share): block collaborative→broadcast downgrade; auto-promote viewers on broadcast→collaborative upgrade ([8e0d71c])
+
+### Changed
+- feat(calendar): read-only event modal for broadcast viewers — dimmed form, amber banner, Close-only button ([8e0d71c])
+- feat(calendar): `Megaphone` icon for broadcast-owned calendars in sidebar; `Users` for collaborative ([8e0d71c])
+- feat(calendar): drag/resize blocked client-side for non-writable calendars ([8e0d71c])
+- feat(calendars): Duplicate button in settings "My Calendars" section ([8e0d71c])
+- fix(share-dialog): layout overhaul — separate header/body sections, `pr-12` to avoid close-button overlap, `max-h-[70vh]` scroll ([8e0d71c])
+
+### Added (previous entries)
 - feat(calendars): `/api/calendars/[id]/share` — generate share links with view/collaborative modes ([b1fdb74])
-- feat(calendars): `/api/calendars/[id]/duplicate` — duplicate a calendar with all its events ([b1fdb74])
 - feat(calendars): `ShareCalendarDialog` — UI for generating and copying share links; share action in sidebar context menu ([b1fdb74])
 - feat(events): Event edit/delete in `EventModal`; CalendarView and settings improvements ([7aa72ec])
 
