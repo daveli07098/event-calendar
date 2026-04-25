@@ -31,6 +31,7 @@ interface EventModalProps {
   initialRange: { start: string; end: string; allDay: boolean } | null;
   onSave: (data: EventFormData) => Promise<void>;
   onDelete: () => Promise<void>;
+  readOnly?: boolean;
 }
 
 function toLocalDateTimeString(dateStr: string) {
@@ -56,6 +57,7 @@ export function EventModal({
   initialRange,
   onSave,
   onDelete,
+  readOnly = false,
 }: EventModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -138,9 +140,16 @@ export function EventModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px]">
         <DialogHeader>
-          <DialogTitle>{event ? "Edit Event" : "New Event"}</DialogTitle>
+          <DialogTitle>{readOnly ? "View Event" : event ? "Edit Event" : "New Event"}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {readOnly && (
+          <p className="text-xs text-amber-500/90 bg-amber-500/10 border border-amber-500/20 rounded-md px-3 py-1.5 -mt-1">
+            This calendar is view-only — you cannot edit events.
+          </p>
+        )}
+        <form onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit} className="flex flex-col gap-4">
+          {/* Dimming overlay for read-only — wraps all fields */}
+          <div className={readOnly ? "opacity-60 pointer-events-none select-none flex flex-col gap-4" : "contents"}>
           <div className="flex flex-col gap-2">
             <Label htmlFor="title">Title</Label>
             <Input
@@ -149,6 +158,8 @@ export function EventModal({
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
+              readOnly={readOnly}
+              className={readOnly ? "cursor-default select-text" : ""}
             />
           </div>
 
@@ -156,6 +167,7 @@ export function EventModal({
             <Switch
               id="allDay"
               checked={allDay}
+              disabled={readOnly}
               onCheckedChange={(checked) => {
                 setAllDay(checked);
                 if (!checked) {
@@ -190,6 +202,8 @@ export function EventModal({
                 type={allDay ? "date" : "datetime-local"}
                 value={allDay ? startTime.slice(0, 10) : startTime}
                 onChange={(e) => setStartTime(e.target.value)}
+                readOnly={readOnly}
+                className={readOnly ? "cursor-default" : ""}
               />
             </div>
             <div className="flex flex-col gap-2">
@@ -199,6 +213,8 @@ export function EventModal({
                 type={allDay ? "date" : "datetime-local"}
                 value={allDay ? endTime.slice(0, 10) : endTime}
                 onChange={(e) => setEndTime(e.target.value)}
+                readOnly={readOnly}
+                className={readOnly ? "cursor-default" : ""}
               />
             </div>
           </div>
@@ -245,6 +261,8 @@ export function EventModal({
               placeholder="Add location"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
+              readOnly={readOnly}
+              className={readOnly ? "cursor-default select-text" : ""}
             />
           </div>
 
@@ -256,11 +274,14 @@ export function EventModal({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
+              readOnly={readOnly}
+              className={readOnly ? "cursor-default select-text" : ""}
             />
           </div>
+          </div>{/* end dimmed wrapper */}
 
           <div className="flex items-center justify-between pt-2">
-            {event && (
+            {event && !readOnly && (
               <Button
                 type="button"
                 variant="destructive"
@@ -278,11 +299,13 @@ export function EventModal({
                 variant="outline"
                 onClick={() => onOpenChange(false)}
               >
-                Cancel
+                {readOnly ? "Close" : "Cancel"}
               </Button>
-              <Button type="submit" disabled={saving || !title.trim()}>
-                {saving ? "Saving..." : event ? "Update" : "Create"}
-              </Button>
+              {!readOnly && (
+                <Button type="submit" disabled={saving || !title.trim()}>
+                  {saving ? "Saving..." : event ? "Update" : "Create"}
+                </Button>
+              )}
             </div>
           </div>
         </form>

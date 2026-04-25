@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { auth, signOut } from "@/lib/auth";
+import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { CalendarPageClient } from "@/components/calendar/CalendarPageClient";
 
@@ -19,7 +19,7 @@ export default async function CalendarPage() {
     select: { id: true },
   });
   if (!userExists) {
-    await signOut({ redirectTo: "/login" });
+    redirect("/login");
   }
 
   const uid = session.user.id;

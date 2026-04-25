@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
 import { ICSImport } from "@/components/settings/ICSImport";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
-import { ArrowLeft, Trash2, Share2, LogOut } from "lucide-react";
+import { ArrowLeft, Trash2, Share2, LogOut, Copy } from "lucide-react";
 import {
   Popover,
   PopoverTrigger,
@@ -95,6 +95,16 @@ export function SettingsClient({ user }: SettingsClientProps) {
     if (!confirm("Leave this calendar? You will lose access to its events.")) return;
     await fetch(`/api/calendars/${id}`, { method: "DELETE" });
     setCalendars((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const duplicateCalendar = async (cal: CalendarType) => {
+    const res = await fetch(`/api/calendars/${cal.id}/duplicate`, { method: "POST" });
+    if (res.ok) {
+      fetchCalendars();
+    } else {
+      const data = await res.json();
+      alert(data.error || "Failed to duplicate");
+    }
   };
 
   // Split owned vs joined
@@ -212,6 +222,17 @@ export function SettingsClient({ user }: SettingsClientProps) {
                     title="Share"
                   >
                     <Share2 className="size-4" />
+                  </Button>
+
+                  {/* Duplicate button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => duplicateCalendar(cal)}
+                    className="size-8"
+                    title="Duplicate calendar"
+                  >
+                    <Copy className="size-4" />
                   </Button>
 
                   {!cal.isDefault && (

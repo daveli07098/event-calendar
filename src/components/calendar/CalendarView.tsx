@@ -38,6 +38,17 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
   } | null>(null);
   const [dayPanelDate, setDayPanelDate] = useState<string | null>(null);
 
+  // Returns true if the user can write to the given calendar
+  const calendarIsWritable = (calId: string) => {
+    const cal = calendars.find((c) => c.id === calId);
+    if (!cal) return false;
+    // Owner (no memberRole) or collaborative editor
+    return !cal.memberRole || cal.memberRole === "editor";
+  };
+
+  const selectedEventReadOnly =
+    selectedEvent ? !calendarIsWritable(selectedEvent.calendarId) : false;
+
   const visibleCalendarIds = calendars
     .filter((c) => c.isVisible)
     .map((c) => c.id);
@@ -89,6 +100,10 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
 
   const handleEventDrop = async (dropInfo: EventDropArg) => {
     const event = dropInfo.event.extendedProps.event as EventType;
+    if (!calendarIsWritable(event.calendarId)) {
+      dropInfo.revert();
+      return;
+    }
     try {
       const res = await fetch(`/api/events/${event.id}`, {
         method: "PUT",
@@ -112,6 +127,10 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
 
   const handleEventResize = async (resizeInfo: EventResizeDoneArg) => {
     const event = resizeInfo.event.extendedProps.event as EventType;
+    if (!calendarIsWritable(event.calendarId)) {
+      resizeInfo.revert();
+      return;
+    }
     try {
       const res = await fetch(`/api/events/${event.id}`, {
         method: "PUT",
@@ -325,6 +344,7 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
         initialRange={selectedRange}
         onSave={handleSaveEvent}
         onDelete={handleDeleteEvent}
+        readOnly={selectedEventReadOnly}
       />
     </>
   );
