@@ -36,34 +36,41 @@ Never invoke without explicit user request:
 
 ## Auto-Commit Rule
 
-**Commit immediately and automatically — without being asked — whenever:**
-- A feature is fully implemented (new route, component, or behaviour works end-to-end)
-- A bug or build error is fixed and verified
-- A refactor or cleanup is complete
-- Any source file is modified as the direct result of completing a user request
+**If you edited or created any source file in this response → the FINAL action must be `git commit`. No exceptions. Do not end the response without committing.**
 
-**How to commit:**
-1. `git add` all modified/new source files related to the change
-2. Write a conventional commit message: `feat:`, `fix:`, `refactor:`, `chore:` etc.
-3. Append a one-line entry to `CHANGELOG.md` under the current dated session block:
-   ```
-   ## [YYYY-MM-DD] — Session: <topic>
-   ### Added / Fixed / Changed / Maintenance
-   - type(scope): description ([short-sha])
-   ```
-   Create a new dated block if today's date isn't already there.
-4. Commit (local only — never push without explicit user request)
+### Commit checklist (run in order, at the end of every response that touched a file):
 
-**Do NOT commit:**
-- Mid-implementation (only on completion)
-- Lock files or generated files alone (bundle with the feature commit)
-- When the user is still iterating ("hmm, let me think…")
+```bash
+# 1. Stage everything related to the change
+git add <changed files>
 
-**Also run on these phrases:** "wrap up", "commit findings", "save and commit",
-"update changelog", "log our changes", "write up what we did", "commit the fix".
+# 2. Commit with conventional message
+git commit -m "type(scope): description"
 
-## Safety
+# 3. Get the short SHA and append to CHANGELOG.md
+git rev-parse --short HEAD
+```
 
-- Never `git push --force` without confirmation
-- Never delete files or destructive DB operations without confirmation
-- Local commits first; push on explicit request only
+### CHANGELOG format — always use dated session blocks:
+```markdown
+## [YYYY-MM-DD] — Session: <topic>
+### Added / Fixed / Changed / Maintenance
+- type(scope): what changed ([short-sha])
+```
+Create a new `## [YYYY-MM-DD]` block if today's date isn't already there. Then `git add CHANGELOG.md && git commit --amend --no-edit` (or a separate `chore: update CHANGELOG` commit).
+
+### What triggers a commit:
+- Any `replace_string_in_file`, `multi_replace_string_in_file`, or `create_file` call was made
+- A feature implementation is complete (even if other unrelated work is still pending)
+- A bug fix is applied and verified
+- That's it — file touched or logical unit done = commit. No other judgment required.
+
+### What does NOT trigger a commit:
+- Response was read-only (searches, reads, explanations only)
+- User explicitly says "don't commit yet"
+
+### Never:
+- Skip a commit because "more work is coming later" — commit each logical unit as it finishes
+- `git push` without explicit user request
+- `git push --force` without confirmation
+- Delete files or run destructive DB operations without confirmation
