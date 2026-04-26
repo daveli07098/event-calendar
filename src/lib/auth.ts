@@ -21,9 +21,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      // If a credentials user with the same email already exists, link Google to
-      // that account rather than creating a second user record.
-      allowDangerousEmailAccountLinking: true,
       authorization: {
         params: {
           scope:
