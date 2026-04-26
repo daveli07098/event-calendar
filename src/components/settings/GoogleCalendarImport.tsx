@@ -162,7 +162,6 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
           ))}
         </div>
       )}
-    </div>
 
       {/* Unlink section */}
       {hasGoogleLinked !== null && (
