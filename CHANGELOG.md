@@ -5,6 +5,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2026-04-27] — Session: Ticket Section
+### Added
+- feat(tickets): AI-powered Ticket Section page for auto-importing event URLs ([b226c5a])
+  - `/tickets` page — paste any ticket/event URL; AI extracts title, date, time, venue, description
+  - `/api/tickets/scrape` — server-side HTML fetch (SSRF-protected) + AI extraction with 4 provider tiers:
+    1. `GEMINI_API_KEY` — Google Gemini 1.5 Flash (free: 1M tokens/day)
+    2. `GITHUB_TOKEN` — GitHub Copilot Chat API (OpenAI-compatible proxy)
+    3. `GROQ_API_KEY` — Groq / Llama 3 (free tier)
+    4. OG/Schema.org + JSON-LD fallback (no key required)
+  - `/api/tickets/add` — auto-creates a `ticket-reminders` calendar (orange) on first use, then adds extracted event
+  - Sidebar nav updated with Ticket icon → `/tickets` link
+
 ## [2026-04-27] — Session: Google sync + account management
 ### Added
 - feat(calendar): per-calendar Google sync button + unlink Google account ([bcf01e7])
