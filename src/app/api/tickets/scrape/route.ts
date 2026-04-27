@@ -2,6 +2,44 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
 // ---------------------------------------------------------------------------
+// AI usage rate limiter — in-memory, resets daily per user
+// Prevents quota burn if the token is misused or the page is hammered.
+// ---------------------------------------------------------------------------
+const AI_DAILY_LIMIT = 20; // max AI-powered scrapes per user per day
+
+interface RateBucket { count: number; dayKey: string }
+const rateLimitMap = new Map<string, RateBucket>();
+
+function getDayKey() {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+/** Returns true if the user is within their daily AI quota. Increments counter. */
+function checkAndIncrementAiLimit(userId: string): boolean {
+  const today = getDayKey();
+  const bucket = rateLimitMap.get(userId);
+
+  if (!bucket || bucket.dayKey !== today) {
+    // New day or first use — reset
+    rateLimitMap.set(userId, { count: 1, dayKey: today });
+    return true;
+  }
+
+  if (bucket.count >= AI_DAILY_LIMIT) return false;
+
+  bucket.count += 1;
+  return true;
+}
+
+/** How many AI calls remain today for this user. */
+function remainingAiCalls(userId: string): number {
+  const today = getDayKey();
+  const bucket = rateLimitMap.get(userId);
+  if (!bucket || bucket.dayKey !== today) return AI_DAILY_LIMIT;
+  return Math.max(0, AI_DAILY_LIMIT - bucket.count);
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 interface TicketData {
@@ -280,8 +318,16 @@ export async function POST(req: NextRequest) {
   let aiUsed = "og-meta";
 
   const pageText = extractTextFromHtml(html);
+  const uid = session.user.id;
 
-  if (geminiKey) {
+  // Check daily AI quota before calling any AI provider.
+  // Falls back to OG-meta if the user has hit their limit for today.
+  const withinLimit = checkAndIncrementAiLimit(uid);
+  const remaining = remainingAiCalls(uid);
+
+  if (!withinLimit) {
+    console.warn(`[tickets/scrape] User ${uid} hit daily AI limit (${AI_DAILY_LIMIT}/day) — using OG-meta fallback`);
+  } else if (geminiKey) {
     try {
       aiResult = await callGemini(pageText, url);
       aiUsed = "gemini-1.5-flash";
@@ -336,5 +382,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  return NextResponse.json(ticket);
+  return NextResponse.json({
+    ...ticket,
+    // Usage info shown in the UI
+    aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining },
+  });
 }

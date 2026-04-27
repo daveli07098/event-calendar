@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 
+interface AiQuota { used: number; limit: number; remaining: number }
+
 interface ScrapedTicket {
   title: string;
   date: string | null;       // ISO string or natural language
@@ -19,6 +21,7 @@ interface ScrapedTicket {
   imageUrl: string | null;
   sourceUrl: string;
   aiUsed: string;            // which AI provider processed it
+  aiQuota: AiQuota;
 }
 
 type Status = "idle" | "scraping" | "scraped" | "adding" | "done" | "error";
@@ -29,6 +32,7 @@ export function TicketSection() {
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [addedCalendarName, setAddedCalendarName] = useState("");
+  const [quota, setQuota] = useState<AiQuota | null>(null);
 
   const handleScrape = async () => {
     const trimmed = url.trim();
@@ -54,6 +58,7 @@ export function TicketSection() {
       }
 
       setTicket(data);
+      if (data.aiQuota) setQuota(data.aiQuota);
       setStatus("scraped");
     } catch {
       setErrorMsg("Network error — please try again");
@@ -111,10 +116,20 @@ export function TicketSection() {
           <Ticket className="size-5 text-primary" />
           <h1 className="text-lg font-semibold">Ticket Section</h1>
         </div>
-        <Badge variant="secondary" className="ml-auto text-xs">
-          <Sparkles className="size-3 mr-1" />
-          AI-powered
-        </Badge>
+        <div className="ml-auto flex items-center gap-2">
+          {quota && (
+            <Badge
+              variant={quota.remaining <= 5 ? "destructive" : "outline"}
+              className="text-xs tabular-nums"
+            >
+              {quota.remaining}/{quota.limit} AI calls left today
+            </Badge>
+          )}
+          <Badge variant="secondary" className="text-xs">
+            <Sparkles className="size-3 mr-1" />
+            AI-powered
+          </Badge>
+        </div>
       </header>
 
       <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
