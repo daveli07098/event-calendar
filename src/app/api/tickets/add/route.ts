@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-const TICKET_CALENDAR_NAME = "ticket-reminders";
+const TICKET_CALENDAR_NAME = "event-reminders";
 const TICKET_CALENDAR_COLOR = "#f97316"; // warm orange — distinct from default calendars
 
 const SALE_CALENDAR_NAME = "sale-ticket";

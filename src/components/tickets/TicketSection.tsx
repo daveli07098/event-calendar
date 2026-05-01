@@ -142,7 +142,7 @@ export function TicketSection() {
           <p className="text-muted-foreground text-sm">
             Paste any event or ticket URL (Eventbrite, Ticketmaster, KKTIX, Accupass, etc.)
             and AI will extract the details and add it to a{" "}
-            <span className="font-semibold text-foreground">ticket-reminders</span> calendar
+            <span className="font-semibold text-foreground">event-reminders</span> calendar
             automatically.
           </p>
         </div>
@@ -313,7 +313,7 @@ export function TicketSection() {
                 <div className="flex gap-2 pt-2">
                   <Button onClick={handleAddToCalendar} className="flex-1">
                     <CalendarPlus className="size-4 mr-2" />
-                    Add to ticket-reminders
+                    Add to event-reminders
                   </Button>
                   <Button variant="outline" onClick={handleReset}>
                     Clear
