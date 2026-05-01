@@ -102,11 +102,30 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     return m ? (m[1] ?? m[2] ?? null) : null;
   };
 
+  // Decode common HTML entities in text extracted from meta tags
+  function decodeHtml(str: string | null): string | null {
+    if (!str) return null;
+    return str
+      .replace(/&quot;/g, '"')
+      .replace(/&#34;/g, '"')
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+  }
+
   // Open Graph
-  const ogTitle = get(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
-    ?? get(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i);
-  const ogDesc = get(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)
-    ?? get(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i);
+  const ogTitle = decodeHtml(
+    get(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i)
+    ?? get(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:title["']/i)
+  );
+  const ogDesc = decodeHtml(
+    get(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i)
+    ?? get(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:description["']/i)
+  );
   const ogImage = get(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i)
     ?? get(/<meta[^>]*content=["']([^"']+)["'][^>]*property=["']og:image["']/i);
 
@@ -153,14 +172,14 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   }
 
   // HTML <title> fallback
-  const htmlTitle = get(/<title[^>]*>([^<]+)<\/title>/i);
+  const htmlTitle = decodeHtml(get(/<title[^>]*>([^<]+)<\/title>/i));
 
   // Eventbrite-specific date meta
   const eventDate = get(/<meta[^>]*name=["']event:start_time["'][^>]*content=["']([^"']+)["']/i);
 
   return {
     title: ogTitle ?? htmlTitle,
-    description: ogDesc,
+    description: decodeHtml(ogDesc),
     imageUrl: ogImage,
     date: schemaDate ?? (eventDate ? eventDate.split("T")[0] : null),
     time: schemaTime ?? (eventDate && eventDate.includes("T") ? eventDate.split("T")[1].slice(0, 5) : null),
