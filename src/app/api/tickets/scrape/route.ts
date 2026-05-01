@@ -14,21 +14,23 @@ function getDayKey() {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
-/** Returns true if the user is within their daily AI quota. Increments counter. */
-function checkAndIncrementAiLimit(userId: string): boolean {
+/** Returns true if the user still has quota remaining (does NOT increment). */
+function checkRemainingAiLimit(userId: string): boolean {
   const today = getDayKey();
   const bucket = rateLimitMap.get(userId);
+  if (!bucket || bucket.dayKey !== today) return true;
+  return bucket.count < AI_DAILY_LIMIT;
+}
 
+/** Increments the counter. Call only after a successful AI response. */
+function incrementAiLimit(userId: string): void {
+  const today = getDayKey();
+  const bucket = rateLimitMap.get(userId);
   if (!bucket || bucket.dayKey !== today) {
-    // New day or first use — reset
     rateLimitMap.set(userId, { count: 1, dayKey: today });
-    return true;
+  } else {
+    bucket.count += 1;
   }
-
-  if (bucket.count >= AI_DAILY_LIMIT) return false;
-
-  bucket.count += 1;
-  return true;
 }
 
 /** How many AI calls remain today for this user. */
@@ -426,7 +428,7 @@ export async function POST(req: NextRequest) {
   // Only check quota if at least one AI provider is configured.
   // Falls back to OG-meta if the user has hit their limit or no AI key exists.
   const hasAiProvider = !!(geminiKey || githubToken || groqKey);
-  const withinLimit = hasAiProvider ? checkAndIncrementAiLimit(uid) : false;
+  const withinLimit = hasAiProvider ? checkRemainingAiLimit(uid) : false;
   const remaining = remainingAiCalls(uid);
 
   if (hasAiProvider && !withinLimit) {
@@ -435,6 +437,7 @@ export async function POST(req: NextRequest) {
     try {
       aiResult = await callGemini(pageText, url);
       aiUsed = "gemini-1.5-flash";
+      incrementAiLimit(uid); // only count when AI actually succeeds
     } catch (e) {
       console.error("[tickets/scrape] Gemini failed:", e);
     }
@@ -443,6 +446,7 @@ export async function POST(req: NextRequest) {
       // gho_/ghu_ tokens must be exchanged for a short-lived Copilot token first
       aiResult = await callCopilot(pageText, url, githubToken);
       aiUsed = "github-copilot";
+      incrementAiLimit(uid);
     } catch (e) {
       console.error("[tickets/scrape] Copilot API failed:", e);
     }
@@ -456,6 +460,7 @@ export async function POST(req: NextRequest) {
         "llama3-8b-8192"
       );
       aiUsed = "groq-llama3";
+      incrementAiLimit(uid);
     } catch (e) {
       console.error("[tickets/scrape] Groq failed:", e);
     }
