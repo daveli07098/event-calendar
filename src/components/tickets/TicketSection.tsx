@@ -108,6 +108,11 @@ export function TicketSection() {
   // Diff state
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
+  // Editable preview fields — pre-filled from scrape, user can correct before adding
+  const [editTitle, setEditTitle] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editTime, setEditTime] = useState("");
+  const [editVenue, setEditVenue] = useState("");
 
   const handleScrape = async () => {
     const trimmed = url.trim();
@@ -136,6 +141,11 @@ export function TicketSection() {
 
       setTicket(data);
       if (data.aiQuota) setQuota(data.aiQuota);
+      // Pre-fill editable fields so user can adjust before adding
+      setEditTitle(data.title ?? "");
+      setEditDate(data.date ?? "");
+      setEditTime(data.time ?? "");
+      setEditVenue(data.venue ?? "");
 
       // Auto-check for existing events with this URL
       setStatus("checking");
@@ -175,11 +185,20 @@ export function TicketSection() {
     if (!ticket) return;
     setStatus("adding");
 
+    // Merge user edits back into the ticket before sending
+    const ticketToAdd = {
+      ...ticket,
+      title: editTitle.trim() || ticket.title,
+      date: editDate.trim() || ticket.date,
+      time: editTime.trim() || ticket.time,
+      venue: editVenue.trim() || ticket.venue,
+    };
+
     try {
       const res = await fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket }),
+        body: JSON.stringify({ ticket: ticketToAdd }),
       });
 
       const data = await res.json();
@@ -239,6 +258,10 @@ export function TicketSection() {
     setSelectedFields(new Set());
     setErrorMsg("");
     setAddedCalendarName("");
+    setEditTitle("");
+    setEditDate("");
+    setEditTime("");
+    setEditVenue("");
   };
 
   const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
@@ -412,27 +435,23 @@ export function TicketSection() {
           </Card>
         )}
 
-        {/* Scraped preview */}
+        {/* Scraped preview — editable so user can correct any field before adding */}
         {(status === "scraped" || status === "adding") && ticket && !diffResult?.hasExisting && (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-2">
-                <CardTitle className="text-base leading-snug">{ticket.title}</CardTitle>
-                <a
-                  href={ticket.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0"
-                >
+                <div>
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Review &amp; adjust before adding</CardTitle>
+                  <CardDescription className="text-xs mt-0.5">
+                    Extracted by <span className="font-medium">{ticket.aiUsed}</span> · edit any field if wrong
+                  </CardDescription>
+                </div>
+                <a href={ticket.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
                   <Button variant="ghost" size="icon" className="size-7">
                     <ExternalLink className="size-3.5" />
                   </Button>
                 </a>
               </div>
-              <CardDescription className="text-xs">
-                Extracted by{" "}
-                <span className="font-medium capitalize">{ticket.aiUsed}</span>
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               {ticket.imageUrl && (
@@ -440,35 +459,50 @@ export function TicketSection() {
                 <img
                   src={ticket.imageUrl}
                   alt={ticket.title}
-                  className="w-full h-40 object-cover rounded-md"
+                  className="w-full h-32 object-cover rounded-md"
                 />
               )}
 
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                {ticket.date && (
+              {/* Editable fields */}
+              <div className="space-y-2.5">
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Title</label>
+                  <Input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    placeholder="Event title"
+                    disabled={status === "adding"}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Date</p>
-                    <p>{ticket.date}</p>
+                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Date</label>
+                    <Input
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      placeholder="e.g. 2026-08-01"
+                      disabled={status === "adding"}
+                    />
                   </div>
-                )}
-                {ticket.time && (
                   <div>
-                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Time</p>
-                    <p>{ticket.time}</p>
+                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Time</label>
+                    <Input
+                      value={editTime}
+                      onChange={(e) => setEditTime(e.target.value)}
+                      placeholder="e.g. 7:30 PM"
+                      disabled={status === "adding"}
+                    />
                   </div>
-                )}
-                {ticket.venue && (
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Venue</p>
-                    <p>{ticket.venue}</p>
-                  </div>
-                )}
-                {ticket.location && (
-                  <div>
-                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Location</p>
-                    <p>{ticket.location}</p>
-                  </div>
-                )}
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Venue</label>
+                  <Input
+                    value={editVenue}
+                    onChange={(e) => setEditVenue(e.target.value)}
+                    placeholder="Venue name"
+                    disabled={status === "adding"}
+                  />
+                </div>
               </div>
 
               {ticket.description && (
