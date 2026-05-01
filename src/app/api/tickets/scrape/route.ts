@@ -353,14 +353,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { url?: string };
+  let body: { url?: string; method?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { url } = body;
+  const { url, method: extractMethod } = body;
+  // "og-meta" forces OG/Schema only; anything else (including "auto") uses AI when available
+  const forceOgMeta = extractMethod === "og-meta";
   if (!url || typeof url !== "string") {
     return NextResponse.json({ error: "url is required" }, { status: 400 });
   }
@@ -421,14 +423,14 @@ export async function POST(req: NextRequest) {
   const groqKey = process.env.GROQ_API_KEY;
 
   let aiResult: Partial<TicketData> = {};
-  let aiUsed = "og-meta";
+  let aiUsed = forceOgMeta ? "og-meta (manual)" : "og-meta";
 
   const pageText = extractTextFromHtml(html);
   const uid = session.user.id;
 
-  // Only check quota if at least one AI provider is configured.
+  // Only check quota if at least one AI provider is configured AND user didn't request OG-meta only.
   // Falls back to OG-meta if the user has hit their limit or no AI key exists.
-  const hasAiProvider = !!(geminiKey || githubToken || groqKey);
+  const hasAiProvider = !forceOgMeta && !!(geminiKey || githubToken || groqKey);
   const withinLimit = hasAiProvider ? checkRemainingAiLimit(uid) : false;
   const remaining = remainingAiCalls(uid);
 

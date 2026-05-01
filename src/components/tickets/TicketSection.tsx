@@ -51,6 +51,13 @@ interface DiffResult {
 
 type Status = "idle" | "scraping" | "checking" | "scraped" | "diff" | "adding" | "updating" | "done" | "error";
 
+/** Add N hours to a "HH:MM" string and return "HH:MM". Used for UTC→HKT display. */
+function addHours(hhmm: string, hours: number): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = (h + hours) % 24;
+  return `${String(total).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`;
+}
+
 // ---------------------------------------------------------------------------
 // Diff table sub-component
 // ---------------------------------------------------------------------------
@@ -108,6 +115,8 @@ export function TicketSection() {
   const [errorMsg, setErrorMsg] = useState("");
   const [addedCalendarName, setAddedCalendarName] = useState("");
   const [quota, setQuota] = useState<AiQuota | null>(null);
+  // Extraction method: "auto" uses AI when available; "og-meta" forces OG/Schema only (free, no quota)
+  const [extractMethod, setExtractMethod] = useState<"auto" | "og-meta">("auto");
   // Diff state
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
@@ -133,7 +142,7 @@ export function TicketSection() {
       const res = await fetch("/api/tickets/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmed }),
+        body: JSON.stringify({ url: trimmed, method: extractMethod }),
       });
 
       const data = await res.json();
@@ -289,12 +298,37 @@ export function TicketSection() {
           <h1 className="text-lg font-semibold">Ticket Section</h1>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          {quota && (
+          {/* Extraction method selector */}
+          <div className="flex items-center rounded-md border border-border overflow-hidden text-xs">
+            <button
+              onClick={() => setExtractMethod("auto")}
+              className={`px-2.5 py-1.5 transition-colors ${
+                extractMethod === "auto"
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+              title="Use Gemini AI when available (uses quota)"
+            >
+              <Sparkles className="size-3 inline mr-1" />Auto
+            </button>
+            <button
+              onClick={() => setExtractMethod("og-meta")}
+              className={`px-2.5 py-1.5 transition-colors ${
+                extractMethod === "og-meta"
+                  ? "bg-primary text-primary-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+              title="OG Meta only — free, no AI quota used"
+            >
+              OG Meta
+            </button>
+          </div>
+          {extractMethod === "auto" && quota && (
             <Badge
               variant={quota.remaining <= 10 ? "destructive" : "outline"}
               className="text-xs tabular-nums"
             >
-              {quota.remaining}/{quota.limit} AI calls left today
+              {quota.remaining}/{quota.limit} AI calls left
             </Badge>
           )}
           {ticket?.aiUsed && (
@@ -302,10 +336,6 @@ export function TicketSection() {
               {ticket.aiUsed}
             </Badge>
           )}
-          <Badge variant="secondary" className="text-xs">
-            <Sparkles className="size-3 mr-1" />
-            AI-powered
-          </Badge>
         </div>
       </header>
 
@@ -412,8 +442,8 @@ export function TicketSection() {
                   )}
                   {diffResult.storedTime && (
                     <div>
-                      <p className="text-xs text-muted-foreground">Time (stored UTC)</p>
-                      <p className="font-medium">{diffResult.storedTime}</p>
+                      <p className="text-xs text-muted-foreground">Time UTC → HKT {diffResult.storedTime ? `${diffResult.storedTime} → ${addHours(diffResult.storedTime, 8)}` : ""}</p>
+                      <p className="font-medium">{addHours(diffResult.storedTime, 8)}</p>
                     </div>
                   )}
                   {diffResult.storedVenue && (
@@ -657,9 +687,10 @@ export function TicketSection() {
                 Saved to <span className="font-semibold">{addedCalendarName}</span>
               </div>
               <div className="flex gap-2">
-                <Link href="/" className="flex-1">
+                {/* Hard reload so new event-reminders / sale-ticket calendars appear in sidebar */}
+                <a href="/" className="flex-1">
                   <Button variant="outline" className="w-full">View calendar</Button>
-                </Link>
+                </a>
                 <Button variant="outline" onClick={handleReset}>Add another</Button>
               </div>
             </CardContent>
