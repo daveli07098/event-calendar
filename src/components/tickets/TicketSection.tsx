@@ -44,6 +44,9 @@ interface DiffResult {
   eventId: string | null;
   saleEventId: string | null;
   changes: FieldChange[];
+  storedDate: string | null;
+  storedTime: string | null;
+  storedVenue: string | null;
 }
 
 type Status = "idle" | "scraping" | "checking" | "scraped" | "diff" | "adding" | "updating" | "done" | "error";
@@ -398,6 +401,29 @@ export function TicketSection() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {/* Static context — show date/venue even when they haven't changed */}
+              {(diffResult.storedDate || diffResult.storedVenue) && (
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm bg-muted/40 rounded-md px-3 py-2.5">
+                  {diffResult.storedDate && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Date 日期</p>
+                      <p className="font-medium">{diffResult.storedDate}</p>
+                    </div>
+                  )}
+                  {diffResult.storedTime && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">Time (stored UTC)</p>
+                      <p className="font-medium">{diffResult.storedTime}</p>
+                    </div>
+                  )}
+                  {diffResult.storedVenue && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-muted-foreground">Venue 場地</p>
+                      <p className="font-medium">{diffResult.storedVenue}</p>
+                    </div>
+                  )}
+                </div>
+              )}
               <DiffTable changes={diffResult.changes} selected={selectedFields} onToggle={toggleField} />
 
               <div className="flex gap-3 text-xs text-muted-foreground">

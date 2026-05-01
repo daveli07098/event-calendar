@@ -31,6 +31,10 @@ export interface DiffResult {
   eventId: string | null;
   saleEventId: string | null;
   changes: FieldChange[];
+  // Static context — current stored values, shown even when unchanged
+  storedDate: string | null;
+  storedTime: string | null;
+  storedVenue: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,6 +108,7 @@ export async function POST(req: NextRequest) {
   if (calendarIds.length === 0) {
     return NextResponse.json<DiffResult>({
       hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, changes: [],
+      storedDate: null, storedTime: null, storedVenue: null,
     });
   }
 
@@ -119,6 +124,7 @@ export async function POST(req: NextRequest) {
   if (matchingEvents.length === 0) {
     return NextResponse.json<DiffResult>({
       hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, changes: [],
+      storedDate: null, storedTime: null, storedVenue: null,
     });
   }
 
@@ -209,5 +215,8 @@ export async function POST(req: NextRequest) {
     eventId: mainEvent.id,
     saleEventId: saleEvent?.id ?? null,
     changes,
+    storedDate: mainEvent.startTime.toISOString().slice(0, 10),
+    storedTime: mainEvent.startTime.toISOString().slice(11, 16),
+    storedVenue: stored.venue ?? null,
   });
 }

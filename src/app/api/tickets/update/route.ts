@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import type { FieldChange } from "../diff/route";
 
 interface ScrapedTicket {
   title: string;
@@ -81,6 +80,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "eventId, appliedFields, ticket required" }, { status: 400 });
   }
 
+  try {
   // Verify ownership
   const existingEvent = await prisma.event.findUnique({
     where: { id: eventId },
@@ -143,4 +143,9 @@ export async function PATCH(req: NextRequest) {
     saleEventId: updatedSaleEvent?.id ?? null,
     appliedFields,
   });
+  } catch (e) {
+    console.error("[tickets/update] Prisma error:", e);
+    const msg = e instanceof Error ? e.message : "Database error";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
