@@ -216,15 +216,15 @@ async function callOpenAICompatible(
   url: string,
   endpoint: string,
   token: string,
-  model: string
+  model: string,
+  extraHeaders: Record<string, string> = {}
 ): Promise<Partial<TicketData>> {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      // Required by Copilot API
-      "Copilot-Integration-Id": "vscode-chat",
+      ...extraHeaders,
     },
     body: JSON.stringify({
       model,
@@ -243,6 +243,83 @@ async function callOpenAICompatible(
   const data = await res.json();
   const raw: string = data.choices?.[0]?.message?.content ?? "{}";
   return JSON.parse(raw.replace(/```json\n?|```/g, "").trim());
+}
+
+/**
+ * Exchange a GitHub OAuth token (gho_) for a short-lived Copilot API token.
+ * The gho_ token alone is NOT accepted by api.githubcopilot.com.
+ */
+async function getCopilotToken(githubToken: string): Promise<string> {
+  const res = await fetch("https://api.github.com/copilot_internal/v2/token", {
+    headers: {
+      Authorization: `token ${githubToken}`,
+      "User-Agent": "GitHubCopilotChat/0.22.4",
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!res.ok) throw new Error(`Copilot token exchange failed: ${res.status}`);
+  const data = await res.json();
+  if (!data.token) throw new Error("No token in Copilot token response");
+  return data.token as string;
+}
+
+async function callCopilot(text: string, url: string, githubToken: string): Promise<Partial<TicketData>> {
+  const copilotToken = await getCopilotToken(githubToken);
+  return callOpenAICompatible(
+    text,
+    url,
+    "https://api.githubcopilot.com/chat/completions",
+    copilotToken,
+    "gpt-4o",
+    {
+      "Copilot-Integration-Id": "vscode-chat",
+      "Editor-Version": "vscode/1.95.0",
+      "Editor-Plugin-Version": "copilot-chat/0.22.4",
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Text-based date/time fallback — for sites with poor OG/Schema markup
+// ---------------------------------------------------------------------------
+function extractDateFromText(text: string): { date: string | null; time: string | null } {
+  // Chinese date patterns: 2026年5月9日, 2026年3月, etc.
+  const cnDate = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (cnDate) {
+    const [, y, m, d] = cnDate;
+    const date = `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    // Try to find time near the date match
+    const timeMatch = text.match(/(\d{1,2})[:：](\d{2})\s*(?:PM|AM|pm|am|下午|晚上)?/);
+    let time: string | null = null;
+    if (timeMatch) {
+      let h = Number(timeMatch[1]);
+      const min = timeMatch[2];
+      // If PM or 下午/晚上 mentioned near the match, adjust
+      if (/PM|pm|下午|晚上/.test(text.slice(text.indexOf(timeMatch[0]) - 10, text.indexOf(timeMatch[0]) + 20)) && h < 12) h += 12;
+      time = `${String(h).padStart(2, "0")}:${min}`;
+    }
+    return { date, time };
+  }
+
+  // ISO / Western: May 9, 2026 / 9 May 2026 / 2026-05-09
+  const months: Record<string, string> = {
+    january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",
+    july:"07",august:"08",september:"09",october:"10",november:"11",december:"12",
+  };
+  const westernDate = text.match(/(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(202\d)/i);
+  if (westernDate) {
+    const [full, day, year] = westernDate;
+    const monthStr = full.replace(/\s.*/, "").toLowerCase().slice(0, 3);
+    const monthMap: Record<string,string> = {jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12"};
+    const month = monthMap[monthStr] ?? "01";
+    return { date: `${year}-${month}-${day.padStart(2, "0")}`, time: null };
+  }
+
+  const isoDate = text.match(/(202\d)-(\d{2})-(\d{2})/);
+  if (isoDate) return { date: isoDate[0], time: null };
+
+  return { date: null, time: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -343,13 +420,8 @@ export async function POST(req: NextRequest) {
     }
   } else if (githubToken) {
     try {
-      aiResult = await callOpenAICompatible(
-        pageText,
-        url,
-        "https://api.githubcopilot.com/chat/completions",
-        githubToken,
-        "gpt-4o"
-      );
+      // gho_/ghu_ tokens must be exchanged for a short-lived Copilot token first
+      aiResult = await callCopilot(pageText, url, githubToken);
       aiUsed = "github-copilot";
     } catch (e) {
       console.error("[tickets/scrape] Copilot API failed:", e);
@@ -369,11 +441,14 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Merge AI result with meta fallback (AI takes precedence)
+  // Text-based date fallback — kicks in when OG/Schema AND AI both miss the date
+  const textDate = extractDateFromText(pageText);
+
+  // Merge: AI > OG/Schema > text extraction
   const ticket: TicketData = {
     title: aiResult.title ?? meta.title ?? "Untitled Event",
-    date: aiResult.date ?? meta.date,
-    time: aiResult.time ?? meta.time,
+    date: aiResult.date ?? meta.date ?? textDate.date,
+    time: aiResult.time ?? meta.time ?? textDate.time,
     venue: aiResult.venue ?? meta.venue,
     location: aiResult.location ?? meta.location,
     description: aiResult.description ?? meta.description,
