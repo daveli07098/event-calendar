@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus, CheckCircle2, Loader2, AlertCircle } from "lucide-react";
+import {
+  ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
 interface AiQuota { used: number; limit: number; remaining: number }
@@ -27,7 +31,72 @@ interface ScrapedTicket {
   saleDate: string | null;
 }
 
-type Status = "idle" | "scraping" | "scraped" | "adding" | "done" | "error";
+interface FieldChange {
+  field: string;
+  label: string;
+  oldValue: string | null;
+  newValue: string | null;
+}
+
+interface DiffResult {
+  hasExisting: boolean;
+  hasChanges: boolean;
+  eventId: string | null;
+  saleEventId: string | null;
+  changes: FieldChange[];
+}
+
+type Status = "idle" | "scraping" | "checking" | "scraped" | "diff" | "adding" | "updating" | "done" | "error";
+
+// ---------------------------------------------------------------------------
+// Diff table sub-component
+// ---------------------------------------------------------------------------
+function DiffTable({
+  changes,
+  selected,
+  onToggle,
+}: {
+  changes: FieldChange[];
+  selected: Set<string>;
+  onToggle: (field: string) => void;
+}) {
+  return (
+    <div className="rounded-md border border-border overflow-hidden text-sm">
+      <div className="grid grid-cols-[auto_1fr_auto_1fr] bg-muted/50 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide gap-x-3">
+        <span />
+        <span>Current 目前</span>
+        <span className="text-center">→</span>
+        <span>Updated 更新</span>
+      </div>
+      {changes.map((change) => (
+        <div
+          key={change.field}
+          className="grid grid-cols-[auto_1fr_auto_1fr] items-start px-3 py-2.5 border-t border-border gap-x-3 hover:bg-muted/30 cursor-pointer"
+          onClick={() => onToggle(change.field)}
+        >
+          <Checkbox
+            checked={selected.has(change.field)}
+            onCheckedChange={() => onToggle(change.field)}
+            className="mt-0.5"
+          />
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">{change.label}</p>
+            <p className={selected.has(change.field) ? "line-through text-muted-foreground text-sm" : "text-sm"}>
+              {change.oldValue ?? <span className="italic text-muted-foreground">none</span>}
+            </p>
+          </div>
+          <ArrowRight className="size-3.5 text-muted-foreground mt-4" />
+          <div>
+            <p className="text-xs text-muted-foreground mb-0.5">&nbsp;</p>
+            <p className={`text-sm font-medium ${selected.has(change.field) ? "text-primary" : "text-muted-foreground"}`}>
+              {change.newValue ?? "—"}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function TicketSection() {
   const [url, setUrl] = useState("");
@@ -36,6 +105,9 @@ export function TicketSection() {
   const [errorMsg, setErrorMsg] = useState("");
   const [addedCalendarName, setAddedCalendarName] = useState("");
   const [quota, setQuota] = useState<AiQuota | null>(null);
+  // Diff state
+  const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
+  const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
 
   const handleScrape = async () => {
     const trimmed = url.trim();
@@ -43,6 +115,8 @@ export function TicketSection() {
 
     setStatus("scraping");
     setTicket(null);
+    setDiffResult(null);
+    setSelectedFields(new Set());
     setErrorMsg("");
 
     try {
@@ -62,6 +136,26 @@ export function TicketSection() {
 
       setTicket(data);
       if (data.aiQuota) setQuota(data.aiQuota);
+
+      // Auto-check for existing events with this URL
+      setStatus("checking");
+      try {
+        const diffRes = await fetch("/api/tickets/diff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: trimmed, ticket: data }),
+        });
+        if (diffRes.ok) {
+          const diff: DiffResult = await diffRes.json();
+          setDiffResult(diff);
+          if (diff.hasExisting && diff.hasChanges) {
+            setSelectedFields(new Set(diff.changes.map((c) => c.field)));
+            setStatus("diff");
+            return;
+          }
+        }
+      } catch { /* diff check failure is non-fatal */ }
+
       setStatus("scraped");
     } catch {
       setErrorMsg("Network error — please try again");
@@ -69,9 +163,16 @@ export function TicketSection() {
     }
   };
 
+  const toggleField = (field: string) => {
+    setSelectedFields((prev) => {
+      const next = new Set(prev);
+      next.has(field) ? next.delete(field) : next.add(field);
+      return next;
+    });
+  };
+
   const handleAddToCalendar = async () => {
     if (!ticket) return;
-
     setStatus("adding");
 
     try {
@@ -89,7 +190,7 @@ export function TicketSection() {
         return;
       }
 
-      setAddedCalendarName(data.calendarName ?? "ticket-reminders");
+      setAddedCalendarName(data.calendarName ?? "event-reminders");
       setStatus("done");
       toast.success(`Event added to "${data.calendarName}"!`);
     } catch {
@@ -98,13 +199,49 @@ export function TicketSection() {
     }
   };
 
+  const handleApplyUpdates = async () => {
+    if (!ticket || !diffResult?.eventId || selectedFields.size === 0) return;
+    setStatus("updating");
+
+    try {
+      const res = await fetch("/api/tickets/update", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventId: diffResult.eventId,
+          saleEventId: diffResult.saleEventId,
+          appliedFields: Array.from(selectedFields),
+          ticket,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to update event");
+        setStatus("diff");
+        return;
+      }
+
+      setAddedCalendarName("event-reminders");
+      setStatus("done");
+      toast.success(`Updated ${selectedFields.size} field${selectedFields.size > 1 ? "s" : ""}!`);
+    } catch {
+      toast.error("Network error — please try again");
+      setStatus("diff");
+    }
+  };
+
   const handleReset = () => {
     setUrl("");
     setStatus("idle");
     setTicket(null);
+    setDiffResult(null);
+    setSelectedFields(new Set());
     setErrorMsg("");
     setAddedCalendarName("");
   };
+
+  const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
 
   return (
     <div className="min-h-screen bg-background">
@@ -142,8 +279,8 @@ export function TicketSection() {
           <p className="text-muted-foreground text-sm">
             Paste any event or ticket URL (Eventbrite, Ticketmaster, KKTIX, Accupass, etc.)
             and AI will extract the details and add it to a{" "}
-            <span className="font-semibold text-foreground">event-reminders</span> calendar
-            automatically.
+            <span className="font-semibold text-foreground">event-reminders</span> calendar.
+            Scan the same URL again anytime to check for updates — price changes, new sale dates, etc.
           </p>
         </div>
 
@@ -152,31 +289,30 @@ export function TicketSection() {
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Paste ticket URL</CardTitle>
             <CardDescription>
-              We fetch the page server-side, extract event info with AI, then create the calendar
-              entry for you.
+              Scan once to import · scan again to check for updates.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex gap-2">
               <Input
                 type="url"
-                placeholder="https://www.eventbrite.com/e/your-event..."
+                placeholder="https://timable.com/hk/zh/event/…"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && status === "idle" && handleScrape()}
-                disabled={status === "scraping" || status === "adding"}
+                disabled={isLoading}
                 className="flex-1"
               />
               <Button
                 onClick={handleScrape}
-                disabled={!url.trim() || status === "scraping" || status === "adding" || status === "done"}
+                disabled={!url.trim() || isLoading || status === "done"}
               >
                 {status === "scraping" ? (
-                  <>
-                    <Loader2 className="size-4 mr-2 animate-spin" /> Scanning…
-                  </>
+                  <><Loader2 className="size-4 mr-2 animate-spin" />Scanning…</>
+                ) : status === "checking" ? (
+                  <><Loader2 className="size-4 mr-2 animate-spin" />Checking…</>
                 ) : (
-                  "Scan"
+                  <><RefreshCw className="size-4 mr-2" />Scan</>
                 )}
               </Button>
             </div>
@@ -205,8 +341,74 @@ export function TicketSection() {
           </Card>
         )}
 
+        {/* ── DIFF VIEW — existing event has changes ── */}
+        {status === "diff" && ticket && diffResult && (
+          <Card className="border-primary/40">
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-base leading-snug">{ticket.title}</CardTitle>
+                  <CardDescription className="mt-1">
+                    Already in your calendar.{" "}
+                    <span className="font-semibold text-foreground">
+                      {diffResult.changes.length} change{diffResult.changes.length > 1 ? "s" : ""}
+                    </span>{" "}
+                    detected — tick what you want to apply.
+                  </CardDescription>
+                </div>
+                <a href={ticket.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
+                  <Button variant="ghost" size="icon" className="size-7">
+                    <ExternalLink className="size-3.5" />
+                  </Button>
+                </a>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <DiffTable changes={diffResult.changes} selected={selectedFields} onToggle={toggleField} />
+
+              <div className="flex gap-3 text-xs text-muted-foreground">
+                <button onClick={() => setSelectedFields(new Set(diffResult.changes.map((c) => c.field)))} className="text-primary hover:underline">
+                  Select all
+                </button>
+                <span>·</span>
+                <button onClick={() => setSelectedFields(new Set())} className="hover:underline">
+                  Deselect all
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <Button onClick={handleApplyUpdates} disabled={selectedFields.size === 0} className="flex-1">
+                  <CheckCircle2 className="size-4 mr-2" />
+                  Apply {selectedFields.size > 0 ? `${selectedFields.size} ` : ""}update{selectedFields.size !== 1 ? "s" : ""}
+                </Button>
+                <Button variant="outline" onClick={handleReset}>Cancel</Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* No changes detected */}
+        {diffResult?.hasExisting && !diffResult.hasChanges && status === "scraped" && (
+          <Card className="border-green-500/30 bg-green-500/5">
+            <CardContent className="flex items-center gap-3 pt-4 pb-4">
+              <CheckCircle2 className="size-5 text-green-600 dark:text-green-400 shrink-0" />
+              <p className="text-sm">Already in your calendar — no changes detected.</p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Updating in progress */}
+        {status === "updating" && (
+          <Card>
+            <CardContent className="flex items-center gap-3 pt-4 pb-4">
+              <Loader2 className="size-5 animate-spin text-primary shrink-0" />
+              <p className="text-sm">Applying updates…</p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Scraped preview */}
-        {(status === "scraped" || status === "adding" || status === "done") && ticket && (
+        {(status === "scraped" || status === "adding") && ticket && !diffResult?.hasExisting && (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-2">
@@ -315,9 +517,7 @@ export function TicketSection() {
                     <CalendarPlus className="size-4 mr-2" />
                     Add to event-reminders
                   </Button>
-                  <Button variant="outline" onClick={handleReset}>
-                    Clear
-                  </Button>
+                  <Button variant="outline" onClick={handleReset}>Clear</Button>
                 </div>
               )}
 
@@ -327,25 +527,24 @@ export function TicketSection() {
                   Adding to calendar…
                 </Button>
               )}
+            </CardContent>
+          </Card>
+        )}
 
-              {status === "done" && (
-                <div className="space-y-2 pt-2">
-                  <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                    <CheckCircle2 className="size-4" />
-                    Added to <span className="font-semibold">{addedCalendarName}</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Link href="/" className="flex-1">
-                      <Button variant="outline" className="w-full">
-                        View calendar
-                      </Button>
-                    </Link>
-                    <Button variant="outline" onClick={handleReset}>
-                      Add another
-                    </Button>
-                  </div>
-                </div>
-              )}
+        {/* Done */}
+        {status === "done" && (
+          <Card className="border-green-500/30 bg-green-500/5">
+            <CardContent className="space-y-3 pt-4">
+              <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                <CheckCircle2 className="size-4" />
+                Saved to <span className="font-semibold">{addedCalendarName}</span>
+              </div>
+              <div className="flex gap-2">
+                <Link href="/" className="flex-1">
+                  <Button variant="outline" className="w-full">View calendar</Button>
+                </Link>
+                <Button variant="outline" onClick={handleReset}>Add another</Button>
+              </div>
             </CardContent>
           </Card>
         )}
