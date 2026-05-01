@@ -215,7 +215,8 @@ ${text}
 
 async function callGemini(text: string, url: string): Promise<Partial<TicketData>> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const model = "gemini-2.0-flash";
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const res = await fetch(endpoint, {
     method: "POST",
@@ -436,7 +437,7 @@ export async function POST(req: NextRequest) {
   } else if (geminiKey && withinLimit) {
     try {
       aiResult = await callGemini(pageText, url);
-      aiUsed = "gemini-1.5-flash";
+      aiUsed = "gemini-2.0-flash";
       incrementAiLimit(uid); // only count when AI actually succeeds
     } catch (e) {
       console.error("[tickets/scrape] Gemini failed:", e);
