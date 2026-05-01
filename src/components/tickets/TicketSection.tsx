@@ -112,6 +112,8 @@ export function TicketSection() {
   const [editTitle, setEditTitle] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editTime, setEditTime] = useState("");
+  const [editEndDate, setEditEndDate] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
   const [editVenue, setEditVenue] = useState("");
 
   const handleScrape = async () => {
@@ -191,6 +193,8 @@ export function TicketSection() {
       title: editTitle.trim() || ticket.title,
       date: editDate.trim() || ticket.date,
       time: editTime.trim() || ticket.time,
+      endDate: editEndDate.trim() || null,
+      endTime: editEndTime.trim() || null,
       venue: editVenue.trim() || ticket.venue,
     };
 
@@ -261,6 +265,8 @@ export function TicketSection() {
     setEditTitle("");
     setEditDate("");
     setEditTime("");
+    setEditEndDate("");
+    setEditEndTime("");
     setEditVenue("");
   };
 
@@ -415,12 +421,40 @@ export function TicketSection() {
           </Card>
         )}
 
-        {/* No changes detected */}
-        {diffResult?.hasExisting && !diffResult.hasChanges && status === "scraped" && (
+        {/* No changes detected — show basic event info */}
+        {diffResult?.hasExisting && !diffResult.hasChanges && status === "scraped" && ticket && (
           <Card className="border-green-500/30 bg-green-500/5">
-            <CardContent className="flex items-center gap-3 pt-4 pb-4">
-              <CheckCircle2 className="size-5 text-green-600 dark:text-green-400 shrink-0" />
-              <p className="text-sm">Already in your calendar — no changes detected.</p>
+            <CardContent className="space-y-3 pt-4 pb-4">
+              <div className="flex items-center gap-2 text-sm font-medium text-green-600 dark:text-green-400">
+                <CheckCircle2 className="size-4 shrink-0" />
+                Already in your calendar — up to date
+              </div>
+              {ticket.imageUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={ticket.imageUrl} alt={ticket.title} className="w-full h-28 object-cover rounded-md" />
+              )}
+              <p className="text-sm font-semibold">{ticket.title}</p>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                {ticket.date && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Date</p>
+                    <p className="font-medium">{ticket.date}</p>
+                  </div>
+                )}
+                {ticket.time && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Time</p>
+                    <p className="font-medium">{ticket.time}</p>
+                  </div>
+                )}
+                {ticket.venue && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Venue</p>
+                    <p className="font-medium">{ticket.venue}</p>
+                  </div>
+                )}
+              </div>
+              <Button variant="outline" size="sm" onClick={handleReset}>Scan another URL</Button>
             </CardContent>
           </Card>
         )}
@@ -476,20 +510,38 @@ export function TicketSection() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Date</label>
+                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Start Date</label>
                     <Input
                       value={editDate}
                       onChange={(e) => setEditDate(e.target.value)}
-                      placeholder="e.g. 2026-08-01"
+                      placeholder="e.g. 2026-07-18"
                       disabled={status === "adding"}
                     />
                   </div>
                   <div>
-                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Time</label>
+                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Start Time</label>
                     <Input
                       value={editTime}
                       onChange={(e) => setEditTime(e.target.value)}
-                      placeholder="e.g. 7:30 PM"
+                      placeholder="e.g. 20:00"
+                      disabled={status === "adding"}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">End Date</label>
+                    <Input
+                      value={editEndDate}
+                      onChange={(e) => setEditEndDate(e.target.value)}
+                      placeholder="e.g. 2026-07-18"
+                      disabled={status === "adding"}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">End Time</label>
+                    <Input
+                      value={editEndTime}
+                      onChange={(e) => setEditEndTime(e.target.value)}
+                      placeholder="e.g. 22:00"
                       disabled={status === "adding"}
                     />
                   </div>

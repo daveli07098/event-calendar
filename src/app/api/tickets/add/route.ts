@@ -12,6 +12,8 @@ interface TicketData {
   title: string;
   date: string | null;
   time: string | null;
+  endDate?: string | null;
+  endTime?: string | null;
   venue: string | null;
   location: string | null;
   description: string | null;
@@ -23,45 +25,49 @@ interface TicketData {
   saleDate: string | null;
 }
 
-/** Parse a date+time string from the ticket into a JS Date.
- *  Falls back to tomorrow noon if parsing fails. */
-function parseEventTime(date: string | null, time: string | null): { start: Date; end: Date } {
-  const fallbackStart = new Date();
-  fallbackStart.setDate(fallbackStart.getDate() + 1);
-  fallbackStart.setHours(12, 0, 0, 0);
-
-  if (!date) {
-    const end = new Date(fallbackStart);
-    end.setHours(end.getHours() + 2);
-    return { start: fallbackStart, end };
-  }
-
-  // Try ISO date (YYYY-MM-DD)
+/** Parse a single date+time into a JS Date, with a fallback. */
+function parseSingleDateTime(date: string | null, time: string | null, fallback: Date): Date {
+  if (!date) return fallback;
   const isoMatch = date.match(/(\d{4})-(\d{2})-(\d{2})/);
-  let start: Date;
-
   if (isoMatch) {
     const [, y, m, d] = isoMatch;
     if (time) {
       const [hStr, minStr] = time.split(":");
-      start = new Date(
-        Number(y),
-        Number(m) - 1,
-        Number(d),
-        Number(hStr ?? 12),
-        Number(minStr ?? 0)
-      );
-    } else {
-      start = new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0);
+      return new Date(Number(y), Number(m) - 1, Number(d), Number(hStr ?? 12), Number(minStr ?? 0));
     }
-  } else {
-    // Try natural language parsing
-    const parsed = new Date(date + (time ? ` ${time}` : ""));
-    start = isNaN(parsed.getTime()) ? fallbackStart : parsed;
+    return new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0);
   }
+  const parsed = new Date(date + (time ? ` ${time}` : ""));
+  return isNaN(parsed.getTime()) ? fallback : parsed;
+}
 
-  const end = new Date(start);
-  end.setHours(end.getHours() + 2); // assume 2-hour event
+/** Parse a date+time string from the ticket into a JS Date.
+ *  Falls back to tomorrow noon if parsing fails. */
+function parseEventTime(
+  date: string | null,
+  time: string | null,
+  endDate?: string | null,
+  endTime?: string | null,
+): { start: Date; end: Date } {
+  const fallbackStart = new Date();
+  fallbackStart.setDate(fallbackStart.getDate() + 1);
+  fallbackStart.setHours(12, 0, 0, 0);
+
+  const start = parseSingleDateTime(date, time, fallbackStart);
+
+  let end: Date;
+  if (endDate || endTime) {
+    // End date defaults to same day as start if only endTime given
+    end = parseSingleDateTime(
+      endDate ?? date,
+      endTime ?? null,
+      new Date(start.getTime() + 2 * 3600000),
+    );
+    if (end <= start) end = new Date(start.getTime() + 2 * 3600000); // sanity: end must be after start
+  } else {
+    end = new Date(start);
+    end.setHours(end.getHours() + 2); // assume 2-hour event
+  }
 
   return { start, end };
 }
@@ -104,7 +110,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Build event times
-  const { start, end } = parseEventTime(ticket.date, ticket.time);
+  const { start, end } = parseEventTime(ticket.date, ticket.time, ticket.endDate, ticket.endTime);
 
   // Build description with ticket info and source URL appended
   const descParts: string[] = [];
