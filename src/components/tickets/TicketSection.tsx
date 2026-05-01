@@ -22,6 +22,9 @@ interface ScrapedTicket {
   sourceUrl: string;
   aiUsed: string;            // which AI provider processed it
   aiQuota: AiQuota;
+  ticketPrices: string[] | null;
+  ticketPlatforms: string[] | null;
+  saleDate: string | null;
 }
 
 type Status = "idle" | "scraping" | "scraped" | "adding" | "done" | "error";
@@ -265,6 +268,43 @@ export function TicketSection() {
                 <div>
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Description</p>
                   <p className="text-sm text-muted-foreground line-clamp-3">{ticket.description}</p>
+                </div>
+              )}
+
+              {/* Ticket-specific info */}
+              {ticket.ticketPrices && ticket.ticketPrices.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Ticket Prices 門票票價
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ticket.ticketPrices.map((price) => (
+                      <span
+                        key={price}
+                        className="inline-block bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs font-semibold px-2 py-0.5 rounded"
+                      >
+                        {price}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {ticket.ticketPlatforms && ticket.ticketPlatforms.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Buy Tickets 立即購票
+                  </p>
+                  <p className="text-sm">{ticket.ticketPlatforms.join(" · ")}</p>
+                </div>
+              )}
+
+              {ticket.saleDate && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    On Sale 開售
+                  </p>
+                  <p className="text-sm">{ticket.saleDate}</p>
                 </div>
               )}
 

@@ -15,6 +15,9 @@ interface TicketData {
   imageUrl: string | null;
   sourceUrl: string;
   aiUsed: string;
+  ticketPrices: string[] | null;
+  ticketPlatforms: string[] | null;
+  saleDate: string | null;
 }
 
 /** Parse a date+time string from the ticket into a JS Date.
@@ -100,9 +103,12 @@ export async function POST(req: NextRequest) {
   // Build event times
   const { start, end } = parseEventTime(ticket.date, ticket.time);
 
-  // Build description with source URL appended
+  // Build description with ticket info and source URL appended
   const descParts: string[] = [];
   if (ticket.description) descParts.push(ticket.description);
+  if (ticket.ticketPrices?.length) descParts.push(`門票票價 Ticket Prices: ${ticket.ticketPrices.join(" / ")}`);
+  if (ticket.ticketPlatforms?.length) descParts.push(`售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`);
+  if (ticket.saleDate) descParts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
   if (ticket.venue) descParts.push(`Venue: ${ticket.venue}`);
   if (ticket.location) descParts.push(`Location: ${ticket.location}`);
   descParts.push(`Ticket URL: ${ticket.sourceUrl}`);

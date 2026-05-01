@@ -52,6 +52,10 @@ interface TicketData {
   imageUrl: string | null;
   sourceUrl: string;
   aiUsed: string;
+  // Ticket-specific fields
+  ticketPrices: string[] | null;    // e.g. ["HK$688", "HK$888", "HK$1,288"]
+  ticketPlatforms: string[] | null; // e.g. ["BOOKYAY", "大麥網"]
+  saleDate: string | null;          // when tickets go on sale
 }
 
 // ---------------------------------------------------------------------------
@@ -169,13 +173,16 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // AI providers
 // ---------------------------------------------------------------------------
 const EXTRACT_PROMPT = (text: string, url: string) => `
-You are an event data extractor. Extract event information from the following webpage text and return ONLY a valid JSON object with these fields:
-- title (string, required)
-- date (YYYY-MM-DD format if possible, or natural language, nullable)
+You are a ticket and event data extractor. Extract information from the following webpage text and return ONLY a valid JSON object with these fields:
+- title (string, required — event/concert name)
+- date (YYYY-MM-DD format if possible, or natural language like "May 9-10, 2026", nullable)
 - time (HH:MM 24h format if possible, nullable)
 - venue (venue/building name, nullable)
 - location (city, address, or country, nullable)
-- description (brief 1-2 sentence summary, nullable)
+- description (brief 1-2 sentence summary of the event, nullable)
+- ticketPrices (array of price strings found on the page, e.g. ["HK$688", "HK$888", "HK$1,288"], null if none found)
+- ticketPlatforms (array of ticketing platform/seller names, e.g. ["BOOKYAY", "大麥網 DAMAI", "膠紙座"], null if none found)
+- saleDate (when tickets go on sale, natural language or ISO, nullable)
 
 Return ONLY the JSON object, no markdown code blocks, no extra text.
 
@@ -373,6 +380,9 @@ export async function POST(req: NextRequest) {
     imageUrl: meta.imageUrl,  // always use OG image
     sourceUrl: url,
     aiUsed,
+    ticketPrices: (aiResult as Partial<TicketData>).ticketPrices ?? null,
+    ticketPlatforms: (aiResult as Partial<TicketData>).ticketPlatforms ?? null,
+    saleDate: (aiResult as Partial<TicketData>).saleDate ?? null,
   };
 
   if (!ticket.title || ticket.title === "Untitled Event") {
