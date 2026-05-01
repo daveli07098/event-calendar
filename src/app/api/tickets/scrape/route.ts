@@ -404,21 +404,22 @@ export async function POST(req: NextRequest) {
   const pageText = extractTextFromHtml(html);
   const uid = session.user.id;
 
-  // Check daily AI quota before calling any AI provider.
-  // Falls back to OG-meta if the user has hit their limit for today.
-  const withinLimit = checkAndIncrementAiLimit(uid);
+  // Only check quota if at least one AI provider is configured.
+  // Falls back to OG-meta if the user has hit their limit or no AI key exists.
+  const hasAiProvider = !!(geminiKey || githubToken || groqKey);
+  const withinLimit = hasAiProvider ? checkAndIncrementAiLimit(uid) : false;
   const remaining = remainingAiCalls(uid);
 
-  if (!withinLimit) {
+  if (hasAiProvider && !withinLimit) {
     console.warn(`[tickets/scrape] User ${uid} hit daily AI limit (${AI_DAILY_LIMIT}/day) — using OG-meta fallback`);
-  } else if (geminiKey) {
+  } else if (geminiKey && withinLimit) {
     try {
       aiResult = await callGemini(pageText, url);
       aiUsed = "gemini-1.5-flash";
     } catch (e) {
       console.error("[tickets/scrape] Gemini failed:", e);
     }
-  } else if (githubToken) {
+  } else if (githubToken && withinLimit) {
     try {
       // gho_/ghu_ tokens must be exchanged for a short-lived Copilot token first
       aiResult = await callCopilot(pageText, url, githubToken);
@@ -426,7 +427,7 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       console.error("[tickets/scrape] Copilot API failed:", e);
     }
-  } else if (groqKey) {
+  } else if (groqKey && withinLimit) {
     try {
       aiResult = await callOpenAICompatible(
         pageText,
