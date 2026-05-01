@@ -5,6 +5,9 @@ import { prisma } from "@/lib/prisma";
 const TICKET_CALENDAR_NAME = "ticket-reminders";
 const TICKET_CALENDAR_COLOR = "#f97316"; // warm orange — distinct from default calendars
 
+const SALE_CALENDAR_NAME = "sale-ticket";
+const SALE_CALENDAR_COLOR = "#8b5cf6"; // purple — alerts for when sales open
+
 interface TicketData {
   title: string;
   date: string | null;
@@ -123,9 +126,48 @@ export async function POST(req: NextRequest) {
       startTime: start,
       endTime: end,
       location: [ticket.venue, ticket.location].filter(Boolean).join(", ") || null,
-      color: TICKET_CALENDAR_COLOR,
     },
   });
+
+  // If there's a sale date, also create a reminder in the "sale-ticket" calendar
+  let saleEvent: { id: string } | null = null;
+  if (ticket.saleDate) {
+    const { start: saleStart, end: saleEnd } = parseEventTime(ticket.saleDate, null);
+
+    let saleCalendar = await prisma.calendar.findFirst({
+      where: { userId: uid, name: SALE_CALENDAR_NAME },
+    });
+    if (!saleCalendar) {
+      saleCalendar = await prisma.calendar.create({
+        data: {
+          userId: uid,
+          name: SALE_CALENDAR_NAME,
+          color: SALE_CALENDAR_COLOR,
+          isDefault: false,
+          isVisible: true,
+        },
+      });
+    }
+
+    const saleDesc = [
+      `售票開始！Ticket sale opens for: ${ticket.title}`,
+      ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
+      ticket.ticketPlatforms?.length ? `平台 Platforms: ${ticket.ticketPlatforms.join(", ")}` : null,
+      ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
+      `Ticket URL: ${ticket.sourceUrl}`,
+    ].filter(Boolean).join("\n\n");
+
+    saleEvent = await prisma.event.create({
+      data: {
+        calendarId: saleCalendar.id,
+        title: `🎫 Sale Opens: ${ticket.title}`,
+        description: saleDesc,
+        startTime: saleStart,
+        endTime: saleEnd,
+        location: null,
+      },
+    });
+  }
 
   return NextResponse.json({
     eventId: event.id,
@@ -133,5 +175,6 @@ export async function POST(req: NextRequest) {
     calendarName: calendar.name,
     start: event.startTime.toISOString(),
     end: event.endTime.toISOString(),
+    saleEventId: saleEvent?.id ?? null,
   });
 }
