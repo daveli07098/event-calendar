@@ -259,10 +259,15 @@ export function TicketSection() {
         <div className="ml-auto flex items-center gap-2">
           {quota && (
             <Badge
-              variant={quota.remaining <= 5 ? "destructive" : "outline"}
+              variant={quota.remaining <= 10 ? "destructive" : "outline"}
               className="text-xs tabular-nums"
             >
               {quota.remaining}/{quota.limit} AI calls left today
+            </Badge>
+          )}
+          {ticket?.aiUsed && (
+            <Badge variant="secondary" className="text-xs font-mono">
+              {ticket.aiUsed}
             </Badge>
           )}
           <Badge variant="secondary" className="text-xs">
