@@ -312,16 +312,22 @@ const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info
 URL: ${url}
 ${text}`.trim();
 
-async function callGemini(text: string, url: string, model = "gemini-2.5-flash"): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
+async function callGemini(text: string, url: string, model = "gemini-3-flash-preview"): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const apiKey = process.env.GEMINI_API_KEY!;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  // Gemini 3 models support thinking_level; older models ignore unknown fields safely
+  const generationConfig: Record<string, unknown> = {
+    responseMimeType: "application/json",
+    maxOutputTokens: 2048,
+    thinking_level: "minimal", // minimise latency/cost for structured extraction
+  };
 
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
+      generationConfig,
     }),
   });
 
@@ -568,12 +574,14 @@ export async function POST(req: NextRequest) {
     const providers: Array<() => Promise<{ result: Partial<TicketData>; name: string }>> = [];
 
     // Gemini models in priority order — all share GEMINI_API_KEY
+    // Free-tier RPM from Google AI Studio rate limits (2026-05):
     const geminiModels = [
-      "gemini-2.5-flash",        // 5 RPM free — primary
-      "gemini-2.0-flash",        // Gemini 2 Flash — 15 RPM free
-      "gemini-2.0-flash-lite",   // Gemini 2 Flash Lite — 30 RPM free
-      "gemma-3-27b-it",          // Gemma 3 27B — 30 RPM free
-      "gemma-3-12b-it",          // Gemma 3 12B — 30 RPM free
+      "gemini-3-flash-preview",       // Gemini 3 Flash        — 5 RPM  free
+      "gemini-3.1-flash-lite-preview", // Gemini 3.1 Flash Lite — 15 RPM free
+      "gemini-2.5-flash",              // Gemini 2.5 Flash      — 5 RPM  free (stable)
+      "gemini-2.5-flash-lite",         // Gemini 2.5 Flash Lite — 10 RPM free (stable)
+      "gemma-4-31b-it",                // Gemma 4 31B           — 15 RPM free
+      "gemma-4-26b-it",                // Gemma 4 26B           — 15 RPM free
     ];
     if (geminiKey) {
       for (const model of geminiModels) {
@@ -615,8 +623,9 @@ export async function POST(req: NextRequest) {
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes("429")) {
-          console.warn(`[tickets/scrape] Provider quota exceeded (429) — trying next provider`);
+        if (msg.includes("429") || msg.includes("404")) {
+          const reason = msg.includes("404") ? "not found" : "quota exceeded (429)";
+          console.warn(`[tickets/scrape] ${reason} for ${name} — trying next provider`);
           aiError = "AI quota exceeded — results from OG-meta only";
           // continue to next provider
         } else {
