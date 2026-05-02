@@ -147,7 +147,7 @@ export function EventModal({
             This calendar is view-only — you cannot edit events.
           </p>
         )}
-        <form onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit} className="flex flex-col gap-4 overflow-y-auto min-h-0 pr-1">
+        <form id="event-modal-form" onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit} className="flex flex-col gap-4 overflow-y-auto min-h-0 pr-1 pb-1">
           {/* Dimming overlay for read-only — wraps all fields */}
           <div className={readOnly ? "opacity-60 pointer-events-none select-none flex flex-col gap-4" : "contents"}>
           <div className="flex flex-col gap-2">
@@ -305,36 +305,41 @@ export function EventModal({
             ) : null;
           })()}
           </div>{/* end dimmed wrapper */}
+        </form>
 
-          <div className="flex items-center justify-between pt-2">
-            {event && !readOnly && (
+        {/* Sticky footer — always visible regardless of scroll position */}
+        <div className="flex items-center justify-between pt-3 border-t shrink-0">
+          {event && !readOnly && (
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              disabled={saving}
+            >
+              <Trash2 className="size-4 mr-1" />
+              Delete
+            </Button>
+          )}
+          <div className="flex items-center gap-2 ml-auto">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              {readOnly ? "Close" : "Cancel"}
+            </Button>
+            {!readOnly && (
               <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={handleDelete}
-                disabled={saving}
+                type="submit"
+                form="event-modal-form"
+                disabled={saving || !title.trim()}
               >
-                <Trash2 className="size-4 mr-1" />
-                Delete
+                {saving ? "Saving..." : event ? "Update" : "Create"}
               </Button>
             )}
-            <div className="flex items-center gap-2 ml-auto">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-              >
-                {readOnly ? "Close" : "Cancel"}
-              </Button>
-              {!readOnly && (
-                <Button type="submit" disabled={saving || !title.trim()}>
-                  {saving ? "Saving..." : event ? "Update" : "Create"}
-                </Button>
-              )}
-            </div>
           </div>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   );
