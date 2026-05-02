@@ -138,7 +138,7 @@ export function EventModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px] overflow-hidden">
+      <DialogContent className="sm:max-w-[480px] flex flex-col max-h-[90vh]">
         <DialogHeader>
           <DialogTitle>{readOnly ? "View Event" : event ? "Edit Event" : "New Event"}</DialogTitle>
         </DialogHeader>
@@ -147,7 +147,7 @@ export function EventModal({
             This calendar is view-only — you cannot edit events.
           </p>
         )}
-        <form onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={readOnly ? (e) => e.preventDefault() : handleSubmit} className="flex flex-col gap-4 overflow-y-auto min-h-0 pr-1">
           {/* Dimming overlay for read-only — wraps all fields */}
           <div className={readOnly ? "opacity-60 pointer-events-none select-none flex flex-col gap-4" : "contents"}>
           <div className="flex flex-col gap-2">
@@ -281,7 +281,7 @@ export function EventModal({
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               readOnly={readOnly}
-              className={`break-all resize-none${readOnly ? " cursor-default select-text" : ""}`}
+              className={`resize-none${readOnly ? " cursor-default select-text" : ""}`}
             />
           </div>
 
@@ -295,10 +295,11 @@ export function EventModal({
                   href={ticketUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-start gap-1.5 text-sm text-primary hover:underline break-all"
+                  title={ticketUrl}
+                  className="flex items-center gap-1.5 text-sm text-primary hover:underline min-w-0"
                 >
                   <ExternalLink className="size-3.5 shrink-0" />
-                  {ticketUrl}
+                  <span className="truncate">{ticketUrl}</span>
                 </a>
               </div>
             ) : null;
