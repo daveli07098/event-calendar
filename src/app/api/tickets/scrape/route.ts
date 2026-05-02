@@ -434,8 +434,11 @@ export async function POST(req: NextRequest) {
   const withinLimit = hasAiProvider ? checkRemainingAiLimit(uid) : false;
   const remaining = remainingAiCalls(uid);
 
+  let aiError: string | null = null;
+
   if (hasAiProvider && !withinLimit) {
     console.warn(`[tickets/scrape] User ${uid} hit daily AI limit (${AI_DAILY_LIMIT}/day) — using OG-meta fallback`);
+    aiError = `Daily AI limit reached (${AI_DAILY_LIMIT}/day)`;
   } else if (geminiKey && withinLimit) {
     try {
       aiResult = await callGemini(pageText, url);
@@ -443,6 +446,7 @@ export async function POST(req: NextRequest) {
       incrementAiLimit(uid); // only count when AI actually succeeds
     } catch (e) {
       console.error("[tickets/scrape] Gemini failed:", e);
+      aiError = e instanceof Error ? e.message : "Gemini error";
     }
   } else if (githubToken && withinLimit) {
     try {
@@ -452,6 +456,7 @@ export async function POST(req: NextRequest) {
       incrementAiLimit(uid);
     } catch (e) {
       console.error("[tickets/scrape] Copilot API failed:", e);
+      aiError = e instanceof Error ? e.message : "Copilot error";
     }
   } else if (groqKey && withinLimit) {
     try {
@@ -466,6 +471,7 @@ export async function POST(req: NextRequest) {
       incrementAiLimit(uid);
     } catch (e) {
       console.error("[tickets/scrape] Groq failed:", e);
+      aiError = e instanceof Error ? e.message : "Groq error";
     }
   }
 
@@ -497,7 +503,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ...ticket,
-    // Usage info shown in the UI
+    aiError, // null on success; error message string when AI failed and fell back to og-meta
     aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining },
   });
 }

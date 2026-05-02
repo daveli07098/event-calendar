@@ -24,6 +24,7 @@ interface ScrapedTicket {
   imageUrl: string | null;
   sourceUrl: string;
   aiUsed: string;            // which AI provider processed it
+  aiError: string | null;    // set when AI failed and fell back to og-meta
   aiQuota: AiQuota;
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
@@ -154,6 +155,10 @@ export function TicketSection() {
 
       setTicket(data);
       if (data.aiQuota) setQuota(data.aiQuota);
+      // Warn user if AI fell back to og-meta due to an error (e.g. quota exceeded)
+      if (data.aiError && data.aiUsed.startsWith("og-meta")) {
+        toast.warning(`AI unavailable: ${data.aiError}. Showing OG-meta results only.`);
+      }
       // Pre-fill editable fields so user can adjust before adding
       setEditTitle(data.title ?? "");
       setEditDate(data.date ?? "");
@@ -532,7 +537,10 @@ export function TicketSection() {
                 <div>
                   <CardTitle className="text-sm font-medium text-muted-foreground">Review &amp; adjust before adding</CardTitle>
                   <CardDescription className="text-xs mt-0.5">
-                    Extracted by <span className="font-medium">{ticket.aiUsed}</span> · edit any field if wrong
+                    Extracted by <span className="font-medium">{ticket.aiUsed}</span>
+                    {ticket.aiError ? (
+                      <span className="ml-1 text-amber-500" title={ticket.aiError}>⚠ AI failed</span>
+                    ) : " · edit any field if wrong"}
                   </CardDescription>
                 </div>
                 <a href={ticket.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
