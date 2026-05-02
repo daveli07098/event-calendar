@@ -295,7 +295,7 @@ export function EventModal({
                   href={ticketUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 text-sm text-primary hover:underline truncate"
+                  className="flex items-start gap-1.5 text-sm text-primary hover:underline break-all"
                 >
                   <ExternalLink className="size-3.5 shrink-0" />
                   {ticketUrl}
