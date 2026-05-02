@@ -315,19 +315,12 @@ ${text}`.trim();
 async function callGemini(text: string, url: string, model = "gemini-3-flash-preview"): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const apiKey = process.env.GEMINI_API_KEY!;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  // Gemini 3 models support thinking_level; older models ignore unknown fields safely
-  const generationConfig: Record<string, unknown> = {
-    responseMimeType: "application/json",
-    maxOutputTokens: 2048,
-    thinking_level: "minimal", // minimise latency/cost for structured extraction
-  };
-
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
-      generationConfig,
+      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
     }),
   });
 
