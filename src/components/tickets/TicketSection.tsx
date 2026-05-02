@@ -510,12 +510,41 @@ export function TicketSection() {
                 )}
                 {ticket.venue && (
                   <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground">Venue</p>
+                    <p className="text-xs text-muted-foreground">Venue 場地</p>
                     <p className="font-medium">{ticket.venue}</p>
                   </div>
                 )}
+                {ticket.ticketPrices?.length ? (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Ticket Prices 門票票價</p>
+                    <p className="font-medium">{ticket.ticketPrices.join(" / ")}</p>
+                  </div>
+                ) : null}
+                {ticket.saleDate && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Sale Opens 開售日期</p>
+                    <p className="font-medium">{ticket.saleDate}</p>
+                  </div>
+                )}
+                {ticket.ticketPlatforms?.length ? (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Platforms 售票平台</p>
+                    <p className="font-medium">{ticket.ticketPlatforms.join(", ")}</p>
+                  </div>
+                ) : null}
               </div>
-              <Button variant="outline" size="sm" onClick={handleReset}>Scan another URL</Button>
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <a
+                  href={ticket.sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-primary hover:underline truncate"
+                >
+                  <ExternalLink className="size-3 shrink-0" />
+                  Ticket link
+                </a>
+                <Button variant="outline" size="sm" onClick={handleReset}>Scan another URL</Button>
+              </div>
             </CardContent>
           </Card>
         )}
