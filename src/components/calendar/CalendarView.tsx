@@ -161,10 +161,8 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
     const controller = new AbortController();
     fetchAbortRef.current = controller;
     try {
-      const res = await fetch(
-        `/api/events?start=${dateInfo.startStr}&end=${dateInfo.endStr}`,
-        { signal: controller.signal }
-      );
+      const params = new URLSearchParams({ start: dateInfo.startStr, end: dateInfo.endStr });
+      const res = await fetch(`/api/events?${params}`, { signal: controller.signal });
       if (res.ok) {
         const data = await res.json();
         setEvents(data);
