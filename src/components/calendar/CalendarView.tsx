@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -39,6 +39,8 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
     allDay: boolean;
   } | null>(null);
   const [dayPanelDate, setDayPanelDate] = useState<string | null>(null);
+  // Abort controller ref — cancels stale event fetches when the user navigates quickly
+  const fetchAbortRef = useRef<AbortController | null>(null);
 
   // Returns true if the user can write to the given calendar
   const calendarIsWritable = (calId: string) => {
@@ -154,16 +156,23 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
   };
 
   const handleDatesSet = async (dateInfo: DatesSetArg) => {
+    // Cancel any in-flight fetch from a previous navigation
+    fetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     try {
       const res = await fetch(
-        `/api/events?start=${dateInfo.startStr}&end=${dateInfo.endStr}`
+        `/api/events?start=${dateInfo.startStr}&end=${dateInfo.endStr}`,
+        { signal: controller.signal }
       );
       if (res.ok) {
         const data = await res.json();
         setEvents(data);
       }
-    } catch {
-      // Keep existing events on error
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        // Keep existing events on non-abort errors
+      }
     }
   };
 
