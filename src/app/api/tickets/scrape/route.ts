@@ -82,8 +82,18 @@ function extractTextFromHtml(html: string): string {
     .replace(/\s{2,}/g, " ")            // collapse whitespace
     .trim();
 
-  // Limit to ~6000 chars to stay within AI context budgets
-  return text.slice(0, 6000);
+  // Prioritise the most event-relevant content by surfacing sentences that
+  // contain keywords (prices, sale dates, venue) right at the start of the
+  // truncated text so they're never cut off by the 8000-char limit.
+  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座/i;
+  const sentences = text.split(/(?<=[.!?。！？\n])\s*/);
+  const relevant = sentences.filter(s => keywords.test(s));
+  const rest = sentences.filter(s => !keywords.test(s));
+  // Put relevant sentences first, then the rest — keeps total within limit
+  text = [...relevant, ...rest].join(" ").replace(/\s{2,}/g, " ").trim();
+
+  // Limit to ~8000 chars (gemini-2.5-flash has large context; 8k covers most event pages)
+  return text.slice(0, 8000);
 }
 
 // ---------------------------------------------------------------------------
