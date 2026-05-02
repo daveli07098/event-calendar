@@ -207,13 +207,27 @@ export function TicketSection() {
     setStatus("adding");
 
     // Merge user edits back into the ticket before sending
+    const resolvedDate = editDate.trim() || ticket.date;
+    const resolvedTime = editTime.trim() || ticket.time;
+
+    // Default end = start + 3 hours when not entered
+    let resolvedEndDate = editEndDate.trim() || null;
+    let resolvedEndTime = editEndTime.trim() || null;
+    if (!resolvedEndDate && !resolvedEndTime && resolvedDate && resolvedTime) {
+      const [h, m] = resolvedTime.split(":").map(Number);
+      const start = new Date(`${resolvedDate}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
+      const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
+      resolvedEndDate = end.toISOString().slice(0, 10);
+      resolvedEndTime = end.toISOString().slice(11, 16);
+    }
+
     const ticketToAdd = {
       ...ticket,
       title: editTitle.trim() || ticket.title,
-      date: editDate.trim() || ticket.date,
-      time: editTime.trim() || ticket.time,
-      endDate: editEndDate.trim() || null,
-      endTime: editEndTime.trim() || null,
+      date: resolvedDate,
+      time: resolvedTime,
+      endDate: resolvedEndDate,
+      endTime: resolvedEndTime,
       venue: editVenue.trim() || ticket.venue,
     };
 
