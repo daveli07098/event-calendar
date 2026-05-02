@@ -283,7 +283,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     if (presaleMatch) {
       const [, y, m, d] = presaleMatch;
       const candidate = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      if (candidate !== schemaSaleDate) schemaSaleFirstDate = candidate;
+      const concertDate = schemaDate ?? (eventDate ? eventDate.split("T")[0] : null);
+      // Exclude the concert date and the public sale date — neither is a presale
+      if (candidate !== schemaSaleDate && candidate !== concertDate) schemaSaleFirstDate = candidate;
     }
   }
 
@@ -310,7 +312,7 @@ const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info
 URL: ${url}
 ${text}`.trim();
 
-async function callGemini(text: string, url: string): Promise<Partial<TicketData>> {
+async function callGemini(text: string, url: string): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const apiKey = process.env.GEMINI_API_KEY!;
   // gemini-2.5-flash: free tier model with actual quota (5 RPM, 250K TPM)
   const model = "gemini-2.5-flash";
@@ -321,7 +323,7 @@ async function callGemini(text: string, url: string): Promise<Partial<TicketData
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 512 },
+      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
     }),
   });
 
@@ -330,7 +332,16 @@ async function callGemini(text: string, url: string): Promise<Partial<TicketData
   const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
   const usage = data.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | undefined;
   const tokensUsed = usage?.totalTokenCount ?? null;
-  return { ...JSON.parse(raw.replace(/```json\n?|```/g, "").trim()), _tokensUsed: tokensUsed };
+  const cleaned = raw.replace(/```json\n?|```/g, "").trim();
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    // Truncated response — attempt to salvage by closing open braces/brackets
+    const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
+    try { parsed = JSON.parse(salvaged); } catch { parsed = {}; }
+  }
+  return { ...(parsed as Partial<TicketData>), _tokensUsed: tokensUsed };
 }
 
 async function callOpenAICompatible(
@@ -340,7 +351,7 @@ async function callOpenAICompatible(
   token: string,
   model: string,
   extraHeaders: Record<string, string> = {}
-): Promise<Partial<TicketData>> {
+): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const res = await fetch(endpoint, {
     method: "POST",
     headers: {
@@ -356,7 +367,7 @@ async function callOpenAICompatible(
           content: EXTRACT_PROMPT(text, url),
         },
       ],
-      max_tokens: 512,
+      max_tokens: 2048,
       temperature: 0,
     }),
   });
@@ -366,7 +377,15 @@ async function callOpenAICompatible(
   const raw: string = data.choices?.[0]?.message?.content ?? "{}";
   const usage = data.usage as { total_tokens?: number } | undefined;
   const tokensUsed = usage?.total_tokens ?? null;
-  return { ...JSON.parse(raw.replace(/```json\n?|```/g, "").trim()), _tokensUsed: tokensUsed };
+  const cleaned = raw.replace(/```json\n?|```/g, "").trim();
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
+    try { parsed = JSON.parse(salvaged); } catch { parsed = {}; }
+  }
+  return { ...(parsed as Partial<TicketData>), _tokensUsed: tokensUsed };
 }
 
 /**
@@ -388,7 +407,7 @@ async function getCopilotToken(githubToken: string): Promise<string> {
   return data.token as string;
 }
 
-async function callCopilot(text: string, url: string, githubToken: string): Promise<Partial<TicketData>> {
+async function callCopilot(text: string, url: string, githubToken: string): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const copilotToken = await getCopilotToken(githubToken);
   return callOpenAICompatible(
     text,
