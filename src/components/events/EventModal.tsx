@@ -138,7 +138,7 @@ export function EventModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[480px]">
+      <DialogContent className="sm:max-w-[480px] overflow-hidden">
         <DialogHeader>
           <DialogTitle>{readOnly ? "View Event" : event ? "Edit Event" : "New Event"}</DialogTitle>
         </DialogHeader>
@@ -281,7 +281,7 @@ export function EventModal({
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               readOnly={readOnly}
-              className={readOnly ? "cursor-default select-text" : ""}
+              className={`break-all resize-none${readOnly ? " cursor-default select-text" : ""}`}
             />
           </div>
 
