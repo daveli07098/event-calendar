@@ -262,7 +262,9 @@ ${text}
 
 async function callGemini(text: string, url: string): Promise<Partial<TicketData>> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const model = "gemini-2.0-flash";
+  // gemini-2.5-flash is the free-tier model (5 RPM, 250K TPM).
+  // gemini-2.0-flash has 0/0 quota on free tier and always returns 429.
+  const model = "gemini-2.5-flash-preview-04-17";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const res = await fetch(endpoint, {
@@ -498,7 +500,7 @@ export async function POST(req: NextRequest) {
     if (geminiKey) {
       providers.push(async () => ({
         result: await callGemini(pageText, url),
-        name: "gemini-2.0-flash",
+        name: "gemini-2.5-flash",
       }));
     }
     if (groqKey) {
