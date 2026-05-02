@@ -5,7 +5,7 @@ import { auth } from "@/lib/auth";
 // AI usage rate limiter — in-memory, resets daily per user
 // Prevents quota burn if the token is misused or the page is hammered.
 // ---------------------------------------------------------------------------
-const AI_DAILY_LIMIT = 50; // max AI-powered scrapes per user per day
+const AI_DAILY_LIMIT = 100; // max AI-powered scrapes per user per day
 
 interface RateBucket { count: number; dayKey: string }
 const rateLimitMap = new Map<string, RateBucket>();
@@ -200,26 +200,80 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   // Eventbrite-specific date meta
   const eventDate = get(/<meta[^>]*name=["']event:start_time["'][^>]*content=["']([^"']+)["']/i);
 
-  // Extract sale dates from non-concert JSON-LD Event blocks.
-  // When AI is unavailable, these give us saleDate + saleFirstDate for free.
+  // Extract sale dates from JSON-LD.
+  // Strategy A: multiple Event blocks where each block's startDate = sale window date
+  // Strategy B: single Event block with offers[].validFrom = sale open dates
+  // Strategy C: text-based fallback for Chinese pages (公開發售 / 會員優先)
   let schemaSaleDate: string | null = null;
   let schemaSaleFirstDate: string | null = null;
-  if (allJsonLdEvents.length > 1) {
-    // Concert = latest (index 0 after desc sort). Rest are sale windows.
-    const saleEvents = allJsonLdEvents.slice(1);
-    // saleFirstDate = earliest non-concert event (fanclub / member presale)
-    const earliest = saleEvents[saleEvents.length - 1];
-    schemaSaleFirstDate = earliest.startDate.slice(0, 10);
-    // saleDate = latest non-concert event (most likely public general sale)
-    const latestSale = saleEvents[0];
-    const latestSaleDate = latestSale.startDate.slice(0, 10);
-    // Only set saleDate separately if it differs from saleFirstDate
-    if (latestSaleDate !== schemaSaleFirstDate) {
-      schemaSaleDate = latestSaleDate;
+
+  // Collect all offer validFrom dates across ALL event blocks
+  const offerDates: Date[] = [];
+  for (const evt of allJsonLdEvents) {
+    const offers = evt.raw.offers;
+    if (!offers) continue;
+    const offerList: Record<string, unknown>[] = Array.isArray(offers) ? offers : [offers];
+    for (const offer of offerList) {
+      if (offer.validFrom) {
+        const d = new Date(String(offer.validFrom));
+        if (!isNaN(d.getTime())) offerDates.push(d);
+      }
+      // availability + price fields ignored — we only need dates
+    }
+  }
+
+  if (offerDates.length > 0) {
+    // Strategy B: use offers.validFrom dates
+    offerDates.sort((a, b) => a.getTime() - b.getTime()); // ascending
+    const firstOffer = offerDates[0];
+    const lastOffer = offerDates[offerDates.length - 1];
+    const firstDateStr = firstOffer.toISOString().slice(0, 10);
+    const lastDateStr = lastOffer.toISOString().slice(0, 10);
+    if (firstDateStr === lastDateStr) {
+      schemaSaleDate = firstDateStr;
     } else {
-      // Only one sale date — treat it as public sale, not presale
-      schemaSaleDate = latestSaleDate;
-      schemaSaleFirstDate = null;
+      schemaSaleFirstDate = firstDateStr; // earliest = presale
+      schemaSaleDate = lastDateStr;       // latest = public sale
+    }
+  } else if (allJsonLdEvents.length > 1) {
+    // Strategy A: separate Event blocks per sale window
+    const saleEvents = allJsonLdEvents.slice(1); // concert is index 0
+    const earliest = saleEvents[saleEvents.length - 1];
+    const latestSale = saleEvents[0];
+    const firstDateStr = earliest.startDate.slice(0, 10);
+    const lastDateStr = latestSale.startDate.slice(0, 10);
+    if (firstDateStr === lastDateStr) {
+      schemaSaleDate = firstDateStr;
+    } else {
+      schemaSaleFirstDate = firstDateStr;
+      schemaSaleDate = lastDateStr;
+    }
+  }
+
+  // Strategy C: Chinese text fallback — scan page text for sale date patterns
+  // e.g. "公開發售" near "2026年4月22日" or "4月22日"
+  if (!schemaSaleDate) {
+    // Look for ISO or Chinese dates near 公開 / on sale keywords
+    const publicSaleMatch = html.match(
+      /(?:公開發售|general sale|public sale)[\s\S]{0,200}?(\d{4})[年-](\d{1,2})[月-](\d{1,2})/i
+    ) ?? html.match(
+      /(\d{4})[年-](\d{1,2})[月-](\d{1,2})[日]?[^]*?(?:公開發售|公開|general sale)/i
+    );
+    if (publicSaleMatch) {
+      const [, y, m, d] = publicSaleMatch;
+      schemaSaleDate = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
+  if (!schemaSaleFirstDate) {
+    const presaleMatch = html.match(
+      /(?:會員優先|priority sale|presale|fan sale)[\s\S]{0,200}?(\d{4})[年-](\d{1,2})[月-](\d{1,2})/i
+    ) ?? html.match(
+      /(\d{4})[年-](\d{1,2})[月-](\d{1,2})[日]?[^]*?(?:會員優先|優先購票|priority)/i
+    );
+    if (presaleMatch) {
+      const [, y, m, d] = presaleMatch;
+      const candidate = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      if (candidate !== schemaSaleDate) schemaSaleFirstDate = candidate;
     }
   }
 
