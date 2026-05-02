@@ -12,6 +12,7 @@ interface ScrapedTicket {
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
   saleDate: string | null;
+  saleFirstDate: string | null;
   sourceUrl: string;
 }
 
@@ -24,6 +25,7 @@ function buildDescription(ticket: ScrapedTicket): string {
   if (ticket.ticketPrices?.length) parts.push(`門票票價 Ticket Prices: ${ticket.ticketPrices.join(" / ")}`);
   if (ticket.ticketPlatforms?.length) parts.push(`售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`);
   if (ticket.saleDate) parts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
+  if (ticket.saleFirstDate) parts.push(`First Sale Date: ${ticket.saleFirstDate}`);
   if (ticket.venue) parts.push(`Venue: ${ticket.venue}`);
   if (ticket.location) parts.push(`Location: ${ticket.location}`);
   parts.push(`Ticket URL: ${ticket.sourceUrl}`);
@@ -69,6 +71,7 @@ export async function PATCH(req: NextRequest) {
   let body: {
     eventId?: string;
     saleEventId?: string | null;
+    presaleEventId?: string | null;
     appliedFields?: string[];
     ticket?: ScrapedTicket;
     tzOffsetMinutes?: number;
@@ -79,7 +82,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { eventId, saleEventId, appliedFields, ticket, tzOffsetMinutes = 0 } = body;
+  const { eventId, saleEventId, presaleEventId, appliedFields, ticket, tzOffsetMinutes = 0 } = body;
   if (!eventId || !appliedFields || !ticket) {
     return NextResponse.json({ error: "eventId, appliedFields, ticket required" }, { status: 400 });
   }
@@ -131,14 +134,13 @@ export async function PATCH(req: NextRequest) {
     data: mainUpdate,
   });
 
-  // Update sale event description whenever main event fields change (keeps it in sync)
+  // Update sale/presale events whenever relevant fields change (keeps them in sync)
   let updatedSaleEvent = null;
-  const saleFieldsChanged = apply.has("date") || apply.has("time") || apply.has("title") || apply.has("ticketPrices") || apply.has("saleDate");
+  let updatedPresaleEvent = null;
+  const saleFieldsChanged = apply.has("date") || apply.has("time") || apply.has("title") || apply.has("ticketPrices") || apply.has("saleDate") || apply.has("saleFirstDate");
+
   if (saleEventId && saleFieldsChanged) {
-    const saleUpdateData: Record<string, unknown> = {
-      description: buildSaleDescription(ticket),
-    };
-    // Also update the sale event's startTime if saleDate changed
+    const saleUpdateData: Record<string, unknown> = { description: buildSaleDescription(ticket) };
     if (apply.has("saleDate") && ticket.saleDate) {
       const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes);
       if (saleStart) {
@@ -148,16 +150,35 @@ export async function PATCH(req: NextRequest) {
         saleUpdateData.endTime = saleEnd;
       }
     }
-    updatedSaleEvent = await prisma.event.update({
-      where: { id: saleEventId },
-      data: saleUpdateData,
-    });
+    updatedSaleEvent = await prisma.event.update({ where: { id: saleEventId }, data: saleUpdateData });
+  }
+
+  if (presaleEventId && saleFieldsChanged) {
+    const presaleUpdateData: Record<string, unknown> = {
+      description: [
+        `會員優先購票 Fan/member presale for: ${ticket.title}`,
+        ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
+        ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
+        `Ticket URL: ${ticket.sourceUrl}`,
+      ].filter(Boolean).join("\n\n"),
+    };
+    if (apply.has("saleFirstDate") && ticket.saleFirstDate) {
+      const presaleStart = parseLocalToUTC(ticket.saleFirstDate, null, tzOffsetMinutes);
+      if (presaleStart) {
+        const presaleEnd = new Date(presaleStart);
+        presaleEnd.setHours(presaleEnd.getHours() + 1);
+        presaleUpdateData.startTime = presaleStart;
+        presaleUpdateData.endTime = presaleEnd;
+      }
+    }
+    updatedPresaleEvent = await prisma.event.update({ where: { id: presaleEventId }, data: presaleUpdateData });
   }
 
   return NextResponse.json({
     updated: true,
     eventId: updatedEvent.id,
     saleEventId: updatedSaleEvent?.id ?? null,
+    presaleEventId: updatedPresaleEvent?.id ?? null,
     appliedFields,
   });
   } catch (e) {

@@ -57,7 +57,8 @@ interface TicketData {
   // Ticket-specific fields
   ticketPrices: string[] | null;    // e.g. ["HK$688", "HK$888", "HK$1,288"]
   ticketPlatforms: string[] | null; // e.g. ["BOOKYAY", "大麥網"]
-  saleDate: string | null;          // when tickets go on sale
+  saleDate: string | null;          // public general on-sale date
+  saleFirstDate: string | null;     // earliest presale / fan-club / member sale date
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +139,13 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   let schemaLocation: string | null = null;
 
   const jsonldMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) ?? [];
+
+  // Collect all valid Event entries, then pick the one with the latest startDate.
+  // Timable and similar sites embed a separate Event JSON-LD block for every sale
+  // window, so the first entry is often a presale date, not the actual show date.
+  interface JsonLdEvent { startDate: string; dateObj: Date; raw: Record<string, unknown> }
+  const allJsonLdEvents: JsonLdEvent[] = [];
+
   for (const block of jsonldMatches) {
     const json = block.replace(/<script[^>]*>/, "").replace(/<\/script>/, "");
     try {
@@ -149,27 +157,38 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
         : [];
 
       for (const event of events) {
-        if (!schemaDate && event.startDate) {
+        if (event.startDate) {
           const sd = String(event.startDate);
-          const parts = sd.split("T");
-          schemaDate = parts[0] ?? null;
-          schemaTime = parts[1] ? parts[1].slice(0, 5) : null; // HH:MM
-        }
-        if (!schemaVenue && event.location) {
-          const loc = event.location as Record<string, unknown>;
-          schemaVenue = String(loc.name ?? "");
-          const addr = loc.address as Record<string, unknown> | string | undefined;
-          if (addr && typeof addr === "object") {
-            schemaLocation = [addr.streetAddress, addr.addressLocality, addr.addressCountry]
-              .filter(Boolean)
-              .join(", ");
-          } else if (typeof addr === "string") {
-            schemaLocation = addr;
+          const d = new Date(sd);
+          if (!isNaN(d.getTime())) {
+            allJsonLdEvents.push({ startDate: sd, dateObj: d, raw: event });
           }
         }
       }
     } catch {
       /* ignore invalid JSON-LD */
+    }
+  }
+
+  if (allJsonLdEvents.length > 0) {
+    // Sort descending — the concert event is furthest in the future
+    allJsonLdEvents.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
+    const mainEvt = allJsonLdEvents[0];
+    const parts = mainEvt.startDate.split("T");
+    schemaDate = parts[0] ?? null;
+    schemaTime = parts[1] ? parts[1].slice(0, 5) : null;
+
+    if (mainEvt.raw.location) {
+      const loc = mainEvt.raw.location as Record<string, unknown>;
+      schemaVenue = String(loc.name ?? "");
+      const addr = loc.address as Record<string, unknown> | string | undefined;
+      if (addr && typeof addr === "object") {
+        schemaLocation = [addr.streetAddress, addr.addressLocality, addr.addressCountry]
+          .filter(Boolean)
+          .join(", ");
+      } else if (typeof addr === "string") {
+        schemaLocation = addr;
+      }
     }
   }
 
@@ -203,7 +222,8 @@ You are a ticket and event data extractor. Extract information from the followin
 - description (brief 1-2 sentence summary of the event, nullable)
 - ticketPrices (array of ALL price strings found on the page including HK$, USD$, etc., e.g. ["HK$699", "HK$899", "HK$1,099"], null if none found)
 - ticketPlatforms (array of ticketing platform/seller names, e.g. ["BOOKYAY", "大麥網 DAMAI", "膠紙座", "Cityline"], null if none found)
-- saleDate (the PUBLIC on-sale date for tickets — include EVEN IF already past, use "YYYY-MM-DD HH:MM" format if possible, nullable. If there are multiple sale phases, use the public general sale date, not the presale.)
+- saleDate (the PUBLIC general on-sale date — include EVEN IF already past, "YYYY-MM-DD HH:MM" format if possible, nullable. Use the public/general sale date, not the earliest presale.)
+- saleFirstDate (the EARLIEST available sale date — earliest fanclub, member, priority, or presale date, only if DIFFERENT from saleDate, "YYYY-MM-DD HH:MM" format if possible, nullable)
 
 Return ONLY the JSON object, no markdown code blocks, no extra text.
 
@@ -492,6 +512,7 @@ export async function POST(req: NextRequest) {
     ticketPrices: (aiResult as Partial<TicketData>).ticketPrices ?? null,
     ticketPlatforms: (aiResult as Partial<TicketData>).ticketPlatforms ?? null,
     saleDate: (aiResult as Partial<TicketData>).saleDate ?? null,
+    saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? null,
   };
 
   if (!ticket.title || ticket.title === "Untitled Event") {

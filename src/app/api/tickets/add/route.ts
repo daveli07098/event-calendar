@@ -23,6 +23,7 @@ interface TicketData {
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
   saleDate: string | null;
+  saleFirstDate: string | null;
 }
 
 /** Parse a single date+time into a JS Date, with a fallback. */
@@ -118,6 +119,7 @@ export async function POST(req: NextRequest) {
   if (ticket.ticketPrices?.length) descParts.push(`門票票價 Ticket Prices: ${ticket.ticketPrices.join(" / ")}`);
   if (ticket.ticketPlatforms?.length) descParts.push(`售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`);
   if (ticket.saleDate) descParts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
+  if (ticket.saleFirstDate) descParts.push(`First Sale Date: ${ticket.saleFirstDate}`);
   if (ticket.venue) descParts.push(`Venue: ${ticket.venue}`);
   if (ticket.location) descParts.push(`Location: ${ticket.location}`);
   descParts.push(`Ticket URL: ${ticket.sourceUrl}`);
@@ -135,11 +137,11 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // If there's a sale date, also create a reminder in the "sale-ticket" calendar
+  // If there's a public sale date, create a reminder in the "sale-ticket" calendar
   let saleEvent: { id: string } | null = null;
-  if (ticket.saleDate) {
-    const { start: saleStart, end: saleEnd } = parseEventTime(ticket.saleDate, null);
+  let presaleEvent: { id: string } | null = null;
 
+  if (ticket.saleDate || ticket.saleFirstDate) {
     let saleCalendar = await prisma.calendar.findFirst({
       where: { userId: uid, name: SALE_CALENDAR_NAME },
     });
@@ -155,24 +157,48 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const saleDesc = [
-      `售票開始！Ticket sale opens for: ${ticket.title}`,
-      ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
-      ticket.ticketPlatforms?.length ? `平台 Platforms: ${ticket.ticketPlatforms.join(", ")}` : null,
-      ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
-      `Ticket URL: ${ticket.sourceUrl}`,
-    ].filter(Boolean).join("\n\n");
+    if (ticket.saleDate) {
+      const { start: saleStart, end: saleEnd } = parseEventTime(ticket.saleDate, null);
+      const saleDesc = [
+        `售票開始！Public sale opens for: ${ticket.title}`,
+        ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
+        ticket.ticketPlatforms?.length ? `平台 Platforms: ${ticket.ticketPlatforms.join(", ")}` : null,
+        ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
+        `Ticket URL: ${ticket.sourceUrl}`,
+      ].filter(Boolean).join("\n\n");
 
-    saleEvent = await prisma.event.create({
-      data: {
-        calendarId: saleCalendar.id,
-        title: `🎫 Sale Opens: ${ticket.title}`,
-        description: saleDesc,
-        startTime: saleStart,
-        endTime: saleEnd,
-        location: null,
-      },
-    });
+      saleEvent = await prisma.event.create({
+        data: {
+          calendarId: saleCalendar.id,
+          title: `🎫 Sale Opens: ${ticket.title}`,
+          description: saleDesc,
+          startTime: saleStart,
+          endTime: saleEnd,
+          location: null,
+        },
+      });
+    }
+
+    if (ticket.saleFirstDate) {
+      const { start: presaleStart, end: presaleEnd } = parseEventTime(ticket.saleFirstDate, null);
+      const presaleDesc = [
+        `會員優先購票 Fan/member presale for: ${ticket.title}`,
+        ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
+        ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
+        `Ticket URL: ${ticket.sourceUrl}`,
+      ].filter(Boolean).join("\n\n");
+
+      presaleEvent = await prisma.event.create({
+        data: {
+          calendarId: saleCalendar.id,
+          title: `🎫 Fan Presale: ${ticket.title}`,
+          description: presaleDesc,
+          startTime: presaleStart,
+          endTime: presaleEnd,
+          location: null,
+        },
+      });
+    }
   }
 
   return NextResponse.json({
@@ -182,5 +208,6 @@ export async function POST(req: NextRequest) {
     start: event.startTime.toISOString(),
     end: event.endTime.toISOString(),
     saleEventId: saleEvent?.id ?? null,
+    presaleEventId: presaleEvent?.id ?? null,
   });
 }

@@ -15,6 +15,7 @@ interface ScrapedTicket {
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
   saleDate: string | null;
+  saleFirstDate: string | null;
   sourceUrl: string;
 }
 
@@ -30,6 +31,7 @@ export interface DiffResult {
   hasChanges: boolean;
   eventId: string | null;
   saleEventId: string | null;
+  presaleEventId: string | null;
   changes: FieldChange[];
   // Static context — current stored values, shown even when unchanged
   storedDate: string | null;
@@ -44,14 +46,16 @@ function parseStored(description: string | null): {
   prices: string[] | null;
   platforms: string[] | null;
   saleDate: string | null;
+  saleFirstDate: string | null;
   venue: string | null;
   location: string | null;
 } {
-  if (!description) return { prices: null, platforms: null, saleDate: null, venue: null, location: null };
+  if (!description) return { prices: null, platforms: null, saleDate: null, saleFirstDate: null, venue: null, location: null };
 
   const pricesLine = description.match(/Ticket Prices: (.+)/)?.[1] ?? null;
   const platformsLine = description.match(/Platforms: (.+)/)?.[1] ?? null;
   const saleDateLine = description.match(/Sale Date: (.+)/)?.[1] ?? null;
+  const saleFirstDateLine = description.match(/First Sale Date: (.+)/)?.[1] ?? null;
   const venueLine = description.match(/Venue: (.+)/)?.[1] ?? null;
   const locationLine = description.match(/Location: (.+)/)?.[1] ?? null;
 
@@ -59,6 +63,7 @@ function parseStored(description: string | null): {
     prices: pricesLine ? pricesLine.split(" / ").map((s) => s.trim()) : null,
     platforms: platformsLine ? platformsLine.split(", ").map((s) => s.trim()) : null,
     saleDate: saleDateLine?.trim() ?? null,
+    saleFirstDate: saleFirstDateLine?.trim() ?? null,
     venue: venueLine?.trim() ?? null,
     location: locationLine?.trim() ?? null,
   };
@@ -120,7 +125,7 @@ export async function POST(req: NextRequest) {
 
   if (calendarIds.length === 0) {
     return NextResponse.json<DiffResult>({
-      hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, changes: [],
+      hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, presaleEventId: null, changes: [],
       storedDate: null, storedTime: null, storedVenue: null,
     });
   }
@@ -136,18 +141,20 @@ export async function POST(req: NextRequest) {
 
   if (matchingEvents.length === 0) {
     return NextResponse.json<DiffResult>({
-      hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, changes: [],
+      hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, presaleEventId: null, changes: [],
       storedDate: null, storedTime: null, storedVenue: null,
     });
   }
 
-  // Separate main event vs sale event
-  const saleEvent = matchingEvents.find((e) => e.calendar.name === "sale-ticket") ?? null;
+  // Separate main event vs sale events
+  const saleEvent = matchingEvents.find((e) => e.calendar.name === "sale-ticket" && e.title.includes("Sale Opens")) ?? null;
+  const presaleEvent = matchingEvents.find((e) => e.calendar.name === "sale-ticket" && e.title.includes("Fan Presale")) ?? null;
   const mainEvent = matchingEvents.find((e) => e.calendar.name !== "sale-ticket") ?? matchingEvents[0];
 
   // Parse stored fields
   const stored = parseStored(mainEvent.description);
   const storedSale = parseStored(saleEvent?.description ?? null);
+  const storedPresale = parseStored(presaleEvent?.description ?? null);
 
   // Convert stored UTC timestamp to user-local date/time for comparison
   const localStart = utcToLocal(mainEvent.startTime, tzOffsetMinutes);
@@ -209,9 +216,21 @@ export async function POST(req: NextRequest) {
   if (newSaleDate && storedSaleDate !== newSaleDate) {
     changes.push({
       field: "saleDate",
-      label: "Sale Opens 開售日期",
+      label: "Public Sale Opens 公開發售日期",
       oldValue: storedSaleDate,
       newValue: newSaleDate,
+    });
+  }
+
+  // --- First / presale date ---
+  const storedFirstSaleDate = normDate(stored.saleFirstDate ?? storedPresale.saleFirstDate);
+  const newFirstSaleDate = normDate(ticket.saleFirstDate);
+  if (newFirstSaleDate && storedFirstSaleDate !== newFirstSaleDate) {
+    changes.push({
+      field: "saleFirstDate",
+      label: "Fan Presale Opens 會員優先購票",
+      oldValue: storedFirstSaleDate,
+      newValue: newFirstSaleDate,
     });
   }
 
@@ -230,8 +249,8 @@ export async function POST(req: NextRequest) {
     hasChanges: changes.length > 0,
     eventId: mainEvent.id,
     saleEventId: saleEvent?.id ?? null,
+    presaleEventId: presaleEvent?.id ?? null,
     changes,
-    // Return local date/time so the UI can display them without further conversion
     storedDate: localStart.date,
     storedTime: localStart.time,
     storedVenue: stored.venue ?? null,

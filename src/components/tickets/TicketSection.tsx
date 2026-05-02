@@ -29,6 +29,7 @@ interface ScrapedTicket {
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
   saleDate: string | null;
+  saleFirstDate: string | null;
 }
 
 interface FieldChange {
@@ -43,6 +44,7 @@ interface DiffResult {
   hasChanges: boolean;
   eventId: string | null;
   saleEventId: string | null;
+  presaleEventId: string | null;
   changes: FieldChange[];
   storedDate: string | null;
   storedTime: string | null;
@@ -249,6 +251,7 @@ export function TicketSection() {
         body: JSON.stringify({
           eventId: diffResult.eventId,
           saleEventId: diffResult.saleEventId,
+          presaleEventId: diffResult.presaleEventId,
           appliedFields: Array.from(selectedFields),
           ticket,
           tzOffsetMinutes: new Date().getTimezoneOffset(),
@@ -522,8 +525,14 @@ export function TicketSection() {
                 ) : null}
                 {ticket.saleDate && (
                   <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground">Sale Opens 開售日期</p>
+                    <p className="text-xs text-muted-foreground">Public Sale Opens 公開發售</p>
                     <p className="font-medium">{ticket.saleDate}</p>
+                  </div>
+                )}
+                {ticket.saleFirstDate && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Fan Presale Opens 會員優先購票</p>
+                    <p className="font-medium">{ticket.saleFirstDate}</p>
                   </div>
                 )}
                 {ticket.ticketPlatforms?.length ? (
@@ -688,9 +697,18 @@ export function TicketSection() {
               {ticket.saleDate && (
                 <div>
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
-                    On Sale 開售
+                    Public Sale 公開發售
                   </p>
                   <p className="text-sm">{ticket.saleDate}</p>
+                </div>
+              )}
+
+              {ticket.saleFirstDate && (
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
+                    Fan Presale 會員優先購票
+                  </p>
+                  <p className="text-sm">{ticket.saleFirstDate}</p>
                 </div>
               )}
 
