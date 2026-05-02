@@ -312,10 +312,8 @@ const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info
 URL: ${url}
 ${text}`.trim();
 
-async function callGemini(text: string, url: string): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
+async function callGemini(text: string, url: string, model = "gemini-2.5-flash"): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  // gemini-2.5-flash: free tier model with actual quota (5 RPM, 250K TPM)
-  const model = "gemini-2.5-flash";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const res = await fetch(endpoint, {
@@ -559,9 +557,8 @@ export async function POST(req: NextRequest) {
   let aiTokensUsed: number | null = null;
 
   // ---------------------------------------------------------------------------
-  // AI cascade: Gemini → Groq → Copilot
-  // On 429 (quota exceeded) we fall through to the next provider automatically.
-  // Only a non-quota error stops the chain and records the error.
+  // AI cascade: multiple Gemini models → Groq → Copilot
+  // Each Gemini model is tried in order; on 429 (quota) we fall through to next.
   // ---------------------------------------------------------------------------
   if (hasAiProvider && !withinLimit) {
     console.warn(`[tickets/scrape] User ${uid} hit daily AI limit (${AI_DAILY_LIMIT}/day) — using OG-meta fallback`);
@@ -570,11 +567,22 @@ export async function POST(req: NextRequest) {
     // Try each provider in order; skip to next on 429
     const providers: Array<() => Promise<{ result: Partial<TicketData>; name: string }>> = [];
 
+    // Gemini models in priority order — all share GEMINI_API_KEY
+    const geminiModels = [
+      "gemini-2.5-flash",        // 5 RPM free — primary
+      "gemini-2.0-flash",        // Gemini 2 Flash — 15 RPM free
+      "gemini-2.0-flash-lite",   // Gemini 2 Flash Lite — 30 RPM free
+      "gemma-3-27b-it",          // Gemma 3 27B — 30 RPM free
+      "gemma-3-12b-it",          // Gemma 3 12B — 30 RPM free
+    ];
     if (geminiKey) {
-      providers.push(async () => ({
-        result: await callGemini(pageText, url),
-        name: "gemini-2.5-flash",
-      }));
+      for (const model of geminiModels) {
+        const m = model; // capture for closure
+        providers.push(async () => ({
+          result: await callGemini(pageText, url, m),
+          name: m,
+        }));
+      }
     }
     if (groqKey) {
       providers.push(async () => ({

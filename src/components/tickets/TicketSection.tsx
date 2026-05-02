@@ -210,15 +210,23 @@ export function TicketSection() {
     const resolvedDate = editDate.trim() || ticket.date;
     const resolvedTime = editTime.trim() || ticket.time;
 
-    // Default end = start + 3 hours when not entered
+    // Default end = start + 3 hours when not entered (pure string arithmetic — no UTC conversion)
     let resolvedEndDate = editEndDate.trim() || null;
     let resolvedEndTime = editEndTime.trim() || null;
     if (!resolvedEndDate && !resolvedEndTime && resolvedDate && resolvedTime) {
       const [h, m] = resolvedTime.split(":").map(Number);
-      const start = new Date(`${resolvedDate}T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`);
-      const end = new Date(start.getTime() + 3 * 60 * 60 * 1000);
-      resolvedEndDate = end.toISOString().slice(0, 10);
-      resolvedEndTime = end.toISOString().slice(11, 16);
+      const totalMins = h * 60 + m + 3 * 60;
+      const endH = Math.floor(totalMins / 60) % 24;
+      const endM = totalMins % 60;
+      const dayOverflow = Math.floor(totalMins / (24 * 60));
+      resolvedEndTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+      if (dayOverflow > 0) {
+        const d = new Date(resolvedDate + "T00:00:00");
+        d.setDate(d.getDate() + dayOverflow);
+        resolvedEndDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      } else {
+        resolvedEndDate = resolvedDate;
+      }
     }
 
     const ticketToAdd = {
