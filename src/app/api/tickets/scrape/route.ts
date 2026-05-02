@@ -328,7 +328,9 @@ async function callGemini(text: string, url: string): Promise<Partial<TicketData
   if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
   const data = await res.json();
   const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  return JSON.parse(raw.replace(/```json\n?|```/g, "").trim());
+  const usage = data.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | undefined;
+  const tokensUsed = usage?.totalTokenCount ?? null;
+  return { ...JSON.parse(raw.replace(/```json\n?|```/g, "").trim()), _tokensUsed: tokensUsed };
 }
 
 async function callOpenAICompatible(
@@ -362,7 +364,9 @@ async function callOpenAICompatible(
   if (!res.ok) throw new Error(`AI API error: ${res.status}`);
   const data = await res.json();
   const raw: string = data.choices?.[0]?.message?.content ?? "{}";
-  return JSON.parse(raw.replace(/```json\n?|```/g, "").trim());
+  const usage = data.usage as { total_tokens?: number } | undefined;
+  const tokensUsed = usage?.total_tokens ?? null;
+  return { ...JSON.parse(raw.replace(/```json\n?|```/g, "").trim()), _tokensUsed: tokensUsed };
 }
 
 /**
@@ -533,6 +537,7 @@ export async function POST(req: NextRequest) {
   const remaining = remainingAiCalls(uid);
 
   let aiError: string | null = null;
+  let aiTokensUsed: number | null = null;
 
   // ---------------------------------------------------------------------------
   // AI cascade: Gemini → Groq → Copilot
@@ -577,6 +582,8 @@ export async function POST(req: NextRequest) {
         aiResult = result;
         aiUsed = name;
         aiError = null;
+        aiTokensUsed = (result as Record<string, unknown>)._tokensUsed as number | null ?? null;
+        if (aiTokensUsed) console.log(`[tickets/scrape] ${name} tokens used: ${aiTokensUsed}`);
         incrementAiLimit(uid);
         break; // success — stop trying
       } catch (e) {
@@ -623,7 +630,8 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ...ticket,
-    aiError, // null on success; error message string when AI failed and fell back to og-meta
+    aiError,
+    aiTokensUsed,
     aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining },
   });
 }

@@ -25,6 +25,7 @@ interface ScrapedTicket {
   sourceUrl: string;
   aiUsed: string;            // which AI provider processed it
   aiError: string | null;    // set when AI failed and fell back to og-meta
+  aiTokensUsed: number | null; // tokens consumed by the AI call
   aiQuota: AiQuota;
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
@@ -342,6 +343,7 @@ export function TicketSection() {
           {ticket?.aiUsed && (
             <Badge variant="secondary" className="text-xs font-mono">
               {ticket.aiUsed}
+              {ticket.aiTokensUsed ? ` · ${ticket.aiTokensUsed.toLocaleString()}t` : ""}
             </Badge>
           )}
         </div>
