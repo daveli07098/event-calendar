@@ -97,6 +97,8 @@ interface MetaFallback {
   time: string | null;
   venue: string | null;
   location: string | null;
+  saleDate: string | null;        // earliest public/general on-sale from JSON-LD
+  saleFirstDate: string | null;   // earliest presale/fan-club date from JSON-LD
 }
 
 function extractMeta(html: string, pageUrl: string): MetaFallback {
@@ -198,6 +200,29 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   // Eventbrite-specific date meta
   const eventDate = get(/<meta[^>]*name=["']event:start_time["'][^>]*content=["']([^"']+)["']/i);
 
+  // Extract sale dates from non-concert JSON-LD Event blocks.
+  // When AI is unavailable, these give us saleDate + saleFirstDate for free.
+  let schemaSaleDate: string | null = null;
+  let schemaSaleFirstDate: string | null = null;
+  if (allJsonLdEvents.length > 1) {
+    // Concert = latest (index 0 after desc sort). Rest are sale windows.
+    const saleEvents = allJsonLdEvents.slice(1);
+    // saleFirstDate = earliest non-concert event (fanclub / member presale)
+    const earliest = saleEvents[saleEvents.length - 1];
+    schemaSaleFirstDate = earliest.startDate.slice(0, 10);
+    // saleDate = latest non-concert event (most likely public general sale)
+    const latestSale = saleEvents[0];
+    const latestSaleDate = latestSale.startDate.slice(0, 10);
+    // Only set saleDate separately if it differs from saleFirstDate
+    if (latestSaleDate !== schemaSaleFirstDate) {
+      schemaSaleDate = latestSaleDate;
+    } else {
+      // Only one sale date — treat it as public sale, not presale
+      schemaSaleDate = latestSaleDate;
+      schemaSaleFirstDate = null;
+    }
+  }
+
   return {
     title: ogTitle ?? htmlTitle,
     description: decodeHtml(ogDesc),
@@ -206,6 +231,8 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     time: schemaTime ?? (eventDate && eventDate.includes("T") ? eventDate.split("T")[1].slice(0, 5) : null),
     venue: schemaVenue || null,
     location: schemaLocation || null,
+    saleDate: schemaSaleDate,
+    saleFirstDate: schemaSaleFirstDate,
   };
 }
 
@@ -465,8 +492,15 @@ export async function POST(req: NextRequest) {
       aiUsed = "gemini-2.0-flash";
       incrementAiLimit(uid); // only count when AI actually succeeds
     } catch (e) {
-      console.error("[tickets/scrape] Gemini failed:", e);
-      aiError = e instanceof Error ? e.message : "Gemini error";
+      const msg = e instanceof Error ? e.message : "Gemini error";
+      const is429 = msg.includes("429");
+      if (is429) {
+        console.warn("[tickets/scrape] Gemini quota exceeded (429) — falling back to OG-meta");
+        aiError = "Gemini daily quota exceeded — results from OG-meta only";
+      } else {
+        console.error("[tickets/scrape] Gemini failed:", e);
+        aiError = msg;
+      }
     }
   } else if (githubToken && withinLimit) {
     try {
@@ -475,8 +509,15 @@ export async function POST(req: NextRequest) {
       aiUsed = "github-copilot";
       incrementAiLimit(uid);
     } catch (e) {
-      console.error("[tickets/scrape] Copilot API failed:", e);
-      aiError = e instanceof Error ? e.message : "Copilot error";
+      const msg = e instanceof Error ? e.message : "Copilot error";
+      const is429 = msg.includes("429");
+      if (is429) {
+        console.warn("[tickets/scrape] Copilot quota exceeded (429) — falling back to OG-meta");
+        aiError = "Copilot daily quota exceeded — results from OG-meta only";
+      } else {
+        console.error("[tickets/scrape] Copilot API failed:", e);
+        aiError = msg;
+      }
     }
   } else if (groqKey && withinLimit) {
     try {
@@ -490,8 +531,15 @@ export async function POST(req: NextRequest) {
       aiUsed = "groq-llama3";
       incrementAiLimit(uid);
     } catch (e) {
-      console.error("[tickets/scrape] Groq failed:", e);
-      aiError = e instanceof Error ? e.message : "Groq error";
+      const msg = e instanceof Error ? e.message : "Groq error";
+      const is429 = msg.includes("429");
+      if (is429) {
+        console.warn("[tickets/scrape] Groq quota exceeded (429) — falling back to OG-meta");
+        aiError = "Groq daily quota exceeded — results from OG-meta only";
+      } else {
+        console.error("[tickets/scrape] Groq failed:", e);
+        aiError = msg;
+      }
     }
   }
 
@@ -511,8 +559,8 @@ export async function POST(req: NextRequest) {
     aiUsed,
     ticketPrices: (aiResult as Partial<TicketData>).ticketPrices ?? null,
     ticketPlatforms: (aiResult as Partial<TicketData>).ticketPlatforms ?? null,
-    saleDate: (aiResult as Partial<TicketData>).saleDate ?? null,
-    saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? null,
+    saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
+    saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
   };
 
   if (!ticket.title || ticket.title === "Untitled Event") {
