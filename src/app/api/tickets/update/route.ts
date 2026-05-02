@@ -40,8 +40,8 @@ function buildSaleDescription(ticket: ScrapedTicket): string {
   ].filter(Boolean).join("\n\n");
 }
 
-/** Parse date+time into a Date. Returns null if unparseable. */
-function parseDateTime(date: string | null, time: string | null): Date | null {
+/** Parse date+time as user-local time and return a UTC Date using tzOffsetMinutes. */
+function parseLocalToUTC(date: string | null, time: string | null, tzOffsetMinutes: number): Date | null {
   if (!date) return null;
   const isoMatch = date.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (!isoMatch) {
@@ -50,7 +50,10 @@ function parseDateTime(date: string | null, time: string | null): Date | null {
   }
   const [, y, m, d] = isoMatch;
   const [h = "12", min = "00"] = (time ?? "12:00").split(":");
-  return new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min));
+  // Create as if server-local (UTC), then shift by tzOffset to get true UTC:
+  // user-local 20:00 HKT (offset=-480) → UTC = 20:00 + (-480/60) = 20:00 - 8 = 12:00 UTC
+  const localDate = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min));
+  return new Date(localDate.getTime() + tzOffsetMinutes * 60_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +69,9 @@ export async function PATCH(req: NextRequest) {
   let body: {
     eventId?: string;
     saleEventId?: string | null;
-    appliedFields?: string[];   // field keys the user confirmed to apply
+    appliedFields?: string[];
     ticket?: ScrapedTicket;
+    tzOffsetMinutes?: number;
   };
   try {
     body = await req.json();
@@ -75,7 +79,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { eventId, saleEventId, appliedFields, ticket } = body;
+  const { eventId, saleEventId, appliedFields, ticket, tzOffsetMinutes = 0 } = body;
   if (!eventId || !appliedFields || !ticket) {
     return NextResponse.json({ error: "eventId, appliedFields, ticket required" }, { status: 400 });
   }
@@ -99,8 +103,17 @@ export async function PATCH(req: NextRequest) {
 
   if (apply.has("date") || apply.has("time")) {
     const dateSrc = apply.has("date") ? ticket.date : existingEvent.startTime.toISOString().slice(0, 10);
-    const timeSrc = apply.has("time") ? ticket.time : existingEvent.startTime.toISOString().slice(11, 16);
-    const newStart = parseDateTime(dateSrc, timeSrc);
+    // For time: if user applied the time change use ticket.time (local), else keep stored UTC time
+    const timeSrc = apply.has("time") ? ticket.time : null;
+    let newStart: Date | null;
+    if (timeSrc !== null) {
+      // ticket.time is local — convert to UTC using client offset
+      newStart = parseLocalToUTC(dateSrc, timeSrc, tzOffsetMinutes);
+    } else {
+      // Keep the existing stored time, only change the date
+      const existingTimeUTC = existingEvent.startTime.toISOString().slice(11, 16);
+      newStart = parseLocalToUTC(dateSrc, existingTimeUTC, 0); // already UTC
+    }
     if (newStart) {
       const newEnd = new Date(newStart);
       newEnd.setHours(newEnd.getHours() + 2);
@@ -118,23 +131,27 @@ export async function PATCH(req: NextRequest) {
     data: mainUpdate,
   });
 
-  // Update sale event if it exists and saleDate changed
+  // Update sale event description whenever main event fields change (keeps it in sync)
   let updatedSaleEvent = null;
-  if (saleEventId && apply.has("saleDate") && ticket.saleDate) {
-    const saleStart = parseDateTime(ticket.saleDate, null);
-    if (saleStart) {
-      const saleEnd = new Date(saleStart);
-      saleEnd.setHours(saleEnd.getHours() + 1);
-
-      updatedSaleEvent = await prisma.event.update({
-        where: { id: saleEventId },
-        data: {
-          description: buildSaleDescription(ticket),
-          startTime: saleStart,
-          endTime: saleEnd,
-        },
-      });
+  const saleFieldsChanged = apply.has("date") || apply.has("time") || apply.has("title") || apply.has("ticketPrices") || apply.has("saleDate");
+  if (saleEventId && saleFieldsChanged) {
+    const saleUpdateData: Record<string, unknown> = {
+      description: buildSaleDescription(ticket),
+    };
+    // Also update the sale event's startTime if saleDate changed
+    if (apply.has("saleDate") && ticket.saleDate) {
+      const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes);
+      if (saleStart) {
+        const saleEnd = new Date(saleStart);
+        saleEnd.setHours(saleEnd.getHours() + 1);
+        saleUpdateData.startTime = saleStart;
+        saleUpdateData.endTime = saleEnd;
+      }
     }
+    updatedSaleEvent = await prisma.event.update({
+      where: { id: saleEventId },
+      data: saleUpdateData,
+    });
   }
 
   return NextResponse.json({

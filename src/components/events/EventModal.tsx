@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2 } from "lucide-react";
+import { Trash2, ExternalLink } from "lucide-react";
 import type { CalendarType, EventType, EventFormData } from "@/types";
 
 interface EventModalProps {
@@ -284,6 +284,25 @@ export function EventModal({
               className={readOnly ? "cursor-default select-text" : ""}
             />
           </div>
+
+          {/* Ticket URL — parsed from description; shown as a clickable link when present */}
+          {(() => {
+            const ticketUrl = description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
+            return ticketUrl ? (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs text-muted-foreground">Ticket Link 購票連結</Label>
+                <a
+                  href={ticketUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-sm text-primary hover:underline truncate"
+                >
+                  <ExternalLink className="size-3.5 shrink-0" />
+                  {ticketUrl}
+                </a>
+              </div>
+            ) : null;
+          })()}
           </div>{/* end dimmed wrapper */}
 
           <div className="flex items-center justify-between pt-2">

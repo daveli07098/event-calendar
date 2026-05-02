@@ -171,7 +171,7 @@ export function TicketSection() {
         const diffRes = await fetch("/api/tickets/diff", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: trimmed, ticket: data }),
+          body: JSON.stringify({ url: trimmed, ticket: data, tzOffsetMinutes: new Date().getTimezoneOffset() }),
         });
         if (diffRes.ok) {
           const diff: DiffResult = await diffRes.json();
@@ -251,6 +251,7 @@ export function TicketSection() {
           saleEventId: diffResult.saleEventId,
           appliedFields: Array.from(selectedFields),
           ticket,
+          tzOffsetMinutes: new Date().getTimezoneOffset(),
         }),
       });
 
@@ -446,8 +447,8 @@ export function TicketSection() {
                   )}
                   {diffResult.storedTime && (
                     <div>
-                      <p className="text-xs text-muted-foreground">Time UTC → HKT {diffResult.storedTime ? `${diffResult.storedTime} → ${addHours(diffResult.storedTime, 8)}` : ""}</p>
-                      <p className="font-medium">{addHours(diffResult.storedTime, 8)}</p>
+                      <p className="text-xs text-muted-foreground">Time 時間</p>
+                      <p className="font-medium">{diffResult.storedTime}</p>
                     </div>
                   )}
                   {diffResult.storedVenue && (

@@ -64,6 +64,19 @@ function parseStored(description: string | null): {
   };
 }
 
+/**
+ * Convert a UTC Date to local date/time strings using a timezone offset.
+ * offsetMinutes = new Date().getTimezoneOffset() from the client
+ * (negative for UTC+ zones, e.g. -480 for HKT)
+ */
+function utcToLocal(utcDate: Date, offsetMinutes: number): { date: string; time: string } {
+  // localMs = utcMs - offsetMinutes * 60000
+  // For HKT (offset=-480): utcMs - (-480*60000) = utcMs + 8h ✓
+  const localMs = utcDate.getTime() - offsetMinutes * 60_000;
+  const d = new Date(localMs);
+  return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) };
+}
+
 /** Normalise a date string to "YYYY-MM-DD" for comparison. Returns original string if can't parse. */
 function normDate(d: string | null): string | null {
   if (!d) return null;
@@ -84,14 +97,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { url?: string; ticket?: ScrapedTicket };
+  let body: { url?: string; ticket?: ScrapedTicket; tzOffsetMinutes?: number };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { url, ticket } = body;
+  const { url, ticket, tzOffsetMinutes = 0 } = body;
   if (!url || !ticket) {
     return NextResponse.json({ error: "url and ticket required" }, { status: 400 });
   }
@@ -136,11 +149,14 @@ export async function POST(req: NextRequest) {
   const stored = parseStored(mainEvent.description);
   const storedSale = parseStored(saleEvent?.description ?? null);
 
+  // Convert stored UTC timestamp to user-local date/time for comparison
+  const localStart = utcToLocal(mainEvent.startTime, tzOffsetMinutes);
+
   // Build diff
   const changes: FieldChange[] = [];
 
   // --- Event date ---
-  const storedDate = normDate(mainEvent.startTime.toISOString().slice(0, 10));
+  const storedDate = normDate(localStart.date);
   const newDate = normDate(ticket.date);
   if (newDate && storedDate !== newDate) {
     changes.push({
@@ -151,8 +167,8 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // --- Event time ---
-  const storedTime = mainEvent.startTime.toISOString().slice(11, 16); // HH:MM UTC
+  // --- Event time (both in local timezone) ---
+  const storedTime = localStart.time; // local HH:MM
   const newTime = ticket.time;
   if (newTime && storedTime !== newTime) {
     changes.push({
@@ -215,8 +231,9 @@ export async function POST(req: NextRequest) {
     eventId: mainEvent.id,
     saleEventId: saleEvent?.id ?? null,
     changes,
-    storedDate: mainEvent.startTime.toISOString().slice(0, 10),
-    storedTime: mainEvent.startTime.toISOString().slice(11, 16),
+    // Return local date/time so the UI can display them without further conversion
+    storedDate: localStart.date,
+    storedTime: localStart.time,
     storedVenue: stored.venue ?? null,
   });
 }
