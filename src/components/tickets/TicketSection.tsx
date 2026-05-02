@@ -29,6 +29,8 @@ interface ScrapedTicket {
   aiQuota: AiQuota;
   ticketPrices: string[] | null;
   ticketPlatforms: string[] | null;
+  endDate: string | null;
+  endTime: string | null;
   saleDate: string | null;
   saleFirstDate: string | null;
 }
@@ -166,6 +168,8 @@ export function TicketSection() {
       setEditTitle(data.title ?? "");
       setEditDate(data.date ?? "");
       setEditTime(data.time ?? "");
+      setEditEndDate(data.endDate ?? "");
+      setEditEndTime(data.endTime ?? "");
       setEditVenue(data.venue ?? "");
 
       // Auto-check for existing events with this URL

@@ -57,6 +57,8 @@ interface TicketData {
   // Ticket-specific fields
   ticketPrices: string[] | null;    // e.g. ["HK$688", "HK$888", "HK$1,288"]
   ticketPlatforms: string[] | null; // e.g. ["BOOKYAY", "大麥網"]
+  endDate: string | null;           // event end date YYYY-MM-DD
+  endTime: string | null;           // event end time HH:MM
   saleDate: string | null;          // public general on-sale date
   saleFirstDate: string | null;     // earliest presale / fan-club / member sale date
 }
@@ -308,7 +310,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate"}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event ends on a different or specified date","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate"}
 URL: ${url}
 ${text}`.trim();
 
@@ -646,6 +648,8 @@ export async function POST(req: NextRequest) {
     aiUsed,
     ticketPrices: (aiResult as Partial<TicketData>).ticketPrices ?? null,
     ticketPlatforms: (aiResult as Partial<TicketData>).ticketPlatforms ?? null,
+    endDate: (aiResult as Partial<TicketData>).endDate ?? null,
+    endTime: (aiResult as Partial<TicketData>).endTime ?? null,
     saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
     saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
   };
