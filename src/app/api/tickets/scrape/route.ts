@@ -201,9 +201,9 @@ You are a ticket and event data extractor. Extract information from the followin
 - venue (venue/building name, nullable)
 - location (city, address, or country, nullable)
 - description (brief 1-2 sentence summary of the event, nullable)
-- ticketPrices (array of price strings found on the page, e.g. ["HK$688", "HK$888", "HK$1,288"], null if none found)
-- ticketPlatforms (array of ticketing platform/seller names, e.g. ["BOOKYAY", "大麥網 DAMAI", "膠紙座"], null if none found)
-- saleDate (when tickets go on sale, natural language or ISO, nullable)
+- ticketPrices (array of ALL price strings found on the page including HK$, USD$, etc., e.g. ["HK$699", "HK$899", "HK$1,099"], null if none found)
+- ticketPlatforms (array of ticketing platform/seller names, e.g. ["BOOKYAY", "大麥網 DAMAI", "膠紙座", "Cityline"], null if none found)
+- saleDate (the PUBLIC on-sale date for tickets — include EVEN IF already past, use "YYYY-MM-DD HH:MM" format if possible, nullable. If there are multiple sale phases, use the public general sale date, not the presale.)
 
 Return ONLY the JSON object, no markdown code blocks, no extra text.
 
