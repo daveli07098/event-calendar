@@ -303,32 +303,17 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // ---------------------------------------------------------------------------
 // AI providers
 // ---------------------------------------------------------------------------
-const EXTRACT_PROMPT = (text: string, url: string) => `
-You are a ticket and event data extractor. Extract information from the following webpage text and return ONLY a valid JSON object with these fields:
-- title (string, required — event/concert name)
-- date (YYYY-MM-DD format if possible, or natural language like "May 9-10, 2026", nullable)
-- time (HH:MM 24h format if possible, nullable)
-- venue (venue/building name, nullable)
-- location (city, address, or country, nullable)
-- description (brief 1-2 sentence summary of the event, nullable)
-- ticketPrices (array of ALL price strings found on the page including HK$, USD$, etc., e.g. ["HK$699", "HK$899", "HK$1,099"], null if none found)
-- ticketPlatforms (array of ticketing platform/seller names, e.g. ["BOOKYAY", "大麥網 DAMAI", "膠紙座", "Cityline"], null if none found)
-- saleDate (the PUBLIC general on-sale date — include EVEN IF already past, "YYYY-MM-DD HH:MM" format if possible, nullable. Use the public/general sale date, not the earliest presale.)
-- saleFirstDate (the EARLIEST available sale date — earliest fanclub, member, priority, or presale date, only if DIFFERENT from saleDate, "YYYY-MM-DD HH:MM" format if possible, nullable)
-
-Return ONLY the JSON object, no markdown code blocks, no extra text.
-
-Source URL: ${url}
-
-Page text:
-${text}
-`.trim();
+// Compact prompt — fewer tokens, same structured output.
+// Field names are self-explanatory; examples only where format is ambiguous.
+const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate"}
+URL: ${url}
+${text}`.trim();
 
 async function callGemini(text: string, url: string): Promise<Partial<TicketData>> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  // gemini-2.5-flash is the free-tier model (5 RPM, 250K TPM).
-  // gemini-2.0-flash has 0/0 quota on free tier and always returns 429.
-  const model = "gemini-2.5-flash-preview-04-17";
+  // gemini-2.5-flash: free tier model with actual quota (5 RPM, 250K TPM)
+  const model = "gemini-2.5-flash";
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const res = await fetch(endpoint, {
