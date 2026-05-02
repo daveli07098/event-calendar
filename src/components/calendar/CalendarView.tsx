@@ -161,7 +161,11 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
     const controller = new AbortController();
     fetchAbortRef.current = controller;
     try {
-      const params = new URLSearchParams({ start: dateInfo.startStr, end: dateInfo.endStr });
+      // Convert FullCalendar's local-timezone strings to UTC ISO before sending.
+      // This avoids URL-encoding issues with +08:00 offsets in query params.
+      const start = new Date(dateInfo.startStr).toISOString();
+      const end = new Date(dateInfo.endStr).toISOString();
+      const params = new URLSearchParams({ start, end });
       const res = await fetch(`/api/events?${params}`, { signal: controller.signal });
       if (res.ok) {
         const data = await res.json();
