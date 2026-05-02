@@ -5,7 +5,7 @@ import { auth } from "@/lib/auth";
 // AI usage rate limiter — in-memory, resets daily per user
 // Prevents quota burn if the token is misused or the page is hammered.
 // ---------------------------------------------------------------------------
-const AI_DAILY_LIMIT = 100; // max AI-powered scrapes per user per day
+const AI_DAILY_LIMIT = 250; // max AI-powered scrapes per user per day
 
 interface RateBucket { count: number; dayKey: string }
 const rateLimitMap = new Map<string, RateBucket>();

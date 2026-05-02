@@ -5,6 +5,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2026-05-02] — Session: Quota
+### Changed
+- chore(quota): raise AI daily scrape limit from 100 to 250 per user ([eb2d428])
+
 ## [2026-04-27] — Session: Ticket Section
 ### Added
 - feat(tickets): AI-powered Ticket Section page for auto-importing event URLs ([b226c5a])
