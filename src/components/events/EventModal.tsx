@@ -219,6 +219,12 @@ export function EventModal({
             </div>
           </div>
 
+          {!allDay && (
+            <p className="text-xs text-muted-foreground -mt-2">
+              Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+            </p>
+          )}
+
           <div className="flex flex-col gap-2">
             <Label htmlFor="calendar">Calendar</Label>
             <Select value={calendarId} onValueChange={(v) => { if (v) setCalendarId(v); }}>
