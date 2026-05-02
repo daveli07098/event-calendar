@@ -22,7 +22,45 @@
 
 ---
 
-### 2. Railway (Best all-in-one)
+### 2. Vercel + Supabase
+
+| Part | Service | Notes |
+|---|---|---|
+| Next.js app | [Vercel](https://vercel.com) | Same as above |
+| PostgreSQL | [Supabase](https://supabase.com) | 500 MB free, no auto-suspend, nice dashboard |
+
+**Pros:** Supabase free tier never suspends (unlike Neon), 500 MB storage, built-in auth/storage/realtime if you ever need them, official Vercel integration injects `DATABASE_URL` automatically.
+
+**Cons:** Supabase uses PgBouncer connection pooling by default — Prisma requires the **Transaction pooler** URL (port 6543), not the direct URL, for serverless. Use the **direct connection** (port 5432) only for migrations.
+
+**Setup:**
+1. Create project on Supabase → Project Settings → Database → copy connection strings
+2. In Vercel: Integrations → Supabase → Connect project (auto-injects `DATABASE_URL`)
+3. In `.env.local` / Vercel env vars, set **two** URLs:
+
+```env
+# For Prisma runtime queries (Transaction pooler — port 6543)
+DATABASE_URL=postgresql://postgres.[ref]:[password]@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true
+
+# For prisma migrate deploy (direct connection — port 5432)
+DIRECT_URL=postgresql://postgres.[ref]:[password]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+```
+
+4. Update `prisma/schema.prisma`:
+
+```prisma
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")  // used by prisma migrate only
+}
+```
+
+> Both URLs are in Supabase → Project Settings → Database → **Connection string** tab. Switch between "Transaction" (port 6543) and "Session" (port 5432) modes.
+
+---
+
+### 3. Railway (Best all-in-one)
 
 | Part | Service | Notes |
 |---|---|---|
