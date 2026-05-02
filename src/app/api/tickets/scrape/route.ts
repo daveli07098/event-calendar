@@ -483,62 +483,62 @@ export async function POST(req: NextRequest) {
 
   let aiError: string | null = null;
 
+  // ---------------------------------------------------------------------------
+  // AI cascade: Gemini → Groq → Copilot
+  // On 429 (quota exceeded) we fall through to the next provider automatically.
+  // Only a non-quota error stops the chain and records the error.
+  // ---------------------------------------------------------------------------
   if (hasAiProvider && !withinLimit) {
     console.warn(`[tickets/scrape] User ${uid} hit daily AI limit (${AI_DAILY_LIMIT}/day) — using OG-meta fallback`);
     aiError = `Daily AI limit reached (${AI_DAILY_LIMIT}/day)`;
-  } else if (geminiKey && withinLimit) {
-    try {
-      aiResult = await callGemini(pageText, url);
-      aiUsed = "gemini-2.0-flash";
-      incrementAiLimit(uid); // only count when AI actually succeeds
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Gemini error";
-      const is429 = msg.includes("429");
-      if (is429) {
-        console.warn("[tickets/scrape] Gemini quota exceeded (429) — falling back to OG-meta");
-        aiError = "Gemini daily quota exceeded — results from OG-meta only";
-      } else {
-        console.error("[tickets/scrape] Gemini failed:", e);
-        aiError = msg;
-      }
+  } else if (hasAiProvider && withinLimit) {
+    // Try each provider in order; skip to next on 429
+    const providers: Array<() => Promise<{ result: Partial<TicketData>; name: string }>> = [];
+
+    if (geminiKey) {
+      providers.push(async () => ({
+        result: await callGemini(pageText, url),
+        name: "gemini-2.0-flash",
+      }));
     }
-  } else if (githubToken && withinLimit) {
-    try {
-      // gho_/ghu_ tokens must be exchanged for a short-lived Copilot token first
-      aiResult = await callCopilot(pageText, url, githubToken);
-      aiUsed = "github-copilot";
-      incrementAiLimit(uid);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Copilot error";
-      const is429 = msg.includes("429");
-      if (is429) {
-        console.warn("[tickets/scrape] Copilot quota exceeded (429) — falling back to OG-meta");
-        aiError = "Copilot daily quota exceeded — results from OG-meta only";
-      } else {
-        console.error("[tickets/scrape] Copilot API failed:", e);
-        aiError = msg;
-      }
+    if (groqKey) {
+      providers.push(async () => ({
+        result: await callOpenAICompatible(
+          pageText, url,
+          "https://api.groq.com/openai/v1/chat/completions",
+          groqKey,
+          "llama3-8b-8192"
+        ),
+        name: "groq-llama3",
+      }));
     }
-  } else if (groqKey && withinLimit) {
-    try {
-      aiResult = await callOpenAICompatible(
-        pageText,
-        url,
-        "https://api.groq.com/openai/v1/chat/completions",
-        groqKey,
-        "llama3-8b-8192"
-      );
-      aiUsed = "groq-llama3";
-      incrementAiLimit(uid);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Groq error";
-      const is429 = msg.includes("429");
-      if (is429) {
-        console.warn("[tickets/scrape] Groq quota exceeded (429) — falling back to OG-meta");
-        aiError = "Groq daily quota exceeded — results from OG-meta only";
-      } else {
-        console.error("[tickets/scrape] Groq failed:", e);
-        aiError = msg;
+    if (githubToken) {
+      providers.push(async () => ({
+        // gho_/ghu_ tokens must be exchanged for a short-lived Copilot token first
+        result: await callCopilot(pageText, url, githubToken),
+        name: "github-copilot",
+      }));
+    }
+
+    for (const provider of providers) {
+      try {
+        const { result, name } = await provider();
+        aiResult = result;
+        aiUsed = name;
+        aiError = null;
+        incrementAiLimit(uid);
+        break; // success — stop trying
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("429")) {
+          console.warn(`[tickets/scrape] Provider quota exceeded (429) — trying next provider`);
+          aiError = "AI quota exceeded — results from OG-meta only";
+          // continue to next provider
+        } else {
+          console.error(`[tickets/scrape] AI provider failed:`, e);
+          aiError = msg;
+          break; // non-quota error — stop chain
+        }
       }
     }
   }
