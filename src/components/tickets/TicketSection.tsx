@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
   CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight,
@@ -288,11 +287,11 @@ export function TicketSection() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="border-b border-border bg-card px-6 py-4 flex items-center gap-4">
-        <Link href="/">
+        <a href="/">
           <Button variant="ghost" size="icon" className="size-8">
             <ArrowLeft className="size-4" />
           </Button>
-        </Link>
+        </a>
         <div className="flex items-center gap-2">
           <Ticket className="size-5 text-primary" />
           <h1 className="text-lg font-semibold">Ticket Section</h1>
