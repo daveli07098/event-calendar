@@ -1,6 +1,256 @@
 # Deployment Guide
 
-## Hosting Options
+## Step-by-step: Vercel + Supabase (Recommended)
+
+### Step 1 — Supabase: Create a project
+
+1. Go to [supabase.com](https://supabase.com) → **New project**
+2. Pick a name, set a strong DB password (save it), choose region closest to you (e.g. `ap-southeast-1` for HK)
+3. Wait ~2 min for provisioning
+
+### Step 2 — Supabase: Get connection strings
+
+Go to **Project Settings → Database → Connection string**
+
+Copy both:
+
+| Mode | Port | Use for |
+|---|---|---|
+| **Transaction** (Session pooler) | 6543 | Prisma runtime (`DATABASE_URL`) |
+| **Direct connection** | 5432 | `prisma migrate deploy` (`DIRECT_URL`) |
+
+They look like:
+```
+postgresql://postgres.xxxx:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres
+postgresql://postgres.xxxx:[YOUR-PASSWORD]@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+```
+
+### Step 3 — Update `prisma/schema.prisma`
+
+```prisma
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+```
+
+### Step 4 — Run migrations against production DB
+
+```bash
+DIRECT_URL="postgresql://postgres.xxxx:PASSWORD@....:5432/postgres" \
+DATABASE_URL="postgresql://postgres.xxxx:PASSWORD@....:6543/postgres?pgbouncer=true" \
+pnpm prisma migrate deploy
+```
+
+### Step 5 — Vercel: Import the project
+
+1. Go to [vercel.com](https://vercel.com) → **Add New Project** → Import from GitHub
+2. Select this repo
+3. Framework preset: **Next.js** (auto-detected)
+4. Do **not** deploy yet — add env vars first
+
+### Step 6 — Vercel: Add environment variables
+
+In Vercel project → **Settings → Environment Variables**, add:
+
+| Variable | Value | Where to get |
+|---|---|---|
+| `DATABASE_URL` | Transaction pooler URL + `?pgbouncer=true` | Supabase → Settings → Database |
+| `DIRECT_URL` | Direct connection URL (port 5432) | Supabase → Settings → Database |
+| `AUTH_SECRET` | Run `openssl rand -base64 32` locally | Terminal |
+| `AUTH_URL` | `https://your-project.vercel.app` | After first deploy, update this |
+| `GOOGLE_CLIENT_ID` | From Google Cloud Console | See below |
+| `GOOGLE_CLIENT_SECRET` | From Google Cloud Console | See below |
+| `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Google AI Studio |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) | Optional |
+
+### Step 7 — Google OAuth: add production redirect URI
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → **APIs & Services → Credentials**
+2. Click your OAuth 2.0 client
+3. Under **Authorised redirect URIs**, add:
+   ```
+   https://your-project.vercel.app/api/auth/callback/google
+   ```
+4. Save
+
+### Step 8 — Deploy
+
+Click **Deploy** in Vercel (or push to `main` if you connected the branch).
+
+After first deploy, update `AUTH_URL` in Vercel env vars to your actual domain, then redeploy.
+
+### Step 9 — Verify
+
+- Visit `https://your-project.vercel.app` → login should work
+- Try creating an event → DB write works
+- Try the ticket scanner → Gemini AI should respond
+
+---
+
+## Hosting Options Comparison
+
+### 1. Vercel + Neon
+
+| Part | Service |
+|---|---|
+| Next.js app | [Vercel](https://vercel.com) |
+| PostgreSQL | [Neon](https://neon.tech) |
+
+**Pros:** One-click Neon integration from Vercel marketplace, `@prisma/adapter-pg` already compatible.
+
+**Cons:** Neon free tier auto-suspends after 5 min inactivity (cold start ~1 s on first query).
+
+**Quick setup:** Vercel → Integrations → Neon → Connect → injects `DATABASE_URL` automatically.
+
+---
+
+### 2. Vercel + Supabase
+
+| Part | Service |
+|---|---|
+| Next.js app | [Vercel](https://vercel.com) |
+| PostgreSQL | [Supabase](https://supabase.com) |
+
+**Pros:** Never suspends, 500 MB free, great dashboard.
+
+**Cons:** Requires two connection URLs for Prisma + pooling (see steps above).
+
+---
+
+### 3. Railway (all-in-one)
+
+| Part | Service |
+|---|---|
+| Next.js app | [Railway](https://railway.app) |
+| PostgreSQL | Railway Postgres plugin |
+
+**Pros:** Single dashboard, no cold starts, `$5/month` credit usually enough for personal use.
+
+**Quick setup:** New project → Deploy from GitHub → Add Postgres plugin → env vars auto-injected.
+
+---
+
+### 4. Fly.io + Supabase
+
+**Pros:** Most control, global edge, Supabase DB never suspends.
+
+**Cons:** More setup (Dockerfile, `fly.toml`), steeper learning curve.
+
+---
+
+## Required Environment Variables (full list)
+
+```env
+# Auth
+AUTH_SECRET=          # openssl rand -base64 32
+AUTH_URL=             # https://your-domain.com
+
+# Database
+DATABASE_URL=         # pooler URL (port 6543) — runtime queries
+DIRECT_URL=           # direct URL (port 5432) — migrations only
+
+# Google OAuth
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# AI providers
+GEMINI_API_KEY=       # https://aistudio.google.com/apikey
+GROQ_API_KEY=         # optional — https://console.groq.com
+GITHUB_TOKEN=         # optional — Copilot cascade fallback
+```
+
+---
+
+## CI/CD
+
+### Option A — Local deploy script (recommended for public repos)
+
+Create `deploy.sh` and add to `.gitignore`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+pnpm build
+vercel deploy --prod
+```
+
+```bash
+chmod +x deploy.sh
+bash deploy.sh
+```
+
+**Why:** No secrets ever touch GitHub. Safe for public repos.
+
+---
+
+### Option B — GitHub Actions (auto-deploy on push to main)
+
+Create `.github/workflows/deploy.yml`:
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    if: github.repository_owner == 'YOUR_GITHUB_USERNAME'  # blocks forks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm build
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          AUTH_URL: ${{ secrets.AUTH_URL }}
+
+      - name: Deploy to Vercel
+        run: pnpm dlx vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
+```
+
+Add secrets at: GitHub repo → **Settings → Secrets and variables → Actions**
+
+| Secret | Value |
+|---|---|
+| `VERCEL_TOKEN` | vercel.com → Account Settings → Tokens |
+| `DATABASE_URL` | Production pooler URL |
+| `DIRECT_URL` | Production direct URL |
+| `AUTH_SECRET` | Same as Vercel env var |
+| `AUTH_URL` | `https://your-domain.com` |
+
+---
+
+## Database Migrations
+
+Run once manually for initial production setup (Step 4 above).
+
+For subsequent deploys, add to `package.json` to auto-migrate on every build:
+
+```json
+"scripts": {
+  "postbuild": "prisma migrate deploy"
+}
+```
+
+> `postbuild` uses `DIRECT_URL` (the direct connection) automatically via `directUrl` in `schema.prisma`.
+
 
 ### 1. Vercel + Neon (Recommended — easiest setup)
 
