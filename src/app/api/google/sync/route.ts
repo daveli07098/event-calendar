@@ -15,9 +15,11 @@ export async function GET() {
   try {
     const calendars = await listGoogleCalendars(session.user.id);
     return NextResponse.json(calendars);
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[google/sync GET]", msg);
     return NextResponse.json(
-      { error: "Failed to fetch Google calendars. Please reconnect your Google account." },
+      { error: "Failed to fetch Google calendars. Please reconnect your Google account.", detail: msg },
       { status: 400 }
     );
   }
