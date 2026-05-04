@@ -12,7 +12,8 @@
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "deploy": "pnpm dlx vercel deploy --prod"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
