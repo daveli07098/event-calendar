@@ -41,6 +41,72 @@ interface SettingsClientProps {
   };
 }
 
+function ChangePasswordSection() {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg(null);
+    if (newPassword.length < 8) {
+      setMsg({ type: "err", text: "Password must be at least 8 characters." });
+      return;
+    }
+    if (newPassword !== confirm) {
+      setMsg({ type: "err", text: "Passwords do not match." });
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/user/password", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ type: "ok", text: "Password updated." });
+        setNewPassword("");
+        setConfirm("");
+      } else {
+        setMsg({ type: "err", text: data.error || "Failed to update password." });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <p className="text-sm font-medium">Change Password</p>
+      <Input
+        type="password"
+        placeholder="New password (min 8 chars)"
+        value={newPassword}
+        onChange={(e) => setNewPassword(e.target.value)}
+        autoComplete="new-password"
+      />
+      <Input
+        type="password"
+        placeholder="Confirm new password"
+        value={confirm}
+        onChange={(e) => setConfirm(e.target.value)}
+        autoComplete="new-password"
+      />
+      {msg && (
+        <p className={`text-sm ${msg.type === "ok" ? "text-green-500" : "text-destructive"}`}>
+          {msg.text}
+        </p>
+      )}
+      <Button type="submit" size="sm" disabled={saving} className="self-start">
+        {saving ? "Saving…" : "Update Password"}
+      </Button>
+    </form>
+  );
+}
+
 export function SettingsClient({ user }: SettingsClientProps) {
   const [calendars, setCalendars] = useState<CalendarType[]>([]);
 
@@ -174,6 +240,8 @@ export function SettingsClient({ user }: SettingsClientProps) {
                 Sign Out
               </Button>
             </div>
+            <Separator className="my-4" />
+            <ChangePasswordSection />
           </CardContent>
         </Card>
 
