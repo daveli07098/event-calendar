@@ -519,7 +519,6 @@ export async function POST(req: NextRequest) {
         Accept: "text/html,application/xhtml+xml",
       },
       signal: AbortSignal.timeout(10_000),
-      // @ts-expect-error — Next.js fetch extension
       cache: "no-store",
     });
     if (!fetchRes.ok) {

@@ -73,7 +73,7 @@ export default async function CalendarPage() {
 
   // Serialize
   function serializeMember(m: { id: string; calendarId: string; userId: string; role: string; joinedAt: Date; user: { id: string; name: string | null; email: string | null; image: string | null } }) {
-    return { ...m, joinedAt: m.joinedAt.toISOString() };
+    return { ...m, role: m.role as "editor" | "viewer", joinedAt: m.joinedAt.toISOString() };
   }
 
   function serializeCal(

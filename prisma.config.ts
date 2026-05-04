@@ -9,5 +9,7 @@ export default defineConfig({
   schema: path.join(__dirname, "prisma", "schema.prisma"),
   datasource: {
     url: process.env.DATABASE_URL,
-  },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    directUrl: process.env.DIRECT_URL,
+  } as any,
 });

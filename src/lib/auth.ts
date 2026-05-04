@@ -92,7 +92,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.id = token.id as string;
       }
       if (token.newGoogleUser) {
-        (session as Record<string, unknown>).newGoogleUser = true;
+        (session as unknown as Record<string, unknown>).newGoogleUser = true;
       }
       return session;
     },
