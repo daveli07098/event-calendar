@@ -317,16 +317,19 @@ ${text}`.trim();
 async function callGemini(text: string, url: string, model = "gemini-3-flash-preview"): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const apiKey = process.env.GEMINI_API_KEY!;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
-    }),
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
+    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
   });
 
-  if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 2000)); // wait before retry
+    res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    if (res.ok || res.status !== 503) break; // success or non-retryable error
+  }
+
+  if (!res || !res.ok) throw new Error(`Gemini API error: ${res?.status ?? "unknown"}`);
   const data = await res.json();
   const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
   const usage = data.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | undefined;
@@ -617,8 +620,8 @@ export async function POST(req: NextRequest) {
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes("429") || msg.includes("404")) {
-          const reason = msg.includes("404") ? "not found" : "quota exceeded (429)";
+        if (msg.includes("429") || msg.includes("404") || msg.includes("503")) {
+          const reason = msg.includes("404") ? "not found" : msg.includes("503") ? "unavailable (503)" : "quota exceeded (429)";
           console.warn(`[tickets/scrape] ${reason} for ${name} — trying next provider`);
           aiError = "AI quota exceeded — results from OG-meta only";
           // continue to next provider
