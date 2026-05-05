@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
   CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight,
@@ -316,6 +316,13 @@ export function TicketSection() {
     setEditEndTime("");
     setEditVenue("");
   };
+
+  // Auto-reset 3 s after a successful add so the input is ready for the next scan
+  useEffect(() => {
+    if (status !== "done") return;
+    const t = setTimeout(handleReset, 3000);
+    return () => clearTimeout(t);
+  }, [status]); // handleReset is stable (no deps change identity)
 
   const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
 
