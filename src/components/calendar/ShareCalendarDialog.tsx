@@ -8,7 +8,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Copy, Check, Link2, X } from "lucide-react";
+import { Copy, Check, Link2, X, Loader2 } from "lucide-react";
 import Image from "next/image";
 import type { CalendarType, CalendarMemberType } from "@/types";
 
@@ -109,7 +109,13 @@ export function ShareCalendarDialog({
         {/* Body — scrollable if content grows */}
         <div className="px-6 pb-6 flex flex-col gap-4 max-h-[70vh] overflow-y-auto">
           {/* Mode selector */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="relative grid grid-cols-2 gap-3">
+            {/* Loading overlay */}
+            {saving && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/70 backdrop-blur-[2px]">
+                <Loader2 className="size-5 animate-spin text-primary" />
+              </div>
+            )}
             <button
               onClick={() => enableSharing("collaborative")}
               disabled={saving || currentMode === "collaborative"}
