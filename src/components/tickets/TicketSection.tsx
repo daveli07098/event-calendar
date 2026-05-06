@@ -132,6 +132,10 @@ export function TicketSection() {
   const [editEndDate, setEditEndDate] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
   const [editVenue, setEditVenue] = useState("");
+  // Calendar picker — only shown when 2+ event-reminders or sale-ticket options exist
+  const [calendarOptions, setCalendarOptions] = useState<{ eventReminders: import('@/app/api/tickets/calendars/route').TicketCalendarOption[]; saleTicket: import('@/app/api/tickets/calendars/route').TicketCalendarOption[] } | null>(null);
+  const [selectedEventCalId, setSelectedEventCalId] = useState<string | null>(null);
+  const [selectedSaleCalId, setSelectedSaleCalId] = useState<string | null>(null);
 
   const handleScrape = async () => {
     const trimmed = url.trim();
@@ -171,6 +175,19 @@ export function TicketSection() {
       setEditEndDate(data.endDate ?? "");
       setEditEndTime(data.endTime ?? "");
       setEditVenue(data.venue ?? "");
+
+      // Fetch available calendars to offer picker if multiple options exist
+      fetch("/api/tickets/calendars")
+        .then((r) => r.json())
+        .then((opts) => {
+          setCalendarOptions(opts);
+          // Default selections to the user's own calendar (first own option)
+          const ownEvent = opts.eventReminders?.find((c: import('@/app/api/tickets/calendars/route').TicketCalendarOption) => c.isOwn);
+          const ownSale = opts.saleTicket?.find((c: import('@/app/api/tickets/calendars/route').TicketCalendarOption) => c.isOwn);
+          setSelectedEventCalId(ownEvent?.id ?? null);
+          setSelectedSaleCalId(ownSale?.id ?? null);
+        })
+        .catch(() => null); // best-effort — fall back to default behaviour
 
       // Auto-check for existing events with this URL
       setStatus("checking");
@@ -247,7 +264,11 @@ export function TicketSection() {
       const res = await fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticket: ticketToAdd }),
+        body: JSON.stringify({
+          ticket: ticketToAdd,
+          ...(selectedEventCalId ? { targetCalendarId: selectedEventCalId } : {}),
+          ...(selectedSaleCalId ? { targetSaleCalendarId: selectedSaleCalId } : {}),
+        }),
       });
 
       const data = await res.json();
@@ -315,6 +336,9 @@ export function TicketSection() {
     setEditEndDate("");
     setEditEndTime("");
     setEditVenue("");
+    setCalendarOptions(null);
+    setSelectedEventCalId(null);
+    setSelectedSaleCalId(null);
   };
 
   // Auto-reset 3 s after a successful add so the input is ready for the next scan
@@ -744,6 +768,62 @@ export function TicketSection() {
                     Fan Presale 會員優先購票
                   </p>
                   <p className="text-sm">{ticket.saleFirstDate}</p>
+                </div>
+              )}
+
+              {/* Calendar picker — only shown when 2+ options exist */}
+              {status === "scraped" && calendarOptions && calendarOptions.eventReminders.length >= 2 && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Save event to</p>
+                  <div className="flex flex-col gap-1.5">
+                    {calendarOptions.eventReminders.map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setSelectedEventCalId(opt.id)}
+                        className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-left transition-colors ${
+                          selectedEventCalId === opt.id
+                            ? "border-primary bg-primary/10 ring-1 ring-primary"
+                            : "border-border hover:border-primary/50"
+                        }`}
+                      >
+                        <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: opt.color }} />
+                        <span className="flex-1 truncate">
+                          {opt.name}{opt.isOwn ? " (yourself)" : opt.ownerName ? ` — ${opt.ownerName}` : ""}
+                        </span>
+                        {!opt.isOwn && (
+                          <span className="text-[10px] text-muted-foreground border border-border rounded px-1">collaborative</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Sale calendar picker */}
+              {status === "scraped" && calendarOptions && calendarOptions.saleTicket.length >= 2 && (ticket.saleDate || ticket.saleFirstDate) && (
+                <div className="space-y-2 pt-1">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Save sale reminders to</p>
+                  <div className="flex flex-col gap-1.5">
+                    {calendarOptions.saleTicket.map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => setSelectedSaleCalId(opt.id)}
+                        className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm text-left transition-colors ${
+                          selectedSaleCalId === opt.id
+                            ? "border-primary bg-primary/10 ring-1 ring-primary"
+                            : "border-border hover:border-primary/50"
+                        }`}
+                      >
+                        <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: opt.color }} />
+                        <span className="flex-1 truncate">
+                          {opt.name}{opt.isOwn ? " (yourself)" : opt.ownerName ? ` — ${opt.ownerName}` : ""}
+                        </span>
+                        {!opt.isOwn && (
+                          <span className="text-[10px] text-muted-foreground border border-border rounded px-1">collaborative</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 

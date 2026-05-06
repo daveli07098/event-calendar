@@ -125,31 +125,49 @@ export function CalendarSidebar({
           </Button>
         </div>
         <div className="flex flex-col gap-1 mb-3">
-          {calendars.filter((c) => !c.memberRole).map((cal) => (
-            <div
-              key={cal.id}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent group"
-            >
+          {(() => {
+            const TICKET_NAMES = ["event-reminders", "sale-ticket"];
+            const myCalendars = calendars.filter((c) => !c.memberRole);
+            // Names that also appear as shared-with-me → show "(yourself)" to distinguish
+            const sharedNames = new Set(
+              calendars.filter((c) => c.memberRole).map((c) => c.name)
+            );
+            // Sort: visible ticket calendars first (normal), then hidden ticket calendars last
+            const sorted = [
+              ...myCalendars.filter((c) => !TICKET_NAMES.includes(c.name) || c.isVisible),
+              ...myCalendars.filter((c) => TICKET_NAMES.includes(c.name) && !c.isVisible),
+            ];
+            return sorted.map((cal) => (
               <div
-                className="size-3 rounded-sm shrink-0"
-                style={{ backgroundColor: cal.color }}
-              />
-              <span className="text-sm flex-1 truncate">{cal.name}</span>
-              {cal.googleCalendarId && (
-                <span className="text-[10px] text-muted-foreground">G</span>
-              )}
-              {cal.shareMode && (
-                cal.shareMode === "broadcast"
-                  ? <Megaphone className="size-3 text-muted-foreground shrink-0" />
-                  : <Users className="size-3 text-muted-foreground shrink-0" />
-              )}
-              <Switch
-                checked={cal.isVisible}
-                onCheckedChange={(checked) => onCalendarToggle(cal.id, checked)}
-                className="scale-75"
-              />
-            </div>
-          ))}
+                key={cal.id}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent group"
+              >
+                <div
+                  className="size-3 rounded-sm shrink-0"
+                  style={{ backgroundColor: cal.color }}
+                />
+                <span className="text-sm flex-1 truncate">
+                  {cal.name}
+                  {sharedNames.has(cal.name) && TICKET_NAMES.includes(cal.name) && (
+                    <span className="ml-1 text-[10px] text-muted-foreground">(yourself)</span>
+                  )}
+                </span>
+                {cal.googleCalendarId && (
+                  <span className="text-[10px] text-muted-foreground">G</span>
+                )}
+                {cal.shareMode && (
+                  cal.shareMode === "broadcast"
+                    ? <Megaphone className="size-3 text-muted-foreground shrink-0" />
+                    : <Users className="size-3 text-muted-foreground shrink-0" />
+                )}
+                <Switch
+                  checked={cal.isVisible}
+                  onCheckedChange={(checked) => onCalendarToggle(cal.id, checked)}
+                  className="scale-75"
+                />
+              </div>
+            ));
+          })()}
         </div>
 
         {/* Shared with me */}

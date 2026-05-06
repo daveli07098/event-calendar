@@ -79,36 +79,74 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { ticket?: TicketData };
+  let body: { ticket?: TicketData; targetCalendarId?: string; targetSaleCalendarId?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { ticket } = body;
+  const { ticket, targetCalendarId, targetSaleCalendarId } = body;
   if (!ticket || typeof ticket.title !== "string") {
     return NextResponse.json({ error: "ticket data is required" }, { status: 400 });
   }
 
   const uid = session.user.id;
 
-  // Find or create the "ticket-reminders" calendar
-  let calendar = await prisma.calendar.findFirst({
-    where: { userId: uid, name: TICKET_CALENDAR_NAME },
-  });
+  // ── Resolve target calendar ─────────────────────────────────────────
+  // Returns { calendar, isCollaborative }.
+  // If collaborative, the caller must also write a shadow copy to the user's own calendar.
+  async function resolveCalendar(
+    targetId: string | undefined,
+    calName: string,
+    calColor: string,
+  ) {
+    if (targetId) {
+      const cal = await prisma.calendar.findUnique({ where: { id: targetId } });
+      if (!cal) return null;
 
-  if (!calendar) {
-    calendar = await prisma.calendar.create({
-      data: {
-        userId: uid,
-        name: TICKET_CALENDAR_NAME,
-        color: TICKET_CALENDAR_COLOR,
-        isDefault: false,
-        isVisible: true,
-      },
-    });
+      if (cal.userId === uid) {
+        // Targeting own calendar — ensure it's visible
+        if (!cal.isVisible) {
+          await prisma.calendar.update({ where: { id: cal.id }, data: { isVisible: true } });
+        }
+        return { calendar: { ...cal, isVisible: true }, isCollaborative: false };
+      }
+
+      // Collaborative calendar — verify membership
+      const membership = await prisma.calendarMember.findUnique({
+        where: { calendarId_userId: { calendarId: targetId, userId: uid } },
+      });
+      if (!membership || cal.shareMode !== "collaborative") return null;
+      return { calendar: cal, isCollaborative: true };
+    }
+
+    // No explicit target — find or create own calendar
+    let calendar = await prisma.calendar.findFirst({ where: { userId: uid, name: calName } });
+    if (!calendar) {
+      calendar = await prisma.calendar.create({
+        data: { userId: uid, name: calName, color: calColor, isDefault: false, isVisible: true },
+      });
+    }
+    return { calendar, isCollaborative: false };
   }
+
+  // Shared helper: create a shadow copy in the user's own calendar (hidden by default)
+  async function ensureShadowCalendar(calName: string, calColor: string) {
+    let own = await prisma.calendar.findFirst({ where: { userId: uid, name: calName } });
+    if (!own) {
+      own = await prisma.calendar.create({
+        data: { userId: uid, name: calName, color: calColor, isDefault: false, isVisible: false },
+      });
+    }
+    return own;
+  }
+
+  const resolved = await resolveCalendar(targetCalendarId, TICKET_CALENDAR_NAME, TICKET_CALENDAR_COLOR);
+  if (!resolved) {
+    return NextResponse.json({ error: "Target calendar not found or access denied" }, { status: 404 });
+  }
+  const { calendar, isCollaborative } = resolved;
 
   // Build event times
   const { start, end } = parseEventTime(ticket.date, ticket.time, ticket.endDate, ticket.endTime);
@@ -126,36 +164,36 @@ export async function POST(req: NextRequest) {
   const description = descParts.join("\n\n");
 
   // Create the event
+  const eventData = {
+    title: ticket.title,
+    description,
+    startTime: start,
+    endTime: end,
+    location: [ticket.venue, ticket.location].filter(Boolean).join(", ") || null,
+  };
+
   const event = await prisma.event.create({
-    data: {
-      calendarId: calendar.id,
-      title: ticket.title,
-      description,
-      startTime: start,
-      endTime: end,
-      location: [ticket.venue, ticket.location].filter(Boolean).join(", ") || null,
-    },
+    data: { calendarId: calendar.id, ...eventData },
   });
+
+  // If target is collaborative, create a hidden shadow copy in user's own calendar
+  if (isCollaborative) {
+    const shadowCal = await ensureShadowCalendar(TICKET_CALENDAR_NAME, TICKET_CALENDAR_COLOR);
+    await prisma.event.create({ data: { calendarId: shadowCal.id, ...eventData } });
+  }
 
   // If there's a public sale date, create a reminder in the "sale-ticket" calendar
   let saleEvent: { id: string } | null = null;
   let presaleEvent: { id: string } | null = null;
 
   if (ticket.saleDate || ticket.saleFirstDate) {
-    let saleCalendar = await prisma.calendar.findFirst({
-      where: { userId: uid, name: SALE_CALENDAR_NAME },
-    });
-    if (!saleCalendar) {
-      saleCalendar = await prisma.calendar.create({
-        data: {
-          userId: uid,
-          name: SALE_CALENDAR_NAME,
-          color: SALE_CALENDAR_COLOR,
-          isDefault: false,
-          isVisible: true,
-        },
-      });
-    }
+    const saleResolved = await resolveCalendar(targetSaleCalendarId, SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
+    const saleCalendar = saleResolved?.calendar ?? await (async () => {
+      let c = await prisma.calendar.findFirst({ where: { userId: uid, name: SALE_CALENDAR_NAME } });
+      if (!c) c = await prisma.calendar.create({ data: { userId: uid, name: SALE_CALENDAR_NAME, color: SALE_CALENDAR_COLOR, isDefault: false, isVisible: true } });
+      return c;
+    })();
+    const saleIsCollaborative = saleResolved?.isCollaborative ?? false;
 
     if (ticket.saleDate) {
       const { start: saleStart, end: saleEnd } = parseEventTime(ticket.saleDate, null);
@@ -167,16 +205,20 @@ export async function POST(req: NextRequest) {
         `Ticket URL: ${ticket.sourceUrl}`,
       ].filter(Boolean).join("\n\n");
 
-      saleEvent = await prisma.event.create({
-        data: {
-          calendarId: saleCalendar.id,
-          title: `🎫 Sale Opens: ${ticket.title}`,
-          description: saleDesc,
-          startTime: saleStart,
-          endTime: saleEnd,
-          location: null,
-        },
-      });
+      const saleEventData = {
+        title: `🎫 Sale Opens: ${ticket.title}`,
+        description: saleDesc,
+        startTime: saleStart,
+        endTime: saleEnd,
+        location: null,
+      };
+
+      saleEvent = await prisma.event.create({ data: { calendarId: saleCalendar.id, ...saleEventData } });
+
+      if (saleIsCollaborative) {
+        const shadowSaleCal = await ensureShadowCalendar(SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
+        await prisma.event.create({ data: { calendarId: shadowSaleCal.id, ...saleEventData } });
+      }
     }
 
     if (ticket.saleFirstDate) {
@@ -188,16 +230,20 @@ export async function POST(req: NextRequest) {
         `Ticket URL: ${ticket.sourceUrl}`,
       ].filter(Boolean).join("\n\n");
 
-      presaleEvent = await prisma.event.create({
-        data: {
-          calendarId: saleCalendar.id,
-          title: `🎫 Fan Presale: ${ticket.title}`,
-          description: presaleDesc,
-          startTime: presaleStart,
-          endTime: presaleEnd,
-          location: null,
-        },
-      });
+      const presaleEventData = {
+        title: `🎫 Fan Presale: ${ticket.title}`,
+        description: presaleDesc,
+        startTime: presaleStart,
+        endTime: presaleEnd,
+        location: null,
+      };
+
+      presaleEvent = await prisma.event.create({ data: { calendarId: saleCalendar.id, ...presaleEventData } });
+
+      if (saleIsCollaborative) {
+        const shadowSaleCal = await ensureShadowCalendar(SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
+        await prisma.event.create({ data: { calendarId: shadowSaleCal.id, ...presaleEventData } });
+      }
     }
   }
 
