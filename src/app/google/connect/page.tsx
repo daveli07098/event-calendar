@@ -27,6 +27,17 @@ export default function GoogleConnectPage() {
   const [syncError, setSyncError] = useState("");
   const [results, setResults] = useState<{ name: string; importedEvents: number }[]>([]);
 
+  // On first mount: if user already has synced Google calendars, skip the prompt
+  useEffect(() => {
+    fetch("/api/calendars")
+      .then((r) => r.json())
+      .then((data: { googleCalendarId?: string | null }[]) => {
+        const alreadySynced = Array.isArray(data) && data.some((c) => !!c.googleCalendarId);
+        if (alreadySynced) router.replace("/");
+      })
+      .catch(() => { /* non-fatal — show prompt as fallback */ });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch the user's Google calendars when entering picker step
   useEffect(() => {
     if (step !== "picker") return;
