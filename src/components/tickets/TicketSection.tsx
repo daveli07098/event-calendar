@@ -65,6 +65,13 @@ function addHours(hhmm: string, hours: number): string {
   return `${String(total).padStart(2, "0")}:${String(m ?? 0).padStart(2, "0")}`;
 }
 
+/** Format a date range. If endDate == date or endDate is absent, show just date. */
+function dateRange(date: string | null, endDate: string | null): string {
+  if (!date) return "";
+  if (!endDate || endDate === date) return date;
+  return `${date} – ${endDate}`;
+}
+
 // ---------------------------------------------------------------------------
 // Diff table sub-component
 // ---------------------------------------------------------------------------
@@ -199,8 +206,7 @@ export function TicketSection() {
       setEditDate(data.date ?? "");
       setEditTime(data.time ?? "");
       setEditEndDate(data.endDate ?? "");
-      setEditEndTime(data.endTime ?? "");
-      setEditVenue(data.venue ?? "");
+      setEditEndTime(data.endTime ?? "");      setEditVenue(data.venue ?? "");
 
       // Fetch available calendars to offer picker if multiple options exist
       fetch("/api/tickets/calendars")
@@ -543,7 +549,7 @@ export function TicketSection() {
                   {diffResult.storedDate && (
                     <div>
                       <p className="text-xs text-muted-foreground">Date 日期</p>
-                      <p className="font-medium">{diffResult.storedDate}</p>
+                      <p className="font-medium">{dateRange(diffResult.storedDate, ticket.endDate)}</p>
                     </div>
                   )}
                   {diffResult.storedTime && (
@@ -600,7 +606,7 @@ export function TicketSection() {
                 {ticket.date && (
                   <div>
                     <p className="text-xs text-muted-foreground">Date</p>
-                    <p className="font-medium">{ticket.date}</p>
+                    <p className="font-medium">{dateRange(ticket.date, ticket.endDate)}</p>
                   </div>
                 )}
                 {ticket.time && (

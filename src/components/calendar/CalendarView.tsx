@@ -39,6 +39,7 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
     allDay: boolean;
   } | null>(null);
   const [dayPanelDate, setDayPanelDate] = useState<string | null>(null);
+  const [copyData, setCopyData] = useState<EventFormData | null>(null);
   // Abort controller ref — cancels stale event fetches when the user navigates quickly
   const fetchAbortRef = useRef<AbortController | null>(null);
 
@@ -209,6 +210,23 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
     setModalOpen(false);
   };
 
+  const handleCopyEvent = async (data: EventFormData) => {
+    // Immediately create a duplicate — no need to open the form again
+    const res = await fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      setEvents((prev) => [...prev, created]);
+      setNewEventId(created.id);
+      setTimeout(() => setNewEventId(null), 2000);
+    }
+    setModalOpen(false);
+    setCopyData(null);
+  };
+
   const handleDeleteEvent = async () => {
     if (!selectedEvent) return;
     const res = await fetch(`/api/events/${selectedEvent.id}`, {
@@ -362,13 +380,18 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
 
       <EventModal
         open={modalOpen}
-        onOpenChange={setModalOpen}
+        onOpenChange={(open) => {
+          setModalOpen(open);
+          if (!open) setCopyData(null);
+        }}
         event={selectedEvent}
         calendars={calendars}
         defaultCalendarId={defaultCalendar?.id || ""}
         initialRange={selectedRange}
+        initialData={copyData ?? undefined}
         onSave={handleSaveEvent}
         onDelete={handleDeleteEvent}
+        onCopy={handleCopyEvent}
         readOnly={selectedEventReadOnly}
       />
     </>

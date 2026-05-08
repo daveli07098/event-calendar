@@ -116,6 +116,8 @@ interface MetaFallback {
   imageUrl: string | null;
   date: string | null;
   time: string | null;
+  endDate: string | null;         // last night of multi-night concert
+  endTime: string | null;         // time of last night
   venue: string | null;
   location: string | null;
   saleDate: string | null;        // earliest public/general on-sale from JSON-LD
@@ -179,10 +181,14 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 
   // Schema.org Event JSON-LD
   let schemaDate: string | null = null;
+  let schemaEndDate: string | null = null;
+  let schemaEndTime: string | null = null;
   let schemaTime: string | null = null;
   let schemaVenue: string | null = null;
   let schemaLocation: string | null = null;
   let sourceTz: string | null = null;
+  // Strategy A sale-window events (non-location Event blocks from JSON-LD)
+  const stratASaleWindows: Array<{ date: string; time: string | null; label: string }> = [];
 
   const jsonldMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) ?? [];
 
@@ -217,17 +223,37 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   }
 
   if (allJsonLdEvents.length > 0) {
-    // Sort descending — the concert event is furthest in the future
-    allJsonLdEvents.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
-    const mainEvt = allJsonLdEvents[0];
-    const parts = mainEvt.startDate.split("T");
-    schemaDate = parts[0] ?? null;
-    schemaTime = parts[1] ? parts[1].slice(0, 5) : null;
-    // Extract timezone offset from the ISO string before slicing (e.g. "+08:00" from "20:00:00+08:00")
-    if (parts[1]) sourceTz = extractTzFromIso(mainEvt.startDate);
+    // Split by location presence:
+    // Events WITH location = concert nights (have a venue)
+    // Events WITHOUT location = sale windows (no venue)
+    const concertEvents = allJsonLdEvents.filter((e) => e.raw.location);
+    const saleWindowEvents = allJsonLdEvents.filter((e) => !e.raw.location);
 
-    if (mainEvt.raw.location) {
-      const loc = mainEvt.raw.location as Record<string, unknown>;
+    // If no events have location, fall back to the old heuristic (latest date = concert)
+    const useEvents = concertEvents.length > 0 ? concertEvents : allJsonLdEvents;
+    const saleOnlyEvents = concertEvents.length > 0 ? saleWindowEvents : [];
+
+    // Sort concert events chronologically — first night is the canonical start date
+    useEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+    const firstNight = useEvents[0]!;
+    const lastNight = useEvents[useEvents.length - 1]!;
+
+    const firstParts = firstNight.startDate.split("T");
+    schemaDate = firstParts[0] ?? null;
+    schemaTime = firstParts[1] ? firstParts[1].slice(0, 5) : null;
+    if (firstParts[1]) sourceTz = extractTzFromIso(firstNight.startDate);
+
+    // Multi-night: record endDate as the last night (different from first)
+    if (useEvents.length > 1 && lastNight.startDate.slice(0, 10) !== firstNight.startDate.slice(0, 10)) {
+      const lastParts = lastNight.startDate.split("T");
+      schemaEndDate = lastParts[0] ?? null;
+      schemaEndTime = lastParts[1] ? lastParts[1].slice(0, 5) : null;
+    }
+
+    // Extract venue from first concert night with location
+    const locationEvent = useEvents.find((e) => e.raw.location) ?? firstNight;
+    if (locationEvent.raw.location) {
+      const loc = locationEvent.raw.location as Record<string, unknown>;
       schemaVenue = String(loc.name ?? "");
       const addr = loc.address as Record<string, unknown> | string | undefined;
       if (addr && typeof addr === "object") {
@@ -236,6 +262,20 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
           .join(", ");
       } else if (typeof addr === "string") {
         schemaLocation = addr;
+      }
+    }
+
+    // For Strategy A (separate Event blocks per sale window): use saleOnlyEvents
+    // Only apply when we actually found concert events with location
+    if (concertEvents.length > 0 && saleOnlyEvents.length > 0) {
+      // These non-location events are sale windows
+      const saleOnly = [...saleOnlyEvents].sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+      for (let i = 0; i < saleOnly.length; i++) {
+        const ev = saleOnly[i]!;
+        const dStr = ev.startDate.slice(0, 10);
+        const tStr = ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null;
+        const label = i === saleOnly.length - 1 ? "Public Sale" : "Priority Sale";
+        if (!stratASaleWindows.some((w) => w.date === dStr)) stratASaleWindows.push({ date: dStr, time: tStr, label });
       }
     }
   }
@@ -301,17 +341,13 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     schemaSaleDates = offerWindows.map(w => ({ date: w.dateStr, time: w.timeStr, label: w.label }));
     schemaSaleFirstDate = offerWindows[0]!.dateStr;
     schemaSaleDate = offerWindows[offerWindows.length - 1]!.dateStr;
-  } else if (allJsonLdEvents.length > 1) {
-    // Strategy A: separate Event blocks per sale window (no offers array)
-    const saleEvents = allJsonLdEvents.slice(1); // concert is index 0 (latest date)
-    saleEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime()); // chrono asc
-    schemaSaleDates = saleEvents.map((ev, i) => ({
-      date: ev.startDate.slice(0, 10),
-      time: ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null,
-      label: i === saleEvents.length - 1 ? "Public Sale" : "Priority Sale",
-    }));
-    schemaSaleFirstDate = schemaSaleDates[0]!.date;
-    schemaSaleDate = schemaSaleDates[schemaSaleDates.length - 1]!.date;
+  } else {
+    // Strategy A: use the non-location Event blocks identified during the concert/sale split
+    if (stratASaleWindows.length > 0) {
+      schemaSaleDates = stratASaleWindows;
+      schemaSaleFirstDate = stratASaleWindows[0]!.date;
+      schemaSaleDate = stratASaleWindows[stratASaleWindows.length - 1]!.date;
+    }
   }
 
   // Strategy C: Chinese text fallback — scan page text for sale date patterns
@@ -352,6 +388,8 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     imageUrl: ogImage,
     date: schemaDate ?? (eventDate ? eventDate.split("T")[0] : null),
     time: schemaTime ?? (eventDate && eventDate.includes("T") ? eventDate.split("T")[1].slice(0, 5) : null),
+    endDate: schemaEndDate,
+    endTime: schemaEndTime,
     venue: schemaVenue || null,
     location: schemaLocation || null,
     saleDate: schemaSaleDate,
@@ -708,8 +746,8 @@ export async function POST(req: NextRequest) {
     aiUsed,
     ticketPrices: (aiResult as Partial<TicketData>).ticketPrices ?? null,
     ticketPlatforms: (aiResult as Partial<TicketData>).ticketPlatforms ?? null,
-    endDate: (aiResult as Partial<TicketData>).endDate ?? null,
-    endTime: (aiResult as Partial<TicketData>).endTime ?? null,
+    endDate: (aiResult as Partial<TicketData>).endDate ?? meta.endDate ?? null,
+    endTime: (aiResult as Partial<TicketData>).endTime ?? meta.endTime ?? null,
     saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
     saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
     saleDates: (aiResult as Partial<TicketData>).saleDates?.length
