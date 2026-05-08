@@ -730,8 +730,10 @@ export async function POST(req: NextRequest) {
     }
 
     for (const provider of providers) {
+      let currentProviderName = "unknown";
       try {
         const { result, name } = await provider();
+        currentProviderName = name;
         aiResult = result;
         aiUsed = name;
         aiError = null;
@@ -743,11 +745,11 @@ export async function POST(req: NextRequest) {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("429") || msg.includes("404") || msg.includes("503")) {
           const reason = msg.includes("404") ? "not found" : msg.includes("503") ? "unavailable (503)" : "quota exceeded (429)";
-          console.warn(`[tickets/scrape] ${reason} for ${name} — trying next provider`);
+          console.warn(`[tickets/scrape] ${reason} for ${currentProviderName} — trying next provider`);
           aiError = "AI quota exceeded — results from OG-meta only";
           // continue to next provider
         } else {
-          console.error(`[tickets/scrape] AI provider failed:`, e);
+          console.error(`[tickets/scrape] AI provider failed (${currentProviderName}):`, e);
           aiError = msg;
           break; // non-quota error — stop chain
         }

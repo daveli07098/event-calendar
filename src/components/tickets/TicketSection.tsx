@@ -695,11 +695,21 @@ export function TicketSection() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <CardTitle className="text-sm font-medium text-muted-foreground">Review &amp; adjust before adding</CardTitle>
-                  <CardDescription className="text-xs mt-0.5">
-                    Extracted by <span className="font-medium">{ticket.aiUsed}</span>
+                  <CardDescription className="text-xs mt-0.5 flex items-center flex-wrap gap-1.5">
+                    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${
+                      ticket.aiError
+                        ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                        : ticket.aiUsed.startsWith("og-meta")
+                        ? "bg-muted text-muted-foreground"
+                        : "bg-primary/10 text-primary"
+                    }`}>
+                      {ticket.aiError ? "⚠" : ticket.aiUsed.startsWith("og-meta") ? "📄" : "✦"}&nbsp;{ticket.aiUsed}
+                    </span>
                     {ticket.aiError ? (
-                      <span className="ml-1 text-amber-500" title={ticket.aiError}>⚠ AI failed</span>
-                    ) : " · edit any field if wrong"}
+                      <span className="text-amber-500" title={ticket.aiError}>AI error — using OG-meta fallback</span>
+                    ) : (
+                      <span className="text-muted-foreground">edit any field if wrong</span>
+                    )}
                   </CardDescription>
                 </div>
                 <a href={ticket.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">

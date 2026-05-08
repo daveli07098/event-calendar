@@ -7,13 +7,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-05-09] — Session: Related Events + Quota Persistence + Scraper Fixes
 ### Fixed
-- fix(diff): missing `/**` comment opener caused ECMAScript parse error in diff/route.ts ([707201e])
-- fix(tickets): AI quota now DB-persisted (`aiQuotaDate`/`aiQuotaCount` on User); survives dev hot-reloads and server restarts ([707201e])
-- fix(scrape): JSON-LD location as plain string now used directly as venue (fixes empty venue on timable multi-night events like IVE) ([707201e])
+- fix(scrape): `ReferenceError: name is not defined` in AI provider catch block — `name` was destructured inside `try` and not accessible in `catch`; fixed with `let currentProviderName` declared before try ([ab9fc90])
+- fix(diff): missing `/**` comment opener caused ECMAScript parse error in diff/route.ts ([d75c0a1])
+- fix(tickets): AI quota now DB-persisted (`aiQuotaDate`/`aiQuotaCount` on User); survives dev hot-reloads and server restarts ([d75c0a1])
+- fix(scrape): JSON-LD location as plain string now used directly as venue (fixes empty venue on timable multi-night events like IVE) ([d75c0a1])
 ### Added
-- feat(tickets): `GET /api/events/related` endpoint — finds events sharing the same Ticket URL across calendars ([707201e])
-- feat(events): EventModal shows "Related Events 相關活動" panel above description when a concert event ↔ ticket-sale event share a Ticket URL ([707201e])
-- feat(events): clicking a related event chip in EventModal switches the modal to that event ([707201e])
+- feat(tickets): `GET /api/events/related` endpoint — finds events sharing the same Ticket URL across calendars ([d75c0a1])
+- feat(events): EventModal shows "Related Events 相關活動" panel above description when concert ↔ ticket-sale events share a Ticket URL ([d75c0a1])
+- feat(events): clicking a related event chip in EventModal switches the modal to that event ([d75c0a1])
+### Changed
+- feat(tickets): "Extracted by" replaced with a styled badge (blue=AI, grey=og-meta, amber=error) showing exact model name ([ab9fc90])
 
 ## [2026-05-02] — Session: Quota + Venue + Diff context
 ### Fixed
