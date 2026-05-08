@@ -7,7 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-05-09] — Session: Related Events + Quota Persistence + Scraper Fixes
 ### Fixed
-- fix(scrape): `ReferenceError: name is not defined` in AI provider catch block — `name` was destructured inside `try` and not accessible in `catch`; fixed with `let currentProviderName` declared before try ([ab9fc90])
+- fix(quota): `remaining` was read before `incrementAiLimit` — badge always showed pre-scan count; now reads after increment ([d02893e])
+- fix(quota): fallback to in-memory if DB columns not yet migrated (prevents 500 crash) ([fc3c9d3])
+- fix(scrape): `ReferenceError: name is not defined` in AI provider catch block ([2e3b1e3])
 - fix(diff): missing `/**` comment opener caused ECMAScript parse error in diff/route.ts ([d75c0a1])
 - fix(tickets): AI quota now DB-persisted (`aiQuotaDate`/`aiQuotaCount` on User); survives dev hot-reloads and server restarts ([d75c0a1])
 - fix(scrape): JSON-LD location as plain string now used directly as venue (fixes empty venue on timable multi-night events like IVE) ([d75c0a1])

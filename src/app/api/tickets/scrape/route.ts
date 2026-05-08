@@ -702,7 +702,7 @@ export async function POST(req: NextRequest) {
   // Falls back to OG-meta if the user has hit their limit or no AI key exists.
   const hasAiProvider = !forceOgMeta && !!(geminiKey || githubToken || groqKey);
   const withinLimit = hasAiProvider ? await checkRemainingAiLimit(uid) : false;
-  const remaining = await remainingAiCalls(uid);
+  // NOTE: remaining is read AFTER the AI call (below) so it reflects the post-increment value
 
   let aiError: string | null = null;
   let aiTokensUsed: number | null = null;
@@ -817,6 +817,9 @@ export async function POST(req: NextRequest) {
       { status: 422 }
     );
   }
+
+  // Read remaining AFTER potential increment so badge reflects actual post-scan value
+  const remaining = await remainingAiCalls(uid);
 
   return NextResponse.json({
     ...ticket,
