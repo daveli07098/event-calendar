@@ -11,46 +11,73 @@ function getDayKey() {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
+// In-memory fallback for quota (used when DB columns not yet migrated)
+const rateLimitMap = new Map<string, { count: number; dayKey: string }>();
+
 /** Returns true if the user still has quota remaining (does NOT increment). */
 async function checkRemainingAiLimit(userId: string): Promise<boolean> {
   const today = getDayKey();
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { aiQuotaDate: true, aiQuotaCount: true },
-  });
-  if (!user || user.aiQuotaDate !== today) return true;
-  return user.aiQuotaCount < AI_DAILY_LIMIT;
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { aiQuotaDate: true, aiQuotaCount: true },
+    });
+    if (!user || user.aiQuotaDate !== today) return true;
+    return user.aiQuotaCount < AI_DAILY_LIMIT;
+  } catch {
+    // DB column not yet migrated — fall back to in-memory
+    const bucket = rateLimitMap.get(userId);
+    if (!bucket || bucket.dayKey !== today) return true;
+    return bucket.count < AI_DAILY_LIMIT;
+  }
 }
 
 /** Increments the counter. Call only after a successful AI response. */
 async function incrementAiLimit(userId: string): Promise<void> {
   const today = getDayKey();
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { aiQuotaDate: true },
-  });
-  if (!user || user.aiQuotaDate !== today) {
-    await prisma.user.update({
+  try {
+    const user = await prisma.user.findUnique({
       where: { id: userId },
-      data: { aiQuotaDate: today, aiQuotaCount: 1 },
+      select: { aiQuotaDate: true },
     });
-  } else {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { aiQuotaCount: { increment: 1 } },
-    });
+    if (!user || user.aiQuotaDate !== today) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { aiQuotaDate: today, aiQuotaCount: 1 },
+      });
+    } else {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { aiQuotaCount: { increment: 1 } },
+      });
+    }
+  } catch {
+    // DB column not yet migrated — fall back to in-memory
+    const bucket = rateLimitMap.get(userId);
+    if (!bucket || bucket.dayKey !== today) {
+      rateLimitMap.set(userId, { count: 1, dayKey: today });
+    } else {
+      bucket.count += 1;
+    }
   }
 }
 
 /** How many AI calls remain today for this user. */
 async function remainingAiCalls(userId: string): Promise<number> {
   const today = getDayKey();
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { aiQuotaDate: true, aiQuotaCount: true },
-  });
-  if (!user || user.aiQuotaDate !== today) return AI_DAILY_LIMIT;
-  return Math.max(0, AI_DAILY_LIMIT - (user.aiQuotaCount ?? 0));
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { aiQuotaDate: true, aiQuotaCount: true },
+    });
+    if (!user || user.aiQuotaDate !== today) return AI_DAILY_LIMIT;
+    return Math.max(0, AI_DAILY_LIMIT - (user.aiQuotaCount ?? 0));
+  } catch {
+    // DB column not yet migrated — fall back to in-memory
+    const bucket = rateLimitMap.get(userId);
+    if (!bucket || bucket.dayKey !== today) return AI_DAILY_LIMIT;
+    return Math.max(0, AI_DAILY_LIMIT - bucket.count);
+  }
 }
 
 // ---------------------------------------------------------------------------
