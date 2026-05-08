@@ -42,6 +42,8 @@ export interface DiffResult {
   storedDate: string | null;
   storedTime: string | null;
   storedVenue: string | null;
+  /** All stored sale window events for this ticket, for display in diff context panel */
+  storedSaleWindows: Array<{ label: string; date: string; time: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +144,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json<DiffResult>({
       hasExisting: false, hasChanges: false, eventId: null,
       saleEventIds: {}, saleEventId: null, presaleEventId: null,
-      changes: [], storedDate: null, storedTime: null, storedVenue: null,
+      changes: [], storedDate: null, storedTime: null, storedVenue: null, storedSaleWindows: [],
     });
   }
 
@@ -159,7 +161,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json<DiffResult>({
       hasExisting: false, hasChanges: false, eventId: null,
       saleEventIds: {}, saleEventId: null, presaleEventId: null,
-      changes: [], storedDate: null, storedTime: null, storedVenue: null,
+      changes: [], storedDate: null, storedTime: null, storedVenue: null, storedSaleWindows: [],
     });
   }
 
@@ -256,6 +258,14 @@ export async function POST(req: NextRequest) {
     changes.push({ field: "venue", label: "Venue 場地", oldValue: stored.venue, newValue: ticket.venue });
   }
 
+  const storedSaleWindows = allSaleEvents
+    .map((se) => {
+      const label = extractLabelFromTitle(se.title) ?? se.title;
+      const local = utcToLocal(se.startTime, tzOffsetMinutes);
+      return { label, date: local.date, time: local.time };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   return NextResponse.json<DiffResult>({
     hasExisting: true,
     hasChanges: changes.length > 0,
@@ -267,5 +277,6 @@ export async function POST(req: NextRequest) {
     storedDate: localStart.date,
     storedTime: localStart.time,
     storedVenue: stored.venue ?? null,
+    storedSaleWindows,
   });
 }

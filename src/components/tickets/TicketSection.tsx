@@ -54,6 +54,7 @@ interface DiffResult {
   storedDate: string | null;
   storedTime: string | null;
   storedVenue: string | null;
+  storedSaleWindows: Array<{ label: string; date: string; time: string }>;
 }
 
 type Status = "idle" | "scraping" | "checking" | "scraped" | "diff" | "adding" | "updating" | "done" | "error";
@@ -150,6 +151,14 @@ export function TicketSection() {
   const [refixRunning, setRefixRunning] = useState(false);
   const [refixSummary, setRefixSummary] = useState<{ fixed: number; skipped: number; errors: number } | null>(null);
 
+  // Fetch quota on mount so badge shows before first scan
+  useEffect(() => {
+    fetch("/api/tickets/scrape")
+      .then((r) => r.json())
+      .then((d) => { if (d.aiQuota) setQuota(d.aiQuota); })
+      .catch(() => null);
+  }, []);
+
   const handleRefix = async () => {
     setRefixRunning(true);
     setRefixSummary(null);
@@ -206,7 +215,7 @@ export function TicketSection() {
       setEditDate(data.date ?? "");
       setEditTime(data.time ?? "");
       setEditEndDate(data.endDate ?? "");
-      setEditEndTime(data.endTime ?? "");      setEditVenue(data.venue ?? "");
+      setEditEndTime(data.endTime ?? "");      setEditVenue(data.venue ?? data.location ?? "");
 
       // Fetch available calendars to offer picker if multiple options exist
       fetch("/api/tickets/calendars")
@@ -423,7 +432,7 @@ export function TicketSection() {
               OG Meta
             </button>
           </div>
-          {extractMethod === "auto" && quota && (
+          {quota && (
             <Badge
               variant={quota.remaining <= 10 ? "destructive" : "outline"}
               className="text-xs tabular-nums"
@@ -562,6 +571,16 @@ export function TicketSection() {
                     <div className="col-span-2">
                       <p className="text-xs text-muted-foreground">Venue 場地</p>
                       <p className="font-medium">{diffResult.storedVenue}</p>
+                    </div>
+                  )}
+                  {diffResult.storedSaleWindows?.length > 0 && (
+                    <div className="col-span-2">
+                      <p className="text-xs text-muted-foreground">Sale Windows 售票時段</p>
+                      {diffResult.storedSaleWindows.map((w) => (
+                        <p key={w.label} className="font-medium text-xs">
+                          <span className="text-muted-foreground">{w.label}:</span> {w.date} {w.time}
+                        </p>
+                      ))}
                     </div>
                   )}
                 </div>

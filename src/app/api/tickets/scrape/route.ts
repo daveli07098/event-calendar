@@ -229,54 +229,61 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     const concertEvents = allJsonLdEvents.filter((e) => e.raw.location);
     const saleWindowEvents = allJsonLdEvents.filter((e) => !e.raw.location);
 
-    // If no events have location, fall back to the old heuristic (latest date = concert)
-    const useEvents = concertEvents.length > 0 ? concertEvents : allJsonLdEvents;
-    const saleOnlyEvents = concertEvents.length > 0 ? saleWindowEvents : [];
+    if (concertEvents.length > 0) {
+      // Multi-night concerts: sort ascending → first night is start date, last night is end date
+      concertEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+      const firstNight = concertEvents[0]!;
+      const lastNight = concertEvents[concertEvents.length - 1]!;
 
-    // Sort concert events chronologically — first night is the canonical start date
-    useEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
-    const firstNight = useEvents[0]!;
-    const lastNight = useEvents[useEvents.length - 1]!;
+      const firstParts = firstNight.startDate.split("T");
+      schemaDate = firstParts[0] ?? null;
+      schemaTime = firstParts[1] ? firstParts[1].slice(0, 5) : null;
+      if (firstParts[1]) sourceTz = extractTzFromIso(firstNight.startDate);
 
-    const firstParts = firstNight.startDate.split("T");
-    schemaDate = firstParts[0] ?? null;
-    schemaTime = firstParts[1] ? firstParts[1].slice(0, 5) : null;
-    if (firstParts[1]) sourceTz = extractTzFromIso(firstNight.startDate);
-
-    // Multi-night: record endDate as the last night (different from first)
-    if (useEvents.length > 1 && lastNight.startDate.slice(0, 10) !== firstNight.startDate.slice(0, 10)) {
-      const lastParts = lastNight.startDate.split("T");
-      schemaEndDate = lastParts[0] ?? null;
-      schemaEndTime = lastParts[1] ? lastParts[1].slice(0, 5) : null;
-    }
-
-    // Extract venue from first concert night with location
-    const locationEvent = useEvents.find((e) => e.raw.location) ?? firstNight;
-    if (locationEvent.raw.location) {
-      const loc = locationEvent.raw.location as Record<string, unknown>;
-      schemaVenue = String(loc.name ?? "");
-      const addr = loc.address as Record<string, unknown> | string | undefined;
-      if (addr && typeof addr === "object") {
-        schemaLocation = [addr.streetAddress, addr.addressLocality, addr.addressCountry]
-          .filter(Boolean)
-          .join(", ");
-      } else if (typeof addr === "string") {
-        schemaLocation = addr;
+      // Multi-night: record endDate as the last night (different from first)
+      if (concertEvents.length > 1 && lastNight.startDate.slice(0, 10) !== firstNight.startDate.slice(0, 10)) {
+        const lastParts = lastNight.startDate.split("T");
+        schemaEndDate = lastParts[0] ?? null;
+        schemaEndTime = lastParts[1] ? lastParts[1].slice(0, 5) : null;
       }
-    }
 
-    // For Strategy A (separate Event blocks per sale window): use saleOnlyEvents
-    // Only apply when we actually found concert events with location
-    if (concertEvents.length > 0 && saleOnlyEvents.length > 0) {
-      // These non-location events are sale windows
-      const saleOnly = [...saleOnlyEvents].sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
-      for (let i = 0; i < saleOnly.length; i++) {
-        const ev = saleOnly[i]!;
-        const dStr = ev.startDate.slice(0, 10);
-        const tStr = ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null;
-        const label = i === saleOnly.length - 1 ? "Public Sale" : "Priority Sale";
-        if (!stratASaleWindows.some((w) => w.date === dStr)) stratASaleWindows.push({ date: dStr, time: tStr, label });
+      // Venue from the first concert night that has location data
+      const locationEvent = firstNight;
+      if (locationEvent.raw.location) {
+        const loc = locationEvent.raw.location as Record<string, unknown>;
+        schemaVenue = typeof loc.name === "string" ? loc.name.trim() : null;
+        const addr = loc.address as Record<string, unknown> | string | undefined;
+        if (addr && typeof addr === "object") {
+          schemaLocation = [addr.streetAddress, addr.addressLocality, addr.addressCountry]
+            .filter(Boolean)
+            .join(", ");
+        } else if (typeof addr === "string") {
+          schemaLocation = addr;
+        }
       }
+
+      // Strategy A: non-location blocks are sale windows
+      if (saleWindowEvents.length > 0) {
+        const saleOnly = [...saleWindowEvents].sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+        for (let i = 0; i < saleOnly.length; i++) {
+          const ev = saleOnly[i]!;
+          const dStr = ev.startDate.slice(0, 10);
+          // Skip dates that overlap with concert nights
+          if (concertEvents.some((c) => c.startDate.slice(0, 10) === dStr)) continue;
+          const tStr = ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null;
+          const label = i === saleOnly.length - 1 ? "Public Sale" : "Priority Sale";
+          if (!stratASaleWindows.some((w) => w.date === dStr)) stratASaleWindows.push({ date: dStr, time: tStr, label });
+        }
+      }
+    } else {
+      // No location data on any event block — fallback: latest date = concert (original behavior)
+      allJsonLdEvents.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
+      const mainEvt = allJsonLdEvents[0]!;
+      const mainParts = mainEvt.startDate.split("T");
+      schemaDate = mainParts[0] ?? null;
+      schemaTime = mainParts[1] ? mainParts[1].slice(0, 5) : null;
+      if (mainParts[1]) sourceTz = extractTzFromIso(mainEvt.startDate);
+      // Can't distinguish concert vs sale without location — skip Strategy A
     }
   }
 
@@ -769,5 +776,24 @@ export async function POST(req: NextRequest) {
     aiError,
     aiTokensUsed,
     aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/tickets/scrape — return current AI quota without performing a scrape
+// ---------------------------------------------------------------------------
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const uid = session.user.id;
+  const remaining = remainingAiCalls(uid);
+  return NextResponse.json({
+    aiQuota: {
+      used: AI_DAILY_LIMIT - remaining,
+      limit: AI_DAILY_LIMIT,
+      remaining,
+    },
   });
 }

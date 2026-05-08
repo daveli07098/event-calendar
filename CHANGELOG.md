@@ -5,6 +5,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2026-05-02] — Session: Quota + Venue + Diff context
+### Fixed
+- fix(tickets): quota badge now fetches on mount via GET /api/tickets/scrape; always visible regardless of extractMethod ([cadbf6a])
+- fix(tickets): venue field now falls back to data.location for events where AI sets location instead of venue (e.g. ZUTOMAYO) ([cadbf6a])
+- fix(tickets): diff context panel now shows stored sale windows (label + date + time) for all ticket events ([cadbf6a])
+### Added
+- feat(tickets): GET /api/tickets/scrape endpoint returns current AI quota without running a scrape ([cadbf6a])
+
 ## [2026-05-02] — Session: Quota
 ### Changed
 - chore(quota): raise AI daily scrape limit from 100 to 250 per user ([eb2d428])
