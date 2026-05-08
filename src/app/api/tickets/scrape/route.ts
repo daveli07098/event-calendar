@@ -59,8 +59,17 @@ interface TicketData {
   ticketPlatforms: string[] | null; // e.g. ["BOOKYAY", "大麥網"]
   endDate: string | null;           // event end date YYYY-MM-DD
   endTime: string | null;           // event end time HH:MM
-  saleDate: string | null;          // public general on-sale date
-  saleFirstDate: string | null;     // earliest presale / fan-club / member sale date
+  saleDate: string | null;          // public general on-sale date (kept for backward compat)
+  saleFirstDate: string | null;     // earliest presale / fan-club / member sale date (kept for backward compat)
+  saleDates: SaleWindow[] | null;   // all sale windows in chronological order
+  sourceTimezone: string | null;    // IANA or ±HH:MM offset extracted from source (e.g. "+08:00" for HKT)
+}
+
+/** A single ticket-sale window with a date, optional time, and a human label. */
+interface SaleWindow {
+  date: string;         // YYYY-MM-DD
+  time: string | null;  // HH:MM 24h or null
+  label: string;        // e.g. "Fan Presale", "Public Sale", "Priority Sale"
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +120,28 @@ interface MetaFallback {
   location: string | null;
   saleDate: string | null;        // earliest public/general on-sale from JSON-LD
   saleFirstDate: string | null;   // earliest presale/fan-club date from JSON-LD
+  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  sourceTimezone: string | null;  // ±HH:MM offset detected from JSON-LD or URL domain
+}
+
+/** Extract ±HH:MM or "Z" timezone offset from the tail of an ISO datetime string. */
+function extractTzFromIso(isoStr: string): string | null {
+  const m = isoStr.match(/([+-]\d{2}:?\d{2}|Z)$/);
+  return m ? m[1] : null;
+}
+
+/** Map known event-ticketing domains to their local timezone offset string. */
+function detectTimezoneFromUrl(url: string): string | null {
+  try {
+    const { hostname } = new URL(url);
+    const h = hostname.toLowerCase();
+    const hktDomains = [
+      "timable.com", "cityline.com", "hkticketing.com", "ticketmaster.com.hk",
+      "urbtix.hk", "ticketflap.com", "klook.com", "kktix.com",
+    ];
+    if (hktDomains.some((d) => h === d || h.endsWith(`.${d}`))) return "+08:00";
+  } catch { /* ignore invalid URL */ }
+  return null;
 }
 
 function extractMeta(html: string, pageUrl: string): MetaFallback {
@@ -151,6 +182,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   let schemaTime: string | null = null;
   let schemaVenue: string | null = null;
   let schemaLocation: string | null = null;
+  let sourceTz: string | null = null;
 
   const jsonldMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) ?? [];
 
@@ -191,6 +223,8 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     const parts = mainEvt.startDate.split("T");
     schemaDate = parts[0] ?? null;
     schemaTime = parts[1] ? parts[1].slice(0, 5) : null;
+    // Extract timezone offset from the ISO string before slicing (e.g. "+08:00" from "20:00:00+08:00")
+    if (parts[1]) sourceTz = extractTzFromIso(mainEvt.startDate);
 
     if (mainEvt.raw.location) {
       const loc = mainEvt.raw.location as Record<string, unknown>;
@@ -218,9 +252,12 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   // Strategy C: text-based fallback for Chinese pages (公開發售 / 會員優先)
   let schemaSaleDate: string | null = null;
   let schemaSaleFirstDate: string | null = null;
+  let schemaSaleDates: Array<{ date: string; time: string | null; label: string }> = [];
 
-  // Collect all offer validFrom dates across ALL event blocks
-  const offerDates: Date[] = [];
+  // Collect all offer validFrom dates + availability labels across ALL event blocks
+  interface OfferWindow { dateObj: Date; dateStr: string; timeStr: string | null; label: string }
+  const offerWindows: OfferWindow[] = [];
+
   for (const evt of allJsonLdEvents) {
     const offers = evt.raw.offers;
     if (!offers) continue;
@@ -228,38 +265,53 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     for (const offer of offerList) {
       if (offer.validFrom) {
         const d = new Date(String(offer.validFrom));
-        if (!isNaN(d.getTime())) offerDates.push(d);
+        if (!isNaN(d.getTime())) {
+          const iso = String(offer.validFrom);
+          const parts = iso.split("T");
+          const dateStr = parts[0] ?? "";
+          const timeStr = parts[1] ? parts[1].slice(0, 5) : null;
+          // Derive label from availability or name field on the offer
+          let label = "Sale";
+          const avail = String((offer.availability ?? offer.name ?? "")).toLowerCase();
+          if (avail.includes("presale") || avail.includes("fan") || avail.includes("member") || avail.includes("priority") || avail.includes("優先")) {
+            label = "Priority Sale";
+          } else if (avail.includes("public") || avail.includes("general") || avail.includes("公開")) {
+            label = "Public Sale";
+          }
+          // Avoid duplicates by date string
+          if (dateStr && !offerWindows.some(w => w.dateStr === dateStr)) {
+            offerWindows.push({ dateObj: d, dateStr, timeStr, label });
+          }
+        }
       }
-      // availability + price fields ignored — we only need dates
     }
   }
 
-  if (offerDates.length > 0) {
+  if (offerWindows.length > 0) {
     // Strategy B: use offers.validFrom dates
-    offerDates.sort((a, b) => a.getTime() - b.getTime()); // ascending
-    const firstOffer = offerDates[0];
-    const lastOffer = offerDates[offerDates.length - 1];
-    const firstDateStr = firstOffer.toISOString().slice(0, 10);
-    const lastDateStr = lastOffer.toISOString().slice(0, 10);
-    if (firstDateStr === lastDateStr) {
-      schemaSaleDate = firstDateStr;
-    } else {
-      schemaSaleFirstDate = firstDateStr; // earliest = presale
-      schemaSaleDate = lastDateStr;       // latest = public sale
+    offerWindows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime()); // chrono asc
+    // Label last one "Public Sale" if still generic; earlier ones "Priority Sale"
+    if (offerWindows.length > 1) {
+      const last = offerWindows[offerWindows.length - 1]!;
+      if (last.label === "Sale") last.label = "Public Sale";
+      for (let i = 0; i < offerWindows.length - 1; i++) {
+        if (offerWindows[i]!.label === "Sale") offerWindows[i]!.label = "Priority Sale";
+      }
     }
+    schemaSaleDates = offerWindows.map(w => ({ date: w.dateStr, time: w.timeStr, label: w.label }));
+    schemaSaleFirstDate = offerWindows[0]!.dateStr;
+    schemaSaleDate = offerWindows[offerWindows.length - 1]!.dateStr;
   } else if (allJsonLdEvents.length > 1) {
-    // Strategy A: separate Event blocks per sale window
-    const saleEvents = allJsonLdEvents.slice(1); // concert is index 0
-    const earliest = saleEvents[saleEvents.length - 1];
-    const latestSale = saleEvents[0];
-    const firstDateStr = earliest.startDate.slice(0, 10);
-    const lastDateStr = latestSale.startDate.slice(0, 10);
-    if (firstDateStr === lastDateStr) {
-      schemaSaleDate = firstDateStr;
-    } else {
-      schemaSaleFirstDate = firstDateStr;
-      schemaSaleDate = lastDateStr;
-    }
+    // Strategy A: separate Event blocks per sale window (no offers array)
+    const saleEvents = allJsonLdEvents.slice(1); // concert is index 0 (latest date)
+    saleEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime()); // chrono asc
+    schemaSaleDates = saleEvents.map((ev, i) => ({
+      date: ev.startDate.slice(0, 10),
+      time: ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null,
+      label: i === saleEvents.length - 1 ? "Public Sale" : "Priority Sale",
+    }));
+    schemaSaleFirstDate = schemaSaleDates[0]!.date;
+    schemaSaleDate = schemaSaleDates[schemaSaleDates.length - 1]!.date;
   }
 
   // Strategy C: Chinese text fallback — scan page text for sale date patterns
@@ -291,6 +343,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     }
   }
 
+  // URL-based timezone fallback — kicks in when JSON-LD has no offset info
+  if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl);
+
   return {
     title: ogTitle ?? htmlTitle,
     description: decodeHtml(ogDesc),
@@ -301,6 +356,8 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     location: schemaLocation || null,
     saleDate: schemaSaleDate,
     saleFirstDate: schemaSaleFirstDate,
+    saleDates: schemaSaleDates.length > 0 ? schemaSaleDates : null,
+    sourceTimezone: sourceTz,
   };
 }
 
@@ -310,7 +367,8 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event ends on a different or specified date","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate"}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event ends on a different or specified date","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"Fan Presale / Priority Sale / Public Sale / etc"}]}
+IMPORTANT for saleDates: list ALL sale windows found (presale, priority, member, public). Include every distinct date. Order chronologically earliest first.
 URL: ${url}
 ${text}`.trim();
 
@@ -654,6 +712,11 @@ export async function POST(req: NextRequest) {
     endTime: (aiResult as Partial<TicketData>).endTime ?? null,
     saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
     saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
+    saleDates: (aiResult as Partial<TicketData>).saleDates?.length
+      ? (aiResult as Partial<TicketData>).saleDates!
+      : meta.saleDates ?? null,
+    // sourceTimezone comes only from meta (JSON-LD / URL domain) — AI doesn't return it
+    sourceTimezone: meta.sourceTimezone,
   };
 
   if (!ticket.title || ticket.title === "Untitled Event") {

@@ -24,19 +24,38 @@ interface TicketData {
   ticketPlatforms: string[] | null;
   saleDate: string | null;
   saleFirstDate: string | null;
+  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  sourceTimezone?: string | null;  // ±HH:MM offset from scrape route (e.g. "+08:00" for HKT)
 }
 
-/** Parse a single date+time into a JS Date, with a fallback. */
-function parseSingleDateTime(date: string | null, time: string | null, fallback: Date): Date {
+/** Parse a single date+time into a UTC Date.
+ *  Priority: sourceTimezone (from JSON-LD/URL) > tzOffsetMinutes (client) > fallback. */
+function parseSingleDateTime(
+  date: string | null,
+  time: string | null,
+  sourceTimezone: string | null,
+  tzOffsetMinutes: number,
+  fallback: Date,
+): Date {
   if (!date) return fallback;
   const isoMatch = date.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) {
     const [, y, m, d] = isoMatch;
-    if (time) {
-      const [hStr, minStr] = time.split(":");
-      return new Date(Number(y), Number(m) - 1, Number(d), Number(hStr ?? 12), Number(minStr ?? 0));
+    const h = time ? time.split(":")[0] ?? "12" : "12";
+    const min = time ? (time.split(":")[1] ?? "00") : "00";
+    if (time && sourceTimezone) {
+      // Reconstruct timezone-aware ISO string and let JS parse to UTC
+      const iso = `${y}-${m}-${d}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00${sourceTimezone}`;
+      const parsed = new Date(iso);
+      if (!isNaN(parsed.getTime())) return parsed;
     }
-    return new Date(Number(y), Number(m) - 1, Number(d), 12, 0, 0);
+    if (time && tzOffsetMinutes !== 0) {
+      // Client-side offset (e.g. HKT = -480): create UTC base then shift
+      const utcBase = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(h), Number(min)));
+      return new Date(utcBase.getTime() + tzOffsetMinutes * 60_000);
+    }
+    // No timezone info — treat as UTC directly
+    return new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), time ? Number(h) : 12, time ? Number(min) : 0));
   }
   const parsed = new Date(date + (time ? ` ${time}` : ""));
   return isNaN(parsed.getTime()) ? fallback : parsed;
@@ -47,6 +66,8 @@ function parseSingleDateTime(date: string | null, time: string | null, fallback:
 function parseEventTime(
   date: string | null,
   time: string | null,
+  sourceTimezone: string | null,
+  tzOffsetMinutes: number,
   endDate?: string | null,
   endTime?: string | null,
 ): { start: Date; end: Date } {
@@ -54,7 +75,7 @@ function parseEventTime(
   fallbackStart.setDate(fallbackStart.getDate() + 1);
   fallbackStart.setHours(12, 0, 0, 0);
 
-  const start = parseSingleDateTime(date, time, fallbackStart);
+  const start = parseSingleDateTime(date, time, sourceTimezone, tzOffsetMinutes, fallbackStart);
 
   let end: Date;
   if (endDate || endTime) {
@@ -62,6 +83,8 @@ function parseEventTime(
     end = parseSingleDateTime(
       endDate ?? date,
       endTime ?? null,
+      sourceTimezone,
+      tzOffsetMinutes,
       new Date(start.getTime() + 2 * 3600000),
     );
     if (end <= start) end = new Date(start.getTime() + 2 * 3600000); // sanity: end must be after start
@@ -79,14 +102,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { ticket?: TicketData; targetCalendarId?: string; targetSaleCalendarId?: string };
+  let body: { ticket?: TicketData; targetCalendarId?: string; targetSaleCalendarId?: string; tzOffsetMinutes?: number };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { ticket, targetCalendarId, targetSaleCalendarId } = body;
+  const { ticket, targetCalendarId, targetSaleCalendarId, tzOffsetMinutes = 0 } = body;
   if (!ticket || typeof ticket.title !== "string") {
     return NextResponse.json({ error: "ticket data is required" }, { status: 400 });
   }
@@ -148,8 +171,9 @@ export async function POST(req: NextRequest) {
   }
   const { calendar, isCollaborative } = resolved;
 
-  // Build event times
-  const { start, end } = parseEventTime(ticket.date, ticket.time, ticket.endDate, ticket.endTime);
+  // Build event times — use sourceTimezone from scrape, fall back to client tzOffsetMinutes
+  const tz = ticket.sourceTimezone ?? null;
+  const { start, end } = parseEventTime(ticket.date, ticket.time, tz, tzOffsetMinutes, ticket.endDate, ticket.endTime);
 
   // Build description with ticket info and source URL appended
   const descParts: string[] = [];
@@ -158,6 +182,9 @@ export async function POST(req: NextRequest) {
   if (ticket.ticketPlatforms?.length) descParts.push(`售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`);
   if (ticket.saleDate) descParts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
   if (ticket.saleFirstDate) descParts.push(`First Sale Date: ${ticket.saleFirstDate}`);
+  if (ticket.saleDates?.length) {
+    descParts.push(`Sale Windows:\n${ticket.saleDates.map(w => `  ${w.label}: ${w.date}${w.time ? " " + w.time : ""}`).join("\n")}`);
+  }
   if (ticket.venue) descParts.push(`Venue: ${ticket.venue}`);
   if (ticket.location) descParts.push(`Location: ${ticket.location}`);
   descParts.push(`Ticket URL: ${ticket.sourceUrl}`);
@@ -182,11 +209,20 @@ export async function POST(req: NextRequest) {
     await prisma.event.create({ data: { calendarId: shadowCal.id, ...eventData } });
   }
 
-  // If there's a public sale date, create a reminder in the "sale-ticket" calendar
-  let saleEvent: { id: string } | null = null;
-  let presaleEvent: { id: string } | null = null;
+  // Create sale-ticket calendar reminders — one per sale window
+  const saleEventIds: string[] = [];
 
-  if (ticket.saleDate || ticket.saleFirstDate) {
+  // Build the list of windows to create events for:
+  // prefer saleDates[] if available, otherwise fall back to legacy saleDate/saleFirstDate
+  const saleWindows: Array<{ date: string; time: string | null; label: string }> = ticket.saleDates?.length
+    ? ticket.saleDates
+    : [
+        ...(ticket.saleFirstDate ? [{ date: ticket.saleFirstDate, time: null, label: "Fan Presale" }] : []),
+        ...(ticket.saleDate && ticket.saleDate !== ticket.saleFirstDate ? [{ date: ticket.saleDate, time: null, label: "Public Sale" }] : []),
+        ...(ticket.saleDate && ticket.saleDate === ticket.saleFirstDate ? [{ date: ticket.saleDate, time: null, label: "Sale Opens" }] : []),
+      ];
+
+  if (saleWindows.length > 0) {
     const saleResolved = await resolveCalendar(targetSaleCalendarId, SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
     const saleCalendar = saleResolved?.calendar ?? await (async () => {
       let c = await prisma.calendar.findFirst({ where: { userId: uid, name: SALE_CALENDAR_NAME } });
@@ -195,54 +231,32 @@ export async function POST(req: NextRequest) {
     })();
     const saleIsCollaborative = saleResolved?.isCollaborative ?? false;
 
-    if (ticket.saleDate) {
-      const { start: saleStart, end: saleEnd } = parseEventTime(ticket.saleDate, null);
-      const saleDesc = [
-        `售票開始！Public sale opens for: ${ticket.title}`,
+    for (const window of saleWindows) {
+      const { start: wStart, end: wEnd } = parseEventTime(window.date, window.time ?? null, tz, tzOffsetMinutes);
+      const isPublic = window.label.toLowerCase().includes("public") || window.label.toLowerCase().includes("公開");
+      const emoji = isPublic ? "🎫" : "⭐";
+      const wDesc = [
+        `${window.label} for: ${ticket.title}`,
         ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
         ticket.ticketPlatforms?.length ? `平台 Platforms: ${ticket.ticketPlatforms.join(", ")}` : null,
         ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
         `Ticket URL: ${ticket.sourceUrl}`,
       ].filter(Boolean).join("\n\n");
 
-      const saleEventData = {
-        title: `🎫 Sale Opens: ${ticket.title}`,
-        description: saleDesc,
-        startTime: saleStart,
-        endTime: saleEnd,
-        location: null,
+      const wEventData = {
+        title: `${emoji} ${window.label}: ${ticket.title}`,
+        description: wDesc,
+        startTime: wStart,
+        endTime: wEnd,
+        location: null as string | null,
       };
 
-      saleEvent = await prisma.event.create({ data: { calendarId: saleCalendar.id, ...saleEventData } });
+      const wEvent = await prisma.event.create({ data: { calendarId: saleCalendar.id, ...wEventData } });
+      saleEventIds.push(wEvent.id);
 
       if (saleIsCollaborative) {
         const shadowSaleCal = await ensureShadowCalendar(SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
-        await prisma.event.create({ data: { calendarId: shadowSaleCal.id, ...saleEventData } });
-      }
-    }
-
-    if (ticket.saleFirstDate) {
-      const { start: presaleStart, end: presaleEnd } = parseEventTime(ticket.saleFirstDate, null);
-      const presaleDesc = [
-        `會員優先購票 Fan/member presale for: ${ticket.title}`,
-        ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
-        ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
-        `Ticket URL: ${ticket.sourceUrl}`,
-      ].filter(Boolean).join("\n\n");
-
-      const presaleEventData = {
-        title: `🎫 Fan Presale: ${ticket.title}`,
-        description: presaleDesc,
-        startTime: presaleStart,
-        endTime: presaleEnd,
-        location: null,
-      };
-
-      presaleEvent = await prisma.event.create({ data: { calendarId: saleCalendar.id, ...presaleEventData } });
-
-      if (saleIsCollaborative) {
-        const shadowSaleCal = await ensureShadowCalendar(SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
-        await prisma.event.create({ data: { calendarId: shadowSaleCal.id, ...presaleEventData } });
+        await prisma.event.create({ data: { calendarId: shadowSaleCal.id, ...wEventData } });
       }
     }
   }
@@ -253,7 +267,6 @@ export async function POST(req: NextRequest) {
     calendarName: calendar.name,
     start: event.startTime.toISOString(),
     end: event.endTime.toISOString(),
-    saleEventId: saleEvent?.id ?? null,
-    presaleEventId: presaleEvent?.id ?? null,
+    saleEventIds,
   });
 }

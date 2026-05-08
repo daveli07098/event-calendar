@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
-  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +33,7 @@ interface ScrapedTicket {
   endTime: string | null;
   saleDate: string | null;
   saleFirstDate: string | null;
+  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
 }
 
 interface FieldChange {
@@ -136,6 +137,30 @@ export function TicketSection() {
   const [calendarOptions, setCalendarOptions] = useState<{ eventReminders: import('@/app/api/tickets/calendars/route').TicketCalendarOption[]; saleTicket: import('@/app/api/tickets/calendars/route').TicketCalendarOption[] } | null>(null);
   const [selectedEventCalId, setSelectedEventCalId] = useState<string | null>(null);
   const [selectedSaleCalId, setSelectedSaleCalId] = useState<string | null>(null);
+
+  // Bulk refix state
+  const [refixRunning, setRefixRunning] = useState(false);
+  const [refixSummary, setRefixSummary] = useState<{ fixed: number; skipped: number; errors: number } | null>(null);
+
+  const handleRefix = async () => {
+    setRefixRunning(true);
+    setRefixSummary(null);
+    try {
+      const res = await fetch("/api/tickets/refix", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await res.json();
+      if (res.ok) {
+        setRefixSummary({ fixed: data.fixed, skipped: data.skipped, errors: data.errors });
+        if (data.fixed > 0) toast.success(`Re-fixed ${data.fixed} event time${data.fixed > 1 ? "s" : ""}`);
+        else toast.info("All event times already correct");
+      } else {
+        toast.error(data.error ?? "Re-fix failed");
+      }
+    } catch {
+      toast.error("Network error during re-fix");
+    } finally {
+      setRefixRunning(false);
+    }
+  };
 
   const handleScrape = async () => {
     const trimmed = url.trim();
@@ -266,6 +291,7 @@ export function TicketSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ticket: ticketToAdd,
+          tzOffsetMinutes: new Date().getTimezoneOffset(),
           ...(selectedEventCalId ? { targetCalendarId: selectedEventCalId } : {}),
           ...(selectedSaleCalId ? { targetSaleCalendarId: selectedSaleCalId } : {}),
         }),
@@ -397,6 +423,17 @@ export function TicketSection() {
               {quota.remaining}/{quota.limit} AI calls left
             </Badge>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground gap-1"
+            onClick={handleRefix}
+            disabled={refixRunning}
+            title="Re-scrape all ticket events and correct timezone offsets"
+          >
+            {refixRunning ? <Loader2 className="size-3 animate-spin" /> : <Wrench className="size-3" />}
+            {refixRunning ? "Re-fixing…" : refixSummary ? `Fixed ${refixSummary.fixed}` : "Re-fix Times"}
+          </Button>
           {ticket?.aiUsed && (
             <Badge variant="secondary" className="text-xs font-mono">
               {ticket.aiUsed}
@@ -582,18 +619,15 @@ export function TicketSection() {
                     <p className="font-medium">{ticket.ticketPrices.join(" / ")}</p>
                   </div>
                 ) : null}
-                {ticket.saleDate && (
-                  <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground">Public Sale Opens 公開發售</p>
-                    <p className="font-medium">{ticket.saleDate}</p>
+                {(ticket.saleDates?.length ? ticket.saleDates : [
+                  ...(ticket.saleFirstDate ? [{ date: ticket.saleFirstDate, time: null, label: "Fan Presale" }] : []),
+                  ...(ticket.saleDate ? [{ date: ticket.saleDate, time: null, label: "Public Sale" }] : []),
+                ]).map((w, i) => (
+                  <div key={i} className="col-span-2">
+                    <p className="text-xs text-muted-foreground">{w.label}</p>
+                    <p className="font-medium">{w.date}{w.time ? " " + w.time : ""}</p>
                   </div>
-                )}
-                {ticket.saleFirstDate && (
-                  <div className="col-span-2">
-                    <p className="text-xs text-muted-foreground">Fan Presale Opens 會員優先購票</p>
-                    <p className="font-medium">{ticket.saleFirstDate}</p>
-                  </div>
-                )}
+                ))}
                 {ticket.ticketPlatforms?.length ? (
                   <div className="col-span-2">
                     <p className="text-xs text-muted-foreground">Platforms 售票平台</p>
@@ -753,23 +787,17 @@ export function TicketSection() {
                 </div>
               )}
 
-              {ticket.saleDate && (
-                <div>
+              {(ticket.saleDates?.length ? ticket.saleDates : [
+                ...(ticket.saleFirstDate ? [{ date: ticket.saleFirstDate, time: null, label: "Fan Presale 會員優先購票" }] : []),
+                ...(ticket.saleDate ? [{ date: ticket.saleDate, time: null, label: "Public Sale 公開發售" }] : []),
+              ]).map((w, i) => (
+                <div key={i}>
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
-                    Public Sale 公開發售
+                    {w.label}
                   </p>
-                  <p className="text-sm">{ticket.saleDate}</p>
+                  <p className="text-sm">{w.date}{w.time ? " " + w.time : ""}</p>
                 </div>
-              )}
-
-              {ticket.saleFirstDate && (
-                <div>
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
-                    Fan Presale 會員優先購票
-                  </p>
-                  <p className="text-sm">{ticket.saleFirstDate}</p>
-                </div>
-              )}
+              ))}
 
               {/* Calendar picker — only shown when 2+ options exist */}
               {status === "scraped" && calendarOptions && calendarOptions.eventReminders.length >= 2 && (
@@ -800,7 +828,7 @@ export function TicketSection() {
               )}
 
               {/* Sale calendar picker */}
-              {status === "scraped" && calendarOptions && calendarOptions.saleTicket.length >= 2 && (ticket.saleDate || ticket.saleFirstDate) && (
+              {status === "scraped" && calendarOptions && calendarOptions.saleTicket.length >= 2 && (ticket.saleDates?.length || ticket.saleDate || ticket.saleFirstDate) && (
                 <div className="space-y-2 pt-1">
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Save sale reminders to</p>
                   <div className="flex flex-col gap-1.5">
