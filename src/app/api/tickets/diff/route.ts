@@ -16,6 +16,7 @@ interface ScrapedTicket {
   ticketPlatforms: string[] | null;
   saleDate: string | null;
   saleFirstDate: string | null;
+  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceUrl: string;
 }
 
@@ -30,7 +31,11 @@ export interface DiffResult {
   hasExisting: boolean;
   hasChanges: boolean;
   eventId: string | null;
+  /** All sale-ticket calendar events for this ticket, keyed by window label. */
+  saleEventIds: Record<string, string>;
+  /** @deprecated use saleEventIds["Public Sale"] or saleEventIds["Sale Opens"] */
   saleEventId: string | null;
+  /** @deprecated use saleEventIds["Fan Presale"] */
   presaleEventId: string | null;
   changes: FieldChange[];
   // Static context — current stored values, shown even when unchanged
@@ -69,8 +74,18 @@ function parseStored(description: string | null): {
   };
 }
 
-/**
- * Convert a UTC Date to local date/time strings using a timezone offset.
+/** Extract window label from a sale event title.
+ *  Title format: "${emoji} ${label}: ${eventTitle}" e.g. "⭐ Fan Presale: Charlie Puth…" */
+function extractLabelFromTitle(title: string): string | null {
+  // Split on first ": " → "⭐ Fan Presale" → drop first space-separated token (emoji)
+  const beforeColon = title.split(": ")[0];
+  if (!beforeColon) return null;
+  const parts = beforeColon.split(" ");
+  if (parts.length < 2) return null;
+  return parts.slice(1).join(" ").trim() || null;
+}
+
+
  * offsetMinutes = new Date().getTimezoneOffset() from the client
  * (negative for UTC+ zones, e.g. -480 for HKT)
  */
@@ -125,8 +140,9 @@ export async function POST(req: NextRequest) {
 
   if (calendarIds.length === 0) {
     return NextResponse.json<DiffResult>({
-      hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, presaleEventId: null, changes: [],
-      storedDate: null, storedTime: null, storedVenue: null,
+      hasExisting: false, hasChanges: false, eventId: null,
+      saleEventIds: {}, saleEventId: null, presaleEventId: null,
+      changes: [], storedDate: null, storedTime: null, storedVenue: null,
     });
   }
 
@@ -141,15 +157,26 @@ export async function POST(req: NextRequest) {
 
   if (matchingEvents.length === 0) {
     return NextResponse.json<DiffResult>({
-      hasExisting: false, hasChanges: false, eventId: null, saleEventId: null, presaleEventId: null, changes: [],
-      storedDate: null, storedTime: null, storedVenue: null,
+      hasExisting: false, hasChanges: false, eventId: null,
+      saleEventIds: {}, saleEventId: null, presaleEventId: null,
+      changes: [], storedDate: null, storedTime: null, storedVenue: null,
     });
   }
 
-  // Separate main event vs sale events
-  const saleEvent = matchingEvents.find((e) => e.calendar.name === "sale-ticket" && e.title.includes("Sale Opens")) ?? null;
-  const presaleEvent = matchingEvents.find((e) => e.calendar.name === "sale-ticket" && e.title.includes("Fan Presale")) ?? null;
+  // Separate main event vs sale events (all of them)
+  const allSaleEvents = matchingEvents.filter((e) => e.calendar.name === "sale-ticket");
   const mainEvent = matchingEvents.find((e) => e.calendar.name !== "sale-ticket") ?? matchingEvents[0];
+
+  // Build label → event map for ALL sale windows
+  const saleEventIds: Record<string, string> = {};
+  for (const se of allSaleEvents) {
+    const label = extractLabelFromTitle(se.title);
+    if (label) saleEventIds[label] = se.id;
+  }
+
+  // Backward-compat: find legacy "Sale Opens" / "Fan Presale" events by name
+  const saleEvent = allSaleEvents.find((e) => e.title.includes("Sale Opens") || e.title.includes("Public Sale")) ?? null;
+  const presaleEvent = allSaleEvents.find((e) => e.title.includes("Fan Presale")) ?? null;
 
   // Parse stored fields
   const stored = parseStored(mainEvent.description);
@@ -166,88 +193,74 @@ export async function POST(req: NextRequest) {
   const storedDate = normDate(localStart.date);
   const newDate = normDate(ticket.date);
   if (newDate && storedDate !== newDate) {
-    changes.push({
-      field: "date",
-      label: "Event Date 演出日期",
-      oldValue: storedDate,
-      newValue: newDate,
-    });
+    changes.push({ field: "date", label: "Event Date 演出日期", oldValue: storedDate, newValue: newDate });
   }
 
   // --- Event time (both in local timezone) ---
-  const storedTime = localStart.time; // local HH:MM
+  const storedTime = localStart.time;
   const newTime = ticket.time;
   if (newTime && storedTime !== newTime) {
-    changes.push({
-      field: "time",
-      label: "Event Time 演出時間",
-      oldValue: storedTime,
-      newValue: newTime,
-    });
+    changes.push({ field: "time", label: "Event Time 演出時間", oldValue: storedTime, newValue: newTime });
   }
 
   // --- Ticket prices ---
   const storedPrices = join(stored.prices);
   const newPrices = join(ticket.ticketPrices);
   if (newPrices && storedPrices !== newPrices) {
-    changes.push({
-      field: "ticketPrices",
-      label: "Ticket Prices 門票票價",
-      oldValue: storedPrices,
-      newValue: newPrices,
-    });
+    changes.push({ field: "ticketPrices", label: "Ticket Prices 門票票價", oldValue: storedPrices, newValue: newPrices });
   }
 
   // --- Ticket platforms ---
   const storedPlatforms = join(stored.platforms);
   const newPlatforms = join(ticket.ticketPlatforms);
   if (newPlatforms && storedPlatforms !== newPlatforms) {
-    changes.push({
-      field: "ticketPlatforms",
-      label: "Sale Platforms 售票平台",
-      oldValue: storedPlatforms,
-      newValue: newPlatforms,
-    });
+    changes.push({ field: "ticketPlatforms", label: "Sale Platforms 售票平台", oldValue: storedPlatforms, newValue: newPlatforms });
   }
 
-  // --- Sale date ---
-  const storedSaleDate = normDate(stored.saleDate ?? storedSale.saleDate);
-  const newSaleDate = normDate(ticket.saleDate);
-  if (newSaleDate && storedSaleDate !== newSaleDate) {
-    changes.push({
-      field: "saleDate",
-      label: "Public Sale Opens 公開發售日期",
-      oldValue: storedSaleDate,
-      newValue: newSaleDate,
-    });
-  }
+  // --- Sale window dates ---
+  // If we have a full saleDates[] array, compare each window individually.
+  // Otherwise fall back to scalar saleDate / saleFirstDate comparison.
+  if (ticket.saleDates?.length) {
+    for (const window of ticket.saleDates) {
+      const matchedEvent = allSaleEvents.find((se) => extractLabelFromTitle(se.title) === window.label);
+      const storedWindowDate = matchedEvent ? utcToLocal(matchedEvent.startTime, tzOffsetMinutes).date : null;
+      const newWindowDate = normDate(window.date);
 
-  // --- First / presale date ---
-  const storedFirstSaleDate = normDate(stored.saleFirstDate ?? storedPresale.saleFirstDate);
-  const newFirstSaleDate = normDate(ticket.saleFirstDate);
-  if (newFirstSaleDate && storedFirstSaleDate !== newFirstSaleDate) {
-    changes.push({
-      field: "saleFirstDate",
-      label: "Fan Presale Opens 會員優先購票",
-      oldValue: storedFirstSaleDate,
-      newValue: newFirstSaleDate,
-    });
+      if (newWindowDate && storedWindowDate !== newWindowDate) {
+        const display = window.time ? `${window.date} ${window.time}` : window.date;
+        changes.push({
+          field: `saleWin::${window.label}`,
+          label: `${window.label}${storedWindowDate ? "" : " (new)"}`,
+          oldValue: storedWindowDate,
+          newValue: display,
+        });
+      }
+    }
+  } else {
+    // Legacy scalar comparison
+    const storedSaleDate = normDate(stored.saleDate ?? storedSale.saleDate);
+    const newSaleDate = normDate(ticket.saleDate);
+    if (newSaleDate && storedSaleDate !== newSaleDate) {
+      changes.push({ field: "saleDate", label: "Public Sale Opens 公開發售日期", oldValue: storedSaleDate, newValue: newSaleDate });
+    }
+
+    const storedFirstSaleDate = normDate(stored.saleFirstDate ?? storedPresale.saleFirstDate);
+    const newFirstSaleDate = normDate(ticket.saleFirstDate);
+    if (newFirstSaleDate && storedFirstSaleDate !== newFirstSaleDate) {
+      changes.push({ field: "saleFirstDate", label: "Fan Presale Opens 會員優先購票", oldValue: storedFirstSaleDate, newValue: newFirstSaleDate });
+    }
   }
 
   // --- Venue ---
   if (ticket.venue && stored.venue && stored.venue !== ticket.venue.trim()) {
-    changes.push({
-      field: "venue",
-      label: "Venue 場地",
-      oldValue: stored.venue,
-      newValue: ticket.venue,
-    });
+    changes.push({ field: "venue", label: "Venue 場地", oldValue: stored.venue, newValue: ticket.venue });
   }
 
   return NextResponse.json<DiffResult>({
     hasExisting: true,
     hasChanges: changes.length > 0,
     eventId: mainEvent.id,
+    saleEventIds,
     saleEventId: saleEvent?.id ?? null,
     presaleEventId: presaleEvent?.id ?? null,
     changes,

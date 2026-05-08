@@ -13,6 +13,7 @@ interface ScrapedTicket {
   ticketPlatforms: string[] | null;
   saleDate: string | null;
   saleFirstDate: string | null;
+  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceUrl: string;
 }
 
@@ -24,8 +25,12 @@ function buildDescription(ticket: ScrapedTicket): string {
   if (ticket.description) parts.push(ticket.description);
   if (ticket.ticketPrices?.length) parts.push(`門票票價 Ticket Prices: ${ticket.ticketPrices.join(" / ")}`);
   if (ticket.ticketPlatforms?.length) parts.push(`售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`);
-  if (ticket.saleDate) parts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
-  if (ticket.saleFirstDate) parts.push(`First Sale Date: ${ticket.saleFirstDate}`);
+  if (ticket.saleDates?.length) {
+    parts.push(`Sale Windows:\n${ticket.saleDates.map(w => `  ${w.label}: ${w.date}${w.time ? " " + w.time : ""}`).join("\n")}`);
+  } else {
+    if (ticket.saleDate) parts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
+    if (ticket.saleFirstDate) parts.push(`First Sale Date: ${ticket.saleFirstDate}`);
+  }
   if (ticket.venue) parts.push(`Venue: ${ticket.venue}`);
   if (ticket.location) parts.push(`Location: ${ticket.location}`);
   parts.push(`Ticket URL: ${ticket.sourceUrl}`);
@@ -72,6 +77,7 @@ export async function PATCH(req: NextRequest) {
     eventId?: string;
     saleEventId?: string | null;
     presaleEventId?: string | null;
+    saleEventIds?: Record<string, string>;
     appliedFields?: string[];
     ticket?: ScrapedTicket;
     tzOffsetMinutes?: number;
@@ -82,7 +88,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { eventId, saleEventId, presaleEventId, appliedFields, ticket, tzOffsetMinutes = 0 } = body;
+  const { eventId, saleEventId, presaleEventId, saleEventIds = {}, appliedFields, ticket, tzOffsetMinutes = 0 } = body;
   if (!eventId || !appliedFields || !ticket) {
     return NextResponse.json({ error: "eventId, appliedFields, ticket required" }, { status: 400 });
   }
@@ -134,12 +140,49 @@ export async function PATCH(req: NextRequest) {
     data: mainUpdate,
   });
 
-  // Update sale/presale events whenever relevant fields change (keeps them in sync)
+  // Update sale/presale events whenever relevant fields change
+  const saleFieldsChanged = apply.has("date") || apply.has("time") || apply.has("title") ||
+    apply.has("ticketPrices") || apply.has("saleDate") || apply.has("saleFirstDate") ||
+    Array.from(apply).some((f) => f.startsWith("saleWin::"));
+
+  const updatedSaleEventIds: Record<string, string> = {};
+
+  // Handle per-window saleWin::${label} changes
+  for (const field of apply) {
+    if (!field.startsWith("saleWin::")) continue;
+    const label = field.slice("saleWin::".length);
+    // Look up event ID in saleEventIds (new), fall back to legacy mapping
+    const seId = saleEventIds[label]
+      ?? (label.toLowerCase().includes("public") || label === "Sale Opens" ? saleEventId : null)
+      ?? (label.toLowerCase().includes("presale") || label.toLowerCase().includes("fan") ? presaleEventId : null);
+    if (!seId) continue;
+
+    const window = ticket.saleDates?.find((w) => w.label === label);
+    if (!window) continue;
+
+    const winStart = parseLocalToUTC(window.date, window.time ?? null, tzOffsetMinutes);
+    if (!winStart) continue;
+    const winEnd = new Date(winStart.getTime() + 3_600_000);
+
+    const updatedWin = await prisma.event.update({
+      where: { id: seId },
+      data: { startTime: winStart, endTime: winEnd },
+    });
+    updatedSaleEventIds[label] = updatedWin.id;
+  }
+
+  // Legacy: update sale/presale events if saleDate / saleFirstDate were applied
   let updatedSaleEvent = null;
   let updatedPresaleEvent = null;
-  const saleFieldsChanged = apply.has("date") || apply.has("time") || apply.has("title") || apply.has("ticketPrices") || apply.has("saleDate") || apply.has("saleFirstDate");
 
-  if (saleEventId && saleFieldsChanged) {
+  // Also propagate description / core field changes to all known sale events
+  const allSaleIds = [
+    ...Object.values(saleEventIds),
+    ...(saleEventId ? [saleEventId] : []),
+    ...(presaleEventId ? [presaleEventId] : []),
+  ].filter((id, i, a) => a.indexOf(id) === i); // unique
+
+  if (saleEventId && saleFieldsChanged && !apply.has("saleWin::" + "Public Sale") && !apply.has("saleWin::" + "Sale Opens")) {
     const saleUpdateData: Record<string, unknown> = { description: buildSaleDescription(ticket) };
     if (apply.has("saleDate") && ticket.saleDate) {
       const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes);
@@ -153,7 +196,7 @@ export async function PATCH(req: NextRequest) {
     updatedSaleEvent = await prisma.event.update({ where: { id: saleEventId }, data: saleUpdateData });
   }
 
-  if (presaleEventId && saleFieldsChanged) {
+  if (presaleEventId && saleFieldsChanged && !apply.has("saleWin::" + "Fan Presale")) {
     const presaleUpdateData: Record<string, unknown> = {
       description: [
         `會員優先購票 Fan/member presale for: ${ticket.title}`,
@@ -174,11 +217,28 @@ export async function PATCH(req: NextRequest) {
     updatedPresaleEvent = await prisma.event.update({ where: { id: presaleEventId }, data: presaleUpdateData });
   }
 
+  // Propagate description+title changes to ALL sale events not already updated
+  if (saleFieldsChanged && (apply.has("ticketPrices") || apply.has("ticketPlatforms") || apply.has("date") || apply.has("time"))) {
+    const alreadyUpdated = new Set([
+      updatedSaleEvent?.id,
+      updatedPresaleEvent?.id,
+      ...Object.values(updatedSaleEventIds),
+    ].filter(Boolean) as string[]);
+    for (const seId of allSaleIds) {
+      if (alreadyUpdated.has(seId)) continue;
+      await prisma.event.update({
+        where: { id: seId },
+        data: { description: buildSaleDescription(ticket) },
+      });
+    }
+  }
+
   return NextResponse.json({
     updated: true,
     eventId: updatedEvent.id,
     saleEventId: updatedSaleEvent?.id ?? null,
     presaleEventId: updatedPresaleEvent?.id ?? null,
+    updatedSaleEventIds,
     appliedFields,
   });
   } catch (e) {

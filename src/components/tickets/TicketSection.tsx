@@ -47,6 +47,7 @@ interface DiffResult {
   hasExisting: boolean;
   hasChanges: boolean;
   eventId: string | null;
+  saleEventIds: Record<string, string>; // label → eventId (all sale windows)
   saleEventId: string | null;
   presaleEventId: string | null;
   changes: FieldChange[];
@@ -326,6 +327,7 @@ export function TicketSection() {
           eventId: diffResult.eventId,
           saleEventId: diffResult.saleEventId,
           presaleEventId: diffResult.presaleEventId,
+          saleEventIds: diffResult.saleEventIds,
           appliedFields: Array.from(selectedFields),
           ticket,
           tzOffsetMinutes: new Date().getTimezoneOffset(),
