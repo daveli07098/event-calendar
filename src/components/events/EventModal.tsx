@@ -19,8 +19,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, ExternalLink } from "lucide-react";
+import { Trash2, ExternalLink, Copy } from "lucide-react";
 import type { CalendarType, EventType, EventFormData } from "@/types";
+
+interface RelatedEvent {
+  id: string;
+  title: string;
+  calendarName: string;
+  calendarColor: string;
+  startTime: string;
+}
 
 interface EventModalProps {
   open: boolean;
@@ -29,8 +37,11 @@ interface EventModalProps {
   calendars: CalendarType[];
   defaultCalendarId: string;
   initialRange: { start: string; end: string; allDay: boolean } | null;
+  initialData?: Partial<EventFormData>;
   onSave: (data: EventFormData) => Promise<void>;
   onDelete: () => Promise<void>;
+  onCopy?: (data: EventFormData) => void;
+  onEventSelect?: (eventId: string) => void;
   readOnly?: boolean;
 }
 
@@ -55,8 +66,11 @@ export function EventModal({
   calendars,
   defaultCalendarId,
   initialRange,
+  initialData,
   onSave,
   onDelete,
+  onCopy,
+  onEventSelect,
   readOnly = false,
 }: EventModalProps) {
   const [title, setTitle] = useState("");
@@ -67,6 +81,7 @@ export function EventModal({
   const [allDay, setAllDay] = useState(false);
   const [calendarId, setCalendarId] = useState(defaultCalendarId);
   const [saving, setSaving] = useState(false);
+  const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
 
   useEffect(() => {
     if (event) {
@@ -81,6 +96,22 @@ export function EventModal({
       } else {
         setStartTime(toLocalDateTimeString(event.startTime));
         setEndTime(toLocalDateTimeString(event.endTime));
+      }
+    } else if (initialData) {
+      setTitle(initialData.title ?? "");
+      setDescription(initialData.description ?? "");
+      setLocation(initialData.location ?? "");
+      setAllDay(initialData.allDay ?? false);
+      setCalendarId(initialData.calendarId ?? defaultCalendarId);
+      if (initialData.startTime) {
+        setStartTime(initialData.allDay
+          ? toLocalDateString(initialData.startTime)
+          : toLocalDateTimeString(initialData.startTime));
+      }
+      if (initialData.endTime) {
+        setEndTime(initialData.allDay
+          ? toLocalDateString(initialData.endTime)
+          : toLocalDateTimeString(initialData.endTime));
       }
     } else if (initialRange) {
       setTitle("");
@@ -106,7 +137,18 @@ export function EventModal({
       const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
       setEndTime(toLocalDateTimeString(oneHourLater.toISOString()));
     }
-  }, [event, initialRange, defaultCalendarId]);
+  }, [event, initialRange, initialData, defaultCalendarId]);
+
+  // Fetch related events (same Ticket URL in description, different calendar)
+  useEffect(() => {
+    if (!event?.description) { setRelatedEvents([]); return; }
+    const ticketUrl = event.description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
+    if (!ticketUrl) { setRelatedEvents([]); return; }
+    fetch(`/api/events/related?url=${encodeURIComponent(ticketUrl)}&excludeId=${event.id}`)
+      .then((r) => r.json())
+      .then((data) => setRelatedEvents(Array.isArray(data) ? data : []))
+      .catch(() => setRelatedEvents([]));
+  }, [event?.id, event?.description]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -274,6 +316,26 @@ export function EventModal({
 
           <div className="flex flex-col gap-2">
             <Label htmlFor="description">Description</Label>
+            {/* Related events — shown above description when a Ticket URL links multiple events */}
+            {relatedEvents.length > 0 && (
+              <div className="flex flex-col gap-1 bg-muted/40 rounded-md px-2.5 py-2 -mt-0.5 border border-border/50">
+                <p className="text-xs text-muted-foreground font-medium">Related Events 相關活動</p>
+                {relatedEvents.map((re) => (
+                  <button
+                    key={re.id}
+                    type="button"
+                    onClick={() => onEventSelect?.(re.id)}
+                    className="flex items-center gap-2 text-sm text-left hover:bg-muted/60 rounded px-1.5 py-1 transition-colors -mx-1"
+                  >
+                    <div className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: re.calendarColor }} />
+                    <span className="truncate flex-1">{re.title}</span>
+                    <span className="text-muted-foreground text-xs shrink-0 tabular-nums">
+                      {new Date(re.startTime).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
             <Textarea
               id="description"
               placeholder="Add description"
@@ -309,19 +371,43 @@ export function EventModal({
 
         {/* Sticky footer — always visible regardless of scroll position */}
         <div className="flex items-center justify-between pt-3 border-t shrink-0">
-          {event && !readOnly && (
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={handleDelete}
-              disabled={saving}
-            >
-              <Trash2 className="size-4 mr-1" />
-              Delete
-            </Button>
-          )}
-          <div className="flex items-center gap-2 ml-auto">
+          <div className="flex items-center gap-2">
+            {event && !readOnly && (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={handleDelete}
+                disabled={saving}
+              >
+                <Trash2 className="size-4 mr-1" />
+                Delete
+              </Button>
+            )}
+            {event && !readOnly && onCopy && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  onCopy({
+                    title,
+                    description: description || undefined,
+                    location: location || undefined,
+                    startTime: new Date(startTime).toISOString(),
+                    endTime: new Date(endTime).toISOString(),
+                    allDay,
+                    calendarId,
+                  })
+                }
+                disabled={saving}
+              >
+                <Copy className="size-4 mr-1" />
+                Copy
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
             <Button
               type="button"
               variant="outline"

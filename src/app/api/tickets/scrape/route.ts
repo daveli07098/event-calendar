@@ -1,44 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 // ---------------------------------------------------------------------------
-// AI usage rate limiter — in-memory, resets daily per user
-// Prevents quota burn if the token is misused or the page is hammered.
+// AI usage rate limiter — DB-backed, persists across hot reloads and restarts
 // ---------------------------------------------------------------------------
 const AI_DAILY_LIMIT = 250; // max AI-powered scrapes per user per day
-
-interface RateBucket { count: number; dayKey: string }
-const rateLimitMap = new Map<string, RateBucket>();
 
 function getDayKey() {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
 /** Returns true if the user still has quota remaining (does NOT increment). */
-function checkRemainingAiLimit(userId: string): boolean {
+async function checkRemainingAiLimit(userId: string): Promise<boolean> {
   const today = getDayKey();
-  const bucket = rateLimitMap.get(userId);
-  if (!bucket || bucket.dayKey !== today) return true;
-  return bucket.count < AI_DAILY_LIMIT;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { aiQuotaDate: true, aiQuotaCount: true },
+  });
+  if (!user || user.aiQuotaDate !== today) return true;
+  return user.aiQuotaCount < AI_DAILY_LIMIT;
 }
 
 /** Increments the counter. Call only after a successful AI response. */
-function incrementAiLimit(userId: string): void {
+async function incrementAiLimit(userId: string): Promise<void> {
   const today = getDayKey();
-  const bucket = rateLimitMap.get(userId);
-  if (!bucket || bucket.dayKey !== today) {
-    rateLimitMap.set(userId, { count: 1, dayKey: today });
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { aiQuotaDate: true },
+  });
+  if (!user || user.aiQuotaDate !== today) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { aiQuotaDate: today, aiQuotaCount: 1 },
+    });
   } else {
-    bucket.count += 1;
+    await prisma.user.update({
+      where: { id: userId },
+      data: { aiQuotaCount: { increment: 1 } },
+    });
   }
 }
 
 /** How many AI calls remain today for this user. */
-function remainingAiCalls(userId: string): number {
+async function remainingAiCalls(userId: string): Promise<number> {
   const today = getDayKey();
-  const bucket = rateLimitMap.get(userId);
-  if (!bucket || bucket.dayKey !== today) return AI_DAILY_LIMIT;
-  return Math.max(0, AI_DAILY_LIMIT - bucket.count);
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { aiQuotaDate: true, aiQuotaCount: true },
+  });
+  if (!user || user.aiQuotaDate !== today) return AI_DAILY_LIMIT;
+  return Math.max(0, AI_DAILY_LIMIT - (user.aiQuotaCount ?? 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -250,15 +262,21 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       // Venue from the first concert night that has location data
       const locationEvent = firstNight;
       if (locationEvent.raw.location) {
-        const loc = locationEvent.raw.location as Record<string, unknown>;
-        schemaVenue = typeof loc.name === "string" ? loc.name.trim() : null;
-        const addr = loc.address as Record<string, unknown> | string | undefined;
-        if (addr && typeof addr === "object") {
-          schemaLocation = [addr.streetAddress, addr.addressLocality, addr.addressCountry]
-            .filter(Boolean)
-            .join(", ");
-        } else if (typeof addr === "string") {
-          schemaLocation = addr;
+        const locRaw = locationEvent.raw.location;
+        if (typeof locRaw === "string") {
+          // Plain string location — use directly as venue name
+          schemaVenue = locRaw.trim() || null;
+        } else {
+          const loc = locRaw as Record<string, unknown>;
+          schemaVenue = typeof loc.name === "string" ? loc.name.trim() : null;
+          const addr = loc.address as Record<string, unknown> | string | undefined;
+          if (addr && typeof addr === "object") {
+            schemaLocation = [addr.streetAddress, addr.addressLocality, addr.addressCountry]
+              .filter(Boolean)
+              .join(", ");
+          } else if (typeof addr === "string") {
+            schemaLocation = addr;
+          }
         }
       }
 
@@ -656,8 +674,8 @@ export async function POST(req: NextRequest) {
   // Only check quota if at least one AI provider is configured AND user didn't request OG-meta only.
   // Falls back to OG-meta if the user has hit their limit or no AI key exists.
   const hasAiProvider = !forceOgMeta && !!(geminiKey || githubToken || groqKey);
-  const withinLimit = hasAiProvider ? checkRemainingAiLimit(uid) : false;
-  const remaining = remainingAiCalls(uid);
+  const withinLimit = hasAiProvider ? await checkRemainingAiLimit(uid) : false;
+  const remaining = await remainingAiCalls(uid);
 
   let aiError: string | null = null;
   let aiTokensUsed: number | null = null;
@@ -719,7 +737,7 @@ export async function POST(req: NextRequest) {
         aiError = null;
         aiTokensUsed = (result as Record<string, unknown>)._tokensUsed as number | null ?? null;
         if (aiTokensUsed) console.log(`[tickets/scrape] ${name} tokens used: ${aiTokensUsed}`);
-        incrementAiLimit(uid);
+        await incrementAiLimit(uid);
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -788,7 +806,7 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const uid = session.user.id;
-  const remaining = remainingAiCalls(uid);
+  const remaining = await remainingAiCalls(uid);
   return NextResponse.json({
     aiQuota: {
       used: AI_DAILY_LIMIT - remaining,

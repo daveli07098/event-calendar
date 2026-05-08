@@ -392,6 +392,13 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
         onSave={handleSaveEvent}
         onDelete={handleDeleteEvent}
         onCopy={handleCopyEvent}
+        onEventSelect={(id) => {
+          const e = events.find((ev) => ev.id === id);
+          if (e) {
+            setSelectedRange(null);
+            setSelectedEvent(e);
+          }
+        }}
         readOnly={selectedEventReadOnly}
       />
     </>

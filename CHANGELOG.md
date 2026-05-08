@@ -5,6 +5,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [2026-05-09] — Session: Related Events + Quota Persistence + Scraper Fixes
+### Fixed
+- fix(diff): missing `/**` comment opener caused ECMAScript parse error in diff/route.ts ([707201e])
+- fix(tickets): AI quota now DB-persisted (`aiQuotaDate`/`aiQuotaCount` on User); survives dev hot-reloads and server restarts ([707201e])
+- fix(scrape): JSON-LD location as plain string now used directly as venue (fixes empty venue on timable multi-night events like IVE) ([707201e])
+### Added
+- feat(tickets): `GET /api/events/related` endpoint — finds events sharing the same Ticket URL across calendars ([707201e])
+- feat(events): EventModal shows "Related Events 相關活動" panel above description when a concert event ↔ ticket-sale event share a Ticket URL ([707201e])
+- feat(events): clicking a related event chip in EventModal switches the modal to that event ([707201e])
+
 ## [2026-05-02] — Session: Quota + Venue + Diff context
 ### Fixed
 - fix(tickets): quota badge now fetches on mount via GET /api/tickets/scrape; always visible regardless of extractMethod ([cadbf6a])

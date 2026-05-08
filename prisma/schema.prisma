@@ -45,6 +45,8 @@ model User {
   image          String?
   password       String?          // hashed — null for OAuth-only users
   themeSettings  Json?            // persisted Theme object { mode, accent, radius, density, font }
+  aiQuotaDate    String?          // "YYYY-MM-DD" day key for AI rate limiting
+  aiQuotaCount   Int              @default(0) // AI scrape calls used on aiQuotaDate
   accounts       Account[]
   sessions       Session[]
   calendars      Calendar[]
