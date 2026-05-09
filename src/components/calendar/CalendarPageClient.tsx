@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Search } from "lucide-react";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
@@ -66,26 +65,13 @@ export function CalendarPageClient({
         onCalendarToggle={handleCalendarToggle}
         onAddCalendar={() => setAddCalendarOpen(true)}
       />
-      <div className="relative flex flex-col flex-1 min-w-0">
-        {/* Search button — top-right corner of calendar area */}
-        <button
-          onClick={() => setSearchOpen(true)}
-          className="absolute top-3 right-4 z-10 flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm text-muted-foreground shadow-sm hover:bg-accent hover:text-accent-foreground transition-colors"
-          title="Search events (⌘K)"
-        >
-          <Search className="h-3.5 w-3.5" />
-          <span>Search</span>
-          <kbd className="ml-1 hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">
-            ⌘K
-          </kbd>
-        </button>
-        <CalendarView
-          calendars={calendars}
-          initialEvents={initialEvents}
-          openEventId={openEventId}
-          onOpenEventHandled={() => setOpenEventId(null)}
-        />
-      </div>
+      <CalendarView
+        calendars={calendars}
+        initialEvents={initialEvents}
+        openEventId={openEventId}
+        onOpenEventHandled={() => setOpenEventId(null)}
+        onSearchOpen={() => setSearchOpen(true)}
+      />
       <AddCalendarDialog
         open={addCalendarOpen}
         onOpenChange={setAddCalendarOpen}

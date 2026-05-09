@@ -29,9 +29,11 @@ interface CalendarViewProps {
   /** Called externally (e.g. search) to open a specific event by id in the modal */
   openEventId?: string | null;
   onOpenEventHandled?: () => void;
+  /** Callback to open the search dialog — used by the FC toolbar custom button */
+  onSearchOpen?: () => void;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
@@ -45,16 +47,32 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   const [copyData, setCopyData] = useState<EventFormData | null>(null);
   // Abort controller ref — cancels stale event fetches when the user navigates quickly
   const fetchAbortRef = useRef<AbortController | null>(null);
+  // Ref so FullCalendar customButton click handler can call the search opener
+  const searchOpenRef = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => { searchOpenRef.current = onSearchOpen; }, [onSearchOpen]);
 
   // Open event modal when triggered from external source (e.g. search dialog)
+  // Falls back to a direct API fetch when the event is outside the current view.
   useEffect(() => {
     if (!openEventId) return;
-    const e = events.find((ev) => ev.id === openEventId);
-    if (e) {
+    const local = events.find((ev) => ev.id === openEventId);
+    if (local) {
       setSelectedRange(null);
-      setSelectedEvent(e);
+      setSelectedEvent(local);
       setModalOpen(true);
       onOpenEventHandled?.();
+    } else {
+      fetch(`/api/events/${openEventId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((e) => {
+          if (e) {
+            setSelectedRange(null);
+            setSelectedEvent(e);
+            setModalOpen(true);
+          }
+        })
+        .catch(() => null)
+        .finally(() => onOpenEventHandled?.());
     }
   }, [openEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -317,10 +335,17 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               interactionPlugin,
               listPlugin,
             ]}
+            customButtons={{
+              search: {
+                text: "Search",
+                hint: "Search events (⌘K)",
+                click: () => searchOpenRef.current?.(),
+              },
+            }}
             headerToolbar={{
               left: "prev,next today",
               center: "title",
-              right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+              right: "search dayGridMonth,timeGridWeek,timeGridDay,listWeek",
             }}
             initialView="dayGridMonth"
             editable={true}
@@ -407,6 +432,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         onSave={handleSaveEvent}
         onDelete={handleDeleteEvent}
         onCopy={handleCopyEvent}
+        onSynced={(updated) => {
+          setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+          setSelectedEvent(updated);
+        }}
         onEventSelect={(id) => {
           const e = events.find((ev) => ev.id === id);
           if (e) {

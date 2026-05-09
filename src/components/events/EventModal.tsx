@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, ExternalLink, Copy, ArrowRight } from "lucide-react";
+import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw } from "lucide-react";
 import type { CalendarType, EventType, EventFormData } from "@/types";
 
 interface RelatedEvent {
@@ -41,6 +41,8 @@ interface EventModalProps {
   onSave: (data: EventFormData) => Promise<void>;
   onDelete: () => Promise<void>;
   onCopy?: (data: EventFormData) => void;
+  /** Called after a successful Sync so CalendarView can refresh the updated event */
+  onSynced?: (updatedEvent: EventType) => void;
   onEventSelect?: (eventId: string) => void;
   readOnly?: boolean;
 }
@@ -70,6 +72,7 @@ export function EventModal({
   onSave,
   onDelete,
   onCopy,
+  onSynced,
   onEventSelect,
   readOnly = false,
 }: EventModalProps) {
@@ -81,6 +84,8 @@ export function EventModal({
   const [allDay, setAllDay] = useState(false);
   const [calendarId, setCalendarId] = useState(defaultCalendarId);
   const [saving, setSaving] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
 
   useEffect(() => {
@@ -149,6 +154,61 @@ export function EventModal({
       .then((data) => setRelatedEvents(Array.isArray(data) ? data : []))
       .catch(() => setRelatedEvents([]));
   }, [event?.id, event?.description]);
+
+  // Sync: re-scrape the ticket URL and update this event + related sale events
+  const handleSync = async () => {
+    if (!event) return;
+    const ticketUrl = event.description?.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
+    if (!ticketUrl) return;
+    setSyncing(true);
+    setSyncError(null);
+    try {
+      // 1. Re-scrape the ticket URL
+      const scrapeRes = await fetch("/api/tickets/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: ticketUrl }),
+      });
+      if (!scrapeRes.ok) throw new Error(await scrapeRes.text());
+      const ticket = await scrapeRes.json();
+
+      // 2. Apply all fields to the main event + related sale events
+      const saleEventIds: Record<string, string> = {};
+      for (const re of relatedEvents) {
+        // Infer label from event title prefix (e.g. "Fan Presale:", "Sale Opens:")
+        const labelMatch = re.title.match(/^([^:]+):/);
+        if (labelMatch) saleEventIds[labelMatch[1].trim()] = re.id;
+      }
+
+      const applyRes = await fetch("/api/tickets/update", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventId: event.id,
+          saleEventIds,
+          appliedFields: ["title", "date", "time", "venue", "location",
+            "ticketPrices", "ticketPlatforms", "saleDate", "saleFirstDate",
+            ...Object.keys(saleEventIds).map((l) => `saleWin::${l}`)],
+          ticket,
+          tzOffsetMinutes: -new Date().getTimezoneOffset(),
+        }),
+      });
+      if (!applyRes.ok) throw new Error(await applyRes.text());
+      const { updatedEvent } = await applyRes.json();
+
+      // 3. Refresh local form fields
+      if (updatedEvent) {
+        setTitle(updatedEvent.title ?? title);
+        setDescription(updatedEvent.description ?? description);
+        setLocation(updatedEvent.location ?? location);
+        onSynced?.(updatedEvent);
+      }
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -371,7 +431,11 @@ export function EventModal({
         </form>
 
         {/* Sticky footer — always visible regardless of scroll position */}
-        <div className="flex items-center justify-between pt-3 border-t shrink-0">
+        <div className="flex flex-col gap-2 pt-3 border-t shrink-0">
+          {syncError && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">{syncError}</p>
+          )}
+          <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {event && !readOnly && (
               <Button
@@ -379,7 +443,7 @@ export function EventModal({
                 variant="destructive"
                 size="sm"
                 onClick={handleDelete}
-                disabled={saving}
+                disabled={saving || syncing}
               >
                 <Trash2 className="size-4 mr-1" />
                 Delete
@@ -401,10 +465,24 @@ export function EventModal({
                     calendarId,
                   })
                 }
-                disabled={saving}
+                disabled={saving || syncing}
               >
                 <Copy className="size-4 mr-1" />
                 Copy
+              </Button>
+            )}
+            {/* Sync button — only shown when event has a Ticket URL and user can edit */}
+            {event && !readOnly && event.description?.includes("Ticket URL:") && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSync}
+                disabled={saving || syncing}
+                title="Re-scrape ticket URL and update event data"
+              >
+                <RefreshCw className={`size-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Syncing…" : "Sync"}
               </Button>
             )}
           </div>
@@ -420,11 +498,12 @@ export function EventModal({
               <Button
                 type="submit"
                 form="event-modal-form"
-                disabled={saving || !title.trim()}
+                disabled={saving || syncing || !title.trim()}
               >
                 {saving ? "Saving..." : event ? "Update" : "Create"}
               </Button>
             )}
+          </div>
           </div>
         </div>
       </DialogContent>

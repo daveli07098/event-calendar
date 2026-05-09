@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ---
 
 ## [2026-05-09] — Session: Related Events + Quota Persistence + Scraper Fixes
+- feat(modal): Sync button, search in FC toolbar, openEventId API fallback ([d0ecada])
 - feat(search): event search dialog (Cmd+K) with keyboard navigation, no AI quota ([f19fafa])
 ### Fixed
 - fix(quota): `remaining` was read before `incrementAiLimit` — badge always showed pre-scan count; now reads after increment ([d02893e])
