@@ -101,8 +101,8 @@ function DiffTable({
         >
           <Checkbox
             checked={selected.has(change.field)}
-            onCheckedChange={() => onToggle(change.field)}
-            className="mt-0.5"
+            className="mt-0.5 pointer-events-none"
+            aria-hidden
           />
           <div>
             <p className="text-xs text-muted-foreground mb-0.5">{change.label}</p>

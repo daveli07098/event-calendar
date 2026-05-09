@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, ExternalLink, Copy } from "lucide-react";
+import { Trash2, ExternalLink, Copy, ArrowRight } from "lucide-react";
 import type { CalendarType, EventType, EventFormData } from "@/types";
 
 interface RelatedEvent {
@@ -325,13 +325,14 @@ export function EventModal({
                     key={re.id}
                     type="button"
                     onClick={() => onEventSelect?.(re.id)}
-                    className="flex items-center gap-2 text-sm text-left hover:bg-muted/60 rounded px-1.5 py-1 transition-colors -mx-1"
+                    className="flex items-center gap-2 text-sm text-left hover:bg-muted/60 rounded px-1.5 py-1 transition-colors -mx-1 group"
                   >
                     <div className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: re.calendarColor }} />
                     <span className="truncate flex-1">{re.title}</span>
                     <span className="text-muted-foreground text-xs shrink-0 tabular-nums">
                       {new Date(re.startTime).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                     </span>
+                    <ArrowRight className="size-3.5 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>
                 ))}
               </div>
