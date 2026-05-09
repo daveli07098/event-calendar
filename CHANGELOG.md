@@ -1,3 +1,8 @@
+## [2026-05-10] — Session: multi-day events & scraper fixes
+### Fixed
+- fix(calendar): DayDetailPanel shows spanning events on day 2+ (2da4cab)
+- fix(scrape): AI prompt now extracts endDate for multi-night concerts (2da4cab)
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

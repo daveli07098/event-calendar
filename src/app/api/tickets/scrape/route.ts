@@ -460,8 +460,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event ends on a different or specified date","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"Fan Presale / Priority Sale / Public Sale / etc"}]}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event spans multiple days (last day); for multi-night concerts listing e.g. '16 & 17 May' or 'May 16-17', set date=first night and endDate=last night","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"Fan Presale / Priority Sale / Public Sale / etc"}]}
 IMPORTANT for saleDates: list ALL sale windows found (presale, priority, member, public). Include every distinct date. Order chronologically earliest first.
+IMPORTANT for multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "16/5 and 17/5"), set date to the FIRST night and endDate to the LAST night.
 URL: ${url}
 ${text}`.trim();
 

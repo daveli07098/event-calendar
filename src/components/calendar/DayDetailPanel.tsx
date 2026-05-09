@@ -40,7 +40,11 @@ export function DayDetailPanel({
   modal = false,
 }: DayDetailPanelProps) {
   const dayEvents = events
-    .filter((e) => e.startTime.startsWith(date))
+    .filter((e) => {
+      const start = e.startTime.slice(0, 10);
+      const end = e.endTime ? e.endTime.slice(0, 10) : start;
+      return date >= start && date <= end;
+    })
     .sort((a, b) => {
       if (a.allDay && !b.allDay) return -1;
       if (!a.allDay && b.allDay) return 1;
