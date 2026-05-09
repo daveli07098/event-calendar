@@ -220,6 +220,46 @@
   padding: 4px 8px;
 }
 
+/* ── Mobile responsive overrides ── */
+@media (max-width: 767px) {
+  /* Tighter toolbar for small screens */
+  .fc .fc-toolbar {
+    gap: 4px;
+  }
+  .fc .fc-toolbar-title {
+    font-size: 0.95rem !important;
+  }
+  .fc .fc-button {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+  }
+  /* Hamburger menu button — larger tap target */
+  .fc .fc-menu-button {
+    font-size: 1rem;
+    padding: 0.25rem 0.6rem;
+  }
+  /* Reduce calendar grid cell padding */
+  .fc .fc-daygrid-day-number {
+    font-size: 0.75rem;
+    padding: 2px 4px;
+  }
+  .fc .fc-col-header-cell-cushion {
+    font-size: 0.72rem;
+    padding: 2px 4px;
+  }
+  /* List view: bigger tap targets */
+  .fc .fc-list-event td {
+    padding: 10px 8px;
+  }
+  .fc .fc-list-event-title a {
+    font-size: 0.875rem;
+  }
+  /* Events in month grid: slightly larger touch targets */
+  .fc .fc-daygrid-event {
+    margin: 1px 2px;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

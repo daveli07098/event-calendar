@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, ChevronLeft, ChevronRight, Settings, Users, Megaphone, Ticket } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, Settings, Users, Megaphone, Ticket, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
@@ -11,12 +11,18 @@ interface CalendarSidebarProps {
   calendars: CalendarType[];
   onCalendarToggle: (id: string, visible: boolean) => void;
   onAddCalendar: () => void;
+  /** Mobile: whether the drawer is open */
+  mobileOpen?: boolean;
+  /** Mobile: callback to close the drawer */
+  onMobileClose?: () => void;
 }
 
 export function CalendarSidebar({
   calendars,
   onCalendarToggle,
   onAddCalendar,
+  mobileOpen = false,
+  onMobileClose,
 }: CalendarSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -38,7 +44,8 @@ export function CalendarSidebar({
 
   if (collapsed) {
     return (
-      <div className="w-12 border-r border-border bg-card flex flex-col items-center pt-4">
+      // On mobile, collapsed sidebar is fully hidden (mobile uses drawer instead)
+      <div className="hidden md:flex w-12 border-r border-border bg-card flex-col items-center pt-4">
         <Button
           variant="ghost"
           size="icon"
@@ -51,19 +58,31 @@ export function CalendarSidebar({
     );
   }
 
-  return (
-    <div className="w-64 border-r border-border bg-card flex flex-col">
-      {/* Collapse button */}
+  const sidebarContent = (
+    <div className="w-64 border-r border-border bg-card flex flex-col h-full">
+      {/* Header row: title + collapse (desktop) or close (mobile) */}
       <div className="flex items-center justify-between p-3 border-b border-border">
         <span className="text-sm font-semibold">Calendars</span>
+        {/* Desktop collapse */}
         <Button
           variant="ghost"
           size="icon"
           onClick={() => setCollapsed(true)}
-          className="size-6"
+          className="size-6 hidden md:flex"
         >
           <ChevronLeft className="size-4" />
         </Button>
+        {/* Mobile close */}
+        {onMobileClose && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onMobileClose}
+            className="size-6 md:hidden"
+          >
+            <X className="size-4" />
+          </Button>
+        )}
       </div>
 
       {/* Mini Calendar */}
@@ -220,5 +239,29 @@ export function CalendarSidebar({
         </Link>
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {/* Desktop sidebar — always rendered, hidden on mobile */}
+      <div className="hidden md:flex shrink-0">
+        {sidebarContent}
+      </div>
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex">
+          {/* Scrim */}
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={onMobileClose}
+          />
+          {/* Drawer panel */}
+          <div className="relative z-10 flex h-full">
+            {sidebarContent}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

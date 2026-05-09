@@ -20,6 +20,7 @@ export function CalendarPageClient({
   const [addCalendarOpen, setAddCalendarOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Cmd+K / Ctrl+K opens search
   useEffect(() => {
@@ -59,11 +60,13 @@ export function CalendarPageClient({
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-screen overflow-hidden">
       <CalendarSidebar
         calendars={calendars}
         onCalendarToggle={handleCalendarToggle}
         onAddCalendar={() => setAddCalendarOpen(true)}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
       />
       <CalendarView
         calendars={calendars}
@@ -71,6 +74,7 @@ export function CalendarPageClient({
         openEventId={openEventId}
         onOpenEventHandled={() => setOpenEventId(null)}
         onSearchOpen={() => setSearchOpen(true)}
+        onMobileMenuOpen={() => setMobileSidebarOpen(true)}
       />
       <AddCalendarDialog
         open={addCalendarOpen}

@@ -155,3 +155,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - chore: Bootstrap Copilot agent files with session-wrap changelog workflow ([30d2bce])
 - chore: VS Code settings — enable/configure Copilot sidecar ([54255ca], [d172a80])
 
+
+## [2026-05-09] — Session: mobile responsive
+### Added
+- feat(mobile): sidebar drawer, list view on mobile, hamburger FC toolbar button ([3dc8a4b])

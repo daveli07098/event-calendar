@@ -31,10 +31,21 @@ interface CalendarViewProps {
   onOpenEventHandled?: () => void;
   /** Callback to open the search dialog — used by the FC toolbar custom button */
   onSearchOpen?: () => void;
+  /** Mobile: opens the sidebar drawer */
+  onMobileMenuOpen?: () => void;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
   const [newEventId, setNewEventId] = useState<string | null>(null);
@@ -50,6 +61,8 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   // Ref so FullCalendar customButton click handler can call the search opener
   const searchOpenRef = useRef<(() => void) | undefined>(undefined);
   useEffect(() => { searchOpenRef.current = onSearchOpen; }, [onSearchOpen]);
+  const mobileMenuRef = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => { mobileMenuRef.current = onMobileMenuOpen; }, [onMobileMenuOpen]);
 
   // Open event modal when triggered from external source (e.g. search dialog)
   // Falls back to a direct API fetch when the event is outside the current view.
@@ -327,7 +340,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       />
       {/* Calendar + optional day-detail panel side by side */}
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 min-w-0 p-4">
+        <div className="flex-1 min-w-0 p-1 md:p-4">
           <FullCalendar
             plugins={[
               dayGridPlugin,
@@ -336,22 +349,31 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               listPlugin,
             ]}
             customButtons={{
+              menu: {
+                text: "☰",
+                hint: "Open menu",
+                click: () => mobileMenuRef.current?.(),
+              },
               search: {
                 text: "Search",
                 hint: "Search events (⌘K)",
                 click: () => searchOpenRef.current?.(),
               },
             }}
-            headerToolbar={{
+            headerToolbar={isMobile ? {
+              left: "menu prev,next",
+              center: "title",
+              right: "today",
+            } : {
               left: "prev,next today",
               center: "title",
               right: "search dayGridMonth,timeGridWeek,timeGridDay,listWeek",
             }}
-            initialView="dayGridMonth"
-            editable={true}
+            initialView={isMobile ? "listWeek" : "dayGridMonth"}
+            editable={!isMobile}
             selectable={true}
             selectMirror={true}
-            dayMaxEvents={true}
+            dayMaxEvents={isMobile ? 3 : true}
             events={fcEvents}
             eventContent={renderEventContent}
             eventClassNames={(arg) => {
@@ -372,7 +394,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             eventDrop={handleEventDrop}
             eventResize={handleEventResize}
             datesSet={handleDatesSet}
-            height="calc(100vh - 4rem)"
+            height="calc(100svh - 2rem)"
             nowIndicator={true}
             eventDisplay="block"
           />
