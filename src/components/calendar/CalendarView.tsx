@@ -405,6 +405,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             date={dayPanelDate}
             events={filteredEvents}
             calendars={calendars}
+            modal={isMobile}
             onClose={() => setDayPanelDate(null)}
             onCreateEvent={(date) => {
               setSelectedEvent(null);

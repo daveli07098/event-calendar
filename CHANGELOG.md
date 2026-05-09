@@ -16,6 +16,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - fix(tickets): AI quota now DB-persisted (`aiQuotaDate`/`aiQuotaCount` on User); survives dev hot-reloads and server restarts ([d75c0a1])
 - fix(scrape): JSON-LD location as plain string now used directly as venue (fixes empty venue on timable multi-night events like IVE) ([d75c0a1])
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(tickets): `GET /api/events/related` endpoint — finds events sharing the same Ticket URL across calendars ([d75c0a1])
 - feat(events): EventModal shows "Related Events 相關活動" panel above description when concert ↔ ticket-sale events share a Ticket URL ([d75c0a1])
 - feat(events): clicking a related event chip in EventModal switches the modal to that event ([d75c0a1])
@@ -28,6 +29,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - fix(tickets): venue field now falls back to data.location for events where AI sets location instead of venue (e.g. ZUTOMAYO) ([cadbf6a])
 - fix(tickets): diff context panel now shows stored sale windows (label + date + time) for all ticket events ([cadbf6a])
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(tickets): GET /api/tickets/scrape endpoint returns current AI quota without running a scrape ([cadbf6a])
 
 ## [2026-05-02] — Session: Quota
@@ -36,6 +38,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-04-27] — Session: Ticket Section
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(tickets): AI-powered Ticket Section page for auto-importing event URLs ([b226c5a])
   - `/tickets` page — paste any ticket/event URL; AI extracts title, date, time, venue, description
   - `/api/tickets/scrape` — server-side HTML fetch (SSRF-protected) + AI extraction with 4 provider tiers:
@@ -48,6 +51,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-04-27] — Session: Google sync + account management
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(calendar): per-calendar Google sync button + unlink Google account ([bcf01e7])
   - `POST /api/calendars/[id]/sync` — re-runs full Google Calendar event import for a linked calendar; only owner can trigger; returns count of synced events
   - `GET /api/google/account` — returns 200/404 to tell the UI if Google is linked
@@ -57,6 +61,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-04-27] — Session: ICS export + Google account management
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(calendar): ICS export + Google account reconnect and deduplication ([61872bf])
   - `GET /api/calendars/[id]/export` — RFC 5545 compliant ICS download (works in Google Calendar, Apple Calendar, Outlook)
     - Proper line folding at 75 chars, text escaping, UTC datetimes
@@ -69,6 +74,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-04-27] — Session: Event creation animation
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(calendar): spring bounce animation for newly created events ([195bc39])
   - `newEventId` state tracks the just-created event for 2 s
   - `eventClassNames` callback adds `fc-event-new` to the FC event wrapper
@@ -80,6 +86,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2026-04-26] — Session: Auto-commit rules + feature commits
 
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(calendar): event reminder toasts + browser notifications (10-min warning + "starting now") with slide animations ([8e0d71c])
 - feat(calendar): `EventReminder` component with progress bar and auto-dismiss ([8e0d71c])
 - feat(calendars): `/api/calendars/[id]/duplicate` — duplicate a calendar with all its events ([8e0d71c])
@@ -123,6 +130,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2026-04-25] — Session: PostgreSQL migration + calendar features
 
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(db): Switch to PostgreSQL via `@prisma/adapter-pg`; `prisma.ts` uses `PrismaPg` driver adapter ([72f7cc9])
 - feat(db): Prisma migration `20260425172814_add_user_theme_settings` — theme/appearance columns on User model ([72f7cc9])
 - feat(calendars): Calendar sharing — `ShareCalendarDialog`, `/api/calendars/[id]/share`, `/api/calendars/[id]/members` routes; `CalendarMember` model; view/collaborative share modes ([72f7cc9])
@@ -158,4 +166,5 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2026-05-09] — Session: mobile responsive
 ### Added
+- fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(mobile): sidebar drawer, list view on mobile, hamburger FC toolbar button ([3dc8a4b])

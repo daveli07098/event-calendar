@@ -11,6 +11,8 @@ interface DayDetailPanelProps {
   onClose: () => void;
   onCreateEvent: (date: string) => void;
   onEditEvent: (event: EventType) => void;
+  /** When true the panel renders as a bottom-sheet modal (mobile) */
+  modal?: boolean;
 }
 
 function formatTime(isoString: string): string {
@@ -35,6 +37,7 @@ export function DayDetailPanel({
   onClose,
   onCreateEvent,
   onEditEvent,
+  modal = false,
 }: DayDetailPanelProps) {
   const dayEvents = events
     .filter((e) => e.startTime.startsWith(date))
@@ -44,8 +47,11 @@ export function DayDetailPanel({
       return new Date(a.startTime).getTime() - new Date(b.startTime).getTime();
     });
 
-  return (
-    <div className="w-72 shrink-0 border-l bg-background flex flex-col overflow-hidden">
+  const panel = (
+    <div className={modal
+      ? "w-full max-h-[70svh] flex flex-col overflow-hidden rounded-t-2xl bg-background"
+      : "w-72 shrink-0 border-l bg-background flex flex-col overflow-hidden"
+    }>
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2.5 border-b">
         <p className="text-sm font-semibold">{formatPanelDate(date)}</p>
@@ -106,4 +112,19 @@ export function DayDetailPanel({
       </div>
     </div>
   );
+
+  if (modal) {
+    return (
+      <div className="fixed inset-0 z-40 flex flex-col justify-end">
+        {/* Scrim */}
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        {/* Sheet */}
+        <div className="relative z-10">
+          {panel}
+        </div>
+      </div>
+    );
+  }
+
+  return panel;
 }
