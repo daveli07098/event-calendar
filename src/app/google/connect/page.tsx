@@ -27,13 +27,11 @@ export default function GoogleConnectPage() {
   const [syncError, setSyncError] = useState("");
   const [results, setResults] = useState<{ name: string; importedEvents: number }[]>([]);
 
-  // On first mount: if user already has synced Google calendars, skip the prompt
+  // On first mount: if user already has a linked Google account, skip the prompt
   useEffect(() => {
-    fetch("/api/calendars")
-      .then((r) => r.json())
-      .then((data: { googleCalendarId?: string | null }[]) => {
-        const alreadySynced = Array.isArray(data) && data.some((c) => !!c.googleCalendarId);
-        if (alreadySynced) router.replace("/");
+    fetch("/api/google/account")
+      .then((r) => {
+        if (r.ok) router.replace("/"); // Google already linked — skip connect flow
       })
       .catch(() => { /* non-fatal — show prompt as fallback */ });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
