@@ -8,7 +8,9 @@ import { prisma } from "@/lib/prisma";
 const AI_DAILY_LIMIT = 250; // max AI-powered scrapes per user per day
 
 function getDayKey() {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  // Use HKT (UTC+8) so quota resets at midnight Hong Kong time, not midnight UTC
+  const hkt = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  return hkt.toISOString().slice(0, 10); // "YYYY-MM-DD" in HKT
 }
 
 // In-memory fallback for quota (used when DB columns not yet migrated)
