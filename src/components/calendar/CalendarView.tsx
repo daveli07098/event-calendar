@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -26,9 +26,12 @@ import { EventReminder } from "@/components/calendar/EventReminder";
 interface CalendarViewProps {
   initialEvents: EventType[];
   calendars: CalendarType[];
+  /** Called externally (e.g. search) to open a specific event by id in the modal */
+  openEventId?: string | null;
+  onOpenEventHandled?: () => void;
 }
 
-export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
@@ -42,6 +45,18 @@ export function CalendarView({ initialEvents, calendars }: CalendarViewProps) {
   const [copyData, setCopyData] = useState<EventFormData | null>(null);
   // Abort controller ref — cancels stale event fetches when the user navigates quickly
   const fetchAbortRef = useRef<AbortController | null>(null);
+
+  // Open event modal when triggered from external source (e.g. search dialog)
+  useEffect(() => {
+    if (!openEventId) return;
+    const e = events.find((ev) => ev.id === openEventId);
+    if (e) {
+      setSelectedRange(null);
+      setSelectedEvent(e);
+      setModalOpen(true);
+      onOpenEventHandled?.();
+    }
+  }, [openEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Returns true if the user can write to the given calendar
   const calendarIsWritable = (calId: string) => {

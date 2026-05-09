@@ -6,6 +6,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ---
 
 ## [2026-05-09] — Session: Related Events + Quota Persistence + Scraper Fixes
+- feat(search): event search dialog (Cmd+K) with keyboard navigation, no AI quota ([f19fafa])
 ### Fixed
 - fix(quota): `remaining` was read before `incrementAiLimit` — badge always showed pre-scan count; now reads after increment ([d02893e])
 - fix(quota): fallback to in-memory if DB columns not yet migrated (prevents 500 crash) ([fc3c9d3])
