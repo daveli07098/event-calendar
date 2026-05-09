@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import FullCalendar from "@fullcalendar/react";
+import type { CalendarApi } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -33,10 +34,15 @@ interface CalendarViewProps {
   onSearchOpen?: () => void;
   /** Mobile: opens the sidebar drawer */
   onMobileMenuOpen?: () => void;
+  /** Called when an event modal opens — used to update the URL (id + ISO start date) */
+  onEventOpen?: (id: string, startTime: string) => void;
+  /** Called when the event modal closes — used to clear the URL params */
+  onEventClose?: () => void;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
+  const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -64,26 +70,29 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   const mobileMenuRef = useRef<(() => void) | undefined>(undefined);
   useEffect(() => { mobileMenuRef.current = onMobileMenuOpen; }, [onMobileMenuOpen]);
 
+  // Helper to navigate the calendar to a date and open the event modal
+  const openEventById = useCallback((e: EventType) => {
+    // Jump FC to the event's month so it's visible
+    const api: CalendarApi | undefined = calendarRef.current?.getApi();
+    if (api) api.gotoDate(e.startTime);
+    setSelectedRange(null);
+    setSelectedEvent(e);
+    setModalOpen(true);
+    onEventOpen?.(e.id, e.startTime);
+  }, [onEventOpen]);
+
   // Open event modal when triggered from external source (e.g. search dialog)
   // Falls back to a direct API fetch when the event is outside the current view.
   useEffect(() => {
     if (!openEventId) return;
     const local = events.find((ev) => ev.id === openEventId);
     if (local) {
-      setSelectedRange(null);
-      setSelectedEvent(local);
-      setModalOpen(true);
+      openEventById(local);
       onOpenEventHandled?.();
     } else {
       fetch(`/api/events/${openEventId}`)
         .then((r) => r.ok ? r.json() : null)
-        .then((e) => {
-          if (e) {
-            setSelectedRange(null);
-            setSelectedEvent(e);
-            setModalOpen(true);
-          }
-        })
+        .then((e) => { if (e) openEventById(e); })
         .catch(() => null)
         .finally(() => onOpenEventHandled?.());
     }
@@ -144,9 +153,11 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   };
 
   const handleEventClick = (clickInfo: EventClickArg) => {
+    const ev = clickInfo.event.extendedProps.event as EventType;
     setSelectedRange(null);
-    setSelectedEvent(clickInfo.event.extendedProps.event as EventType);
+    setSelectedEvent(ev);
     setModalOpen(true);
+    onEventOpen?.(ev.id, ev.startTime);
   };
 
   const handleEventDrop = async (dropInfo: EventDropArg) => {
@@ -342,6 +353,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 min-w-0 p-1 md:p-4">
           <FullCalendar
+            ref={calendarRef}
             plugins={[
               dayGridPlugin,
               timeGridPlugin,
@@ -445,7 +457,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         open={modalOpen}
         onOpenChange={(open) => {
           setModalOpen(open);
-          if (!open) setCopyData(null);
+          if (!open) {
+            setCopyData(null);
+            onEventClose?.();
+          }
         }}
         event={selectedEvent}
         calendars={calendars}

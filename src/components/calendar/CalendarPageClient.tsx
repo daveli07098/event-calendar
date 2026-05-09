@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
@@ -21,6 +21,30 @@ export function CalendarPageClient({
   const [searchOpen, setSearchOpen] = useState(false);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // On mount: open event + navigate to date if URL has ?event=id
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const eventId = params.get("event");
+    if (eventId) setOpenEventId(eventId);
+  }, []);
+
+  // Write ?event=id&date=YYYY-MM-DD into the URL (no page reload)
+  const handleEventOpen = useCallback((id: string, startTime: string) => {
+    const date = startTime.slice(0, 10);
+    const url = new URL(window.location.href);
+    url.searchParams.set("event", id);
+    url.searchParams.set("date", date);
+    window.history.replaceState(null, "", url.toString());
+  }, []);
+
+  // Clear event params from URL when modal closes
+  const handleEventClose = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("event");
+    url.searchParams.delete("date");
+    window.history.replaceState(null, "", url.toString());
+  }, []);
 
   // Cmd+K / Ctrl+K opens search
   useEffect(() => {
@@ -73,6 +97,8 @@ export function CalendarPageClient({
         initialEvents={initialEvents}
         openEventId={openEventId}
         onOpenEventHandled={() => setOpenEventId(null)}
+        onEventOpen={handleEventOpen}
+        onEventClose={handleEventClose}
         onSearchOpen={() => setSearchOpen(true)}
         onMobileMenuOpen={() => setMobileSidebarOpen(true)}
       />

@@ -168,3 +168,4 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - fix(mobile): DayDetailPanel as bottom-sheet on mobile ([605f755])
 - feat(mobile): sidebar drawer, list view on mobile, hamburger FC toolbar button ([3dc8a4b])
+- feat(url): event URL anchor (?event=id&date=YYYY-MM-DD); gotoDate on open ([100cef3])
