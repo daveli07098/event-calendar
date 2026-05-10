@@ -1,3 +1,8 @@
+## [2026-05-10] — Session: date extraction accuracy fix
+### Fixed
+- fix(scrape): add `dateConfident` flag to MetaFallback — when date came from JSON-LD concert blocks (events with location), prefer it over AI result (which can confuse ticket-sale dates with performance dates) (15b2dbe)
+- fix(scrape): AI prompt now has CRITICAL instruction — "date" = performance date, NEVER a sale/presale date (15b2dbe)
+
 ## [2026-05-10] — Session: multi-slot classification fix
 ### Fixed
 - fix(scrape): reclassify location-less JSON-LD events within concert date range as slots, not sale windows (4e1d8d8)

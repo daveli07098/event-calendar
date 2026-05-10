@@ -176,6 +176,7 @@ interface MetaFallback {
   description: string | null;
   imageUrl: string | null;
   date: string | null;
+  dateConfident: boolean;         // true when date came from a JSON-LD concert block (with location)
   time: string | null;
   endDate: string | null;         // last night of multi-night concert
   endTime: string | null;         // time of last night
@@ -572,6 +573,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     description: decodeHtml(ogDesc),
     imageUrl: ogImage,
     date: schemaDate ?? (eventDate ? eventDate.split("T")[0] : null),
+    dateConfident: concertEvents.length > 0,
     time: schemaTime ?? (eventDate && eventDate.includes("T") ? eventDate.split("T")[1].slice(0, 5) : null),
     endDate: schemaEndDate,
     endTime: schemaEndTime,
@@ -592,6 +594,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
 {"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event spans multiple days (last day); for multi-night concerts listing e.g. '16 & 17 May' or 'May 16-17', set date=first night and endDate=last night","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"Fan Presale / Priority Sale / Public Sale / etc"}]}
+CRITICAL: "date" must be the ACTUAL PERFORMANCE DATE (when the show/match/concert physically happens at the venue), NEVER a ticket sale or presale date. Ticket sales happen weeks/months before the event - those dates belong only in saleDate/saleFirstDate/saleDates. If the page lists multiple sale windows (e.g. presale May 11, public sale May 14) and actual show dates (e.g. Jul 31, Aug 4), set date=Jul 31 (first show date).
 IMPORTANT for saleDates: list ALL sale windows found (presale, priority, member, public). Include every distinct date. Order chronologically earliest first.
 IMPORTANT for multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "16/5 and 17/5"), set date to the FIRST night and endDate to the LAST night.
 URL: ${url}
@@ -921,7 +924,9 @@ export async function POST(req: NextRequest) {
   // Merge: AI > OG/Schema > text extraction
   const ticket: TicketData = {
     title: aiResult.title ?? meta.title ?? "Untitled Event",
-    date: aiResult.date ?? meta.date ?? textDate.date,
+    // Prefer meta.date when it came from a JSON-LD concert block (has location) — those are
+    // structurally reliable and can't be confused with sale-window dates the way AI can be.
+    date: (meta.dateConfident ? meta.date : null) ?? aiResult.date ?? meta.date ?? textDate.date,
     time: aiResult.time ?? meta.time ?? textDate.time,
     venue: aiResult.venue ?? meta.venue,
     location: aiResult.location ?? meta.location,
