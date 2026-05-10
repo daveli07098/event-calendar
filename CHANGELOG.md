@@ -1,10 +1,11 @@
 ## [2026-05-10] — Session: calendar UX + location tags + venue cleanup
 ### Added
-- feat(calendar): "+N more" link now opens DayDetailPanel instead of FC default popover ([7b86f48])
-- feat(events): location region badge (e.g. "Hong Kong") shown in EventModal label and DayDetailPanel event cards, derived from location string (7b86f48)
+- feat(calendar): "+N more" link now opens DayDetailPanel instead of FC default popover (19b1e4e)
+- feat(events): location region badge (e.g. "Hong Kong") shown in EventModal label and DayDetailPanel event cards, derived from location string (19b1e4e)
+- feat(calendar): HK region badge rendered on every event chip across all views — list (listWeek), month grid (dayGridMonth), week/day time grid, and all-day events (f7a1652)
 ### Fixed
-- fix(venues): GET /api/venues now filters out 地點待定 TBD placeholder entries and deduplicates "X, Y" rows where "X" already exists — no DB migration needed, applied on every fetch (7b86f48)
-- fix(venues): PUT import skips 地點待定 entries; extended cleanup deletes existing TBD venues and merges "X, Y" duplicates regardless of insert order (7b86f48)
+- fix(venues): GET /api/venues now filters out 地點待定 TBD placeholder entries and deduplicates "X, Y" rows where "X" already exists (19b1e4e)
+- fix(venues): PUT import skips 地點待定 entries; cleanup deletes existing TBD venues and merges "X, Y" duplicates (19b1e4e)
 
 ## [2026-05-10] — Session: event navigation + seating plan propagation
 ### Changed

@@ -306,15 +306,33 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
 
   const defaultCalendar = calendars.find((c) => c.isDefault) || calendars[0];
 
+  /** Derive a short region label from a location string for badge display. */
+  const regionLabel = (location: string | null | undefined): string | null => {
+    if (!location) return null;
+    if (location.includes("香港") || location.toLowerCase().includes("hong kong")) return "HK";
+    return null;
+  };
+
   // Custom event content — title-first with smaller muted time for timed events
   const renderEventContent = (arg: EventContentArg) => {
     const { event, timeText } = arg;
     const viewType = arg.view.type;
     const color = event.backgroundColor || "#4285f4";
+    const ev = event.extendedProps.event as EventType;
+    const region = regionLabel(ev?.location);
 
-    // List view — render title only; FC handles dot + time columns
+    // List view — title + optional region badge; FC handles dot + time columns
     if (viewType.startsWith("list")) {
-      return <span className="text-sm">{event.title}</span>;
+      return (
+        <span className="text-sm flex items-center gap-1.5 flex-wrap">
+          <span>{event.title}</span>
+          {region && (
+            <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 leading-tight shrink-0">
+              {region}
+            </span>
+          )}
+        </span>
+      );
     }
 
     if (event.allDay) {
@@ -322,12 +340,17 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       return (
         <div className="ec-allday-event">
           <span className="ec-event-title">{event.title}</span>
+          {region && (
+            <span className="inline-flex items-center rounded px-1 text-[9px] font-medium bg-white/20 leading-tight shrink-0 ml-1">
+              {region}
+            </span>
+          )}
         </div>
       );
     }
 
     if (viewType.startsWith("dayGrid")) {
-      // Timed in month grid: dot + title + smaller time
+      // Timed in month grid: dot + title + smaller time + region badge
       return (
         <div className="ec-timed-event">
           <span
@@ -338,14 +361,24 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           {timeText && (
             <span className="ec-event-time">{timeText}</span>
           )}
+          {region && (
+            <span className="inline-flex items-center rounded px-1 py-0 text-[9px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 leading-tight shrink-0 ml-auto">
+              {region}
+            </span>
+          )}
         </div>
       );
     }
 
-    // timeGrid (week / day): title on top, time below
+    // timeGrid (week / day): title on top, optional region badge, time below
     return (
       <div className="ec-timegrid-event">
         <span className="ec-event-title">{event.title}</span>
+        {region && (
+          <span className="inline-flex items-center rounded px-1 py-0 text-[9px] font-medium bg-white/20 leading-tight mt-0.5 self-start">
+            {region}
+          </span>
+        )}
         {timeText && <span className="ec-event-time">{timeText}</span>}
       </div>
     );
