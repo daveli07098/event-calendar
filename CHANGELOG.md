@@ -1,3 +1,9 @@
+## [2026-05-10] — Session: scraper end time + sale date accuracy
+### Fixed
+- fix(tickets): `extractMeta` now extracts end time from JSON-LD concert event's `endDate` field — single-night shows (e.g. "20:00–22:30") now populate the END TIME field in the form instead of leaving it blank (f31cc05)
+- fix(tickets): POST handler sanitizes concert date from all sale-window fields after build — AI hallucinating `saleFirstDate = concert date` is now silently corrected (f31cc05)
+- fix(tickets): EXTRACT\_PROMPT significantly strengthened: explicit examples of ALL sale window types (VIP priority, credit card, ticketing-platform, fan club, public sale), strict rule that saleFirstDate must be before performance date, clearer endTime extraction instruction (f31cc05)
+
 ## [2026-05-10] — Session: ticket slot end time extraction
 ### Fixed
 - fix(tickets): `extractTextSlots` now parses optional end time from Chinese date-range patterns ("2026年8月6至16日 7:30 PM – 10:10 PM") — end time 22:10 is captured and shown in slot label (3a33c78)

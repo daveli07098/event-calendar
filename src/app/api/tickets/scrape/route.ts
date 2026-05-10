@@ -422,6 +422,24 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
         schemaEndTime = lastParts[1] ? lastParts[1].slice(0, 5) : null;
       }
 
+      // Single-night or any concert: extract end time from JSON-LD endDate field when available.
+      // Timable and other structured sites include endDate so we can show "8:00 PM–10:30 PM" in the form.
+      if (!schemaEndTime) {
+        const firstConcertRawEnd = typeof firstNight.raw.endDate === "string" ? firstNight.raw.endDate : null;
+        if (firstConcertRawEnd?.includes("T")) {
+          const endDateOnly = firstConcertRawEnd.slice(0, 10);
+          const endT = firstConcertRawEnd.split("T")[1]?.slice(0, 5) ?? null;
+          if (endDateOnly === schemaDate) {
+            // Same-day end — capture the end time
+            schemaEndTime = endT;
+          } else if (schemaDate && endDateOnly > schemaDate && !schemaEndDate) {
+            // Late-night show crossing midnight (e.g. ends 00:30 next day)
+            schemaEndDate = endDateOnly;
+            schemaEndTime = endT;
+          }
+        }
+      }
+
       // Venue from the first concert night that has location data
       const locationEvent = firstNight;
       if (locationEvent.raw.location) {
@@ -668,10 +686,26 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD if event spans multiple days (last day); for multi-night concerts listing e.g. '16 & 17 May' or 'May 16-17', set date=first night and endDate=last night","endTime":"HH:MM 24h end time if stated","venue":"building name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general sale (not presale)","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/member sale if different from saleDate","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"Fan Presale / Priority Sale / Public Sale / etc"}]}
-CRITICAL: "date" must be the ACTUAL PERFORMANCE DATE (when the show/match/concert physically happens at the venue), NEVER a ticket sale or presale date. Ticket sales happen weeks/months before the event - those dates belong only in saleDate/saleFirstDate/saleDates. If the page lists multiple sale windows (e.g. presale May 11, public sale May 14) and actual show dates (e.g. Jul 31, Aug 4), set date=Jul 31 (first show date).
-IMPORTANT for saleDates: list ALL sale windows found (presale, priority, member, public). Include every distinct date. Order chronologically earliest first.
-IMPORTANT for multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "16/5 and 17/5"), set date to the FIRST night and endDate to the LAST night.
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}]}
+
+CRITICAL — performance date vs sale dates:
+  • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
+  • Sale dates are weeks or months BEFORE the show. If the page shows e.g. show on Sep 30 and sales starting Mar 20, then date=Sep 30, saleDates start Mar 20.
+  • saleFirstDate MUST be earlier than "date". If your saleFirstDate equals "date", you have confused the concert date with a sale date — set saleFirstDate to null instead.
+
+CRITICAL — extract ALL sale windows into saleDates (one entry per distinct date/type):
+  Common sale types to look for (use the EXACT label shown on the page, Chinese or English):
+    • VIP / Exclusive priority  (快達票 VIP 優先訂票, VIP Presale, VIP Priority)
+    • Credit card priority       (信用卡優先訂票, Visa/Mastercard Priority)
+    • Ticketing-platform priority(快達票優先訂票, HK Ticketing Priority, Cityline Priority)
+    • Fan-club / member presale  (官方球迷會會員預訂, Fan Club Presale, Member Sale)
+    • General public on-sale     (公開發售, General Sale, Public Sale)
+  Each type is a separate saleDates entry with its own date and label.
+  Order saleDates chronologically (earliest first). Also set saleFirstDate = saleDates[0].date and saleDate = saleDates[last].date.
+
+CRITICAL — multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "Aug 6–16"), set date=FIRST night and endDate=LAST night.
+CRITICAL — endTime: extract from patterns like "7:30 PM – 10:10 PM" (→ 22:10) or JSON-LD endDate.
+
 URL: ${url}
 ${text}`.trim();
 
@@ -1165,6 +1199,18 @@ export async function POST(req: NextRequest) {
     sourceTimezone: meta.sourceTimezone,
     slots: meta.slots,
   };
+
+  // Post-build sanitization: remove any sale-window dates that equal the concert date.
+  // The AI occasionally outputs the performance date as saleFirstDate — this is always wrong.
+  if (ticket.date) {
+    const perfDate = ticket.date;
+    if (ticket.saleFirstDate === perfDate) ticket.saleFirstDate = null;
+    if (ticket.saleDate === perfDate) ticket.saleDate = null;
+    if (ticket.saleDates?.length) {
+      ticket.saleDates = ticket.saleDates.filter((w) => w.date !== perfDate);
+      if (ticket.saleDates.length === 0) ticket.saleDates = null;
+    }
+  }
 
   if (!ticket.title || ticket.title === "Untitled Event") {
     return NextResponse.json(
