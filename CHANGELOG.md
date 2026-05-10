@@ -1,3 +1,11 @@
+## [2026-05-10] — Session: calendar UX + location tags + venue cleanup
+### Added
+- feat(calendar): "+N more" link now opens DayDetailPanel instead of FC default popover ([7b86f48])
+- feat(events): location region badge (e.g. "Hong Kong") shown in EventModal label and DayDetailPanel event cards, derived from location string (7b86f48)
+### Fixed
+- fix(venues): GET /api/venues now filters out 地點待定 TBD placeholder entries and deduplicates "X, Y" rows where "X" already exists — no DB migration needed, applied on every fetch (7b86f48)
+- fix(venues): PUT import skips 地點待定 entries; extended cleanup deletes existing TBD venues and merges "X, Y" duplicates regardless of insert order (7b86f48)
+
 ## [2026-05-10] — Session: event navigation + seating plan propagation
 ### Changed
 - fix(events): clicking a calendar event now opens the DayDetailPanel (day schedule) first instead of jumping straight to the edit modal; user picks the event from the list (ca7b26d)
