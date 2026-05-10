@@ -30,36 +30,14 @@ distinct calendar events according to these rules.
 
 ## Examples
 
-### 粵劇特朗普5.0 — theatre with evening run + matinee (timable.com)
+### 粵劇特朗普5.0 (Theatre — evening run + matinee)
 
-**Source:** timable.com event page  
-**JSON-LD Event blocks with `location`:**
+JSON-LD nights: Jun 13 19:30, Jun 14 19:30, Jun 14 13:30
 
-| Block | `startDate` | `endDate` |
-|---|---|---|
-| Evening (night 1) | Jun 13 19:30 | Jun 13 22:30 |
-| Evening (night 2) | Jun 14 19:30 | Jun 14 22:30 |
-| Matinee | Jun 14 13:30 | Jun 14 16:30 |
+- Time 19:30 group → [Jun 13, Jun 14] consecutive → **Event A: Jun 13–14 · 19:30**
+- Time 13:30 group → [Jun 14] single → **Event B: Jun 14 · 13:30**
 
-**`groupIntoSlots()` output:**
-
-| Time key | Dates | Consecutive? | Result |
-|---|---|---|---|
-| `19:30` | Jun 13, Jun 14 | ✓ gap = 1 day | `date: Jun 13, endDate: Jun 14` |
-| `13:30` | Jun 14 | n/a (single) | `date: Jun 14` |
-
-`slots.length = 2` → picker rendered, both pre-checked.
-
-**Expected slot picker UI:**
-
-```
-☑  Jun 13–14 · 19:30   ← evening run (consecutive → range)
-☑  Jun 14 · 13:30      ← matinee (single night)
-
-[ Add 2 slots ]
-```
-
-Unchecking the matinee and clicking "Add 1 slot" creates only the evening event.
+Both appear as checkboxes in the import UI; user picks which to add.
 
 ### IVE World Tour (Friday special + weekend run)
 

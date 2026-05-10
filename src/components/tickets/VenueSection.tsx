@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Building2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Building2, Loader2, FolderSync } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ export function VenueSection() {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", address: "", city: "Hong Kong", tags: "" });
 
@@ -60,6 +61,26 @@ export function VenueSection() {
     }
   };
 
+  const handleImportFromEvents = async () => {
+    setImporting(true);
+    try {
+      const res = await fetch("/api/venues", { method: "PUT" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Import failed");
+      if (data.imported > 0) {
+        const refreshed = await fetch("/api/venues").then((r) => r.json());
+        setVenues(Array.isArray(refreshed) ? refreshed : []);
+        toast.success(`Imported ${data.imported} venue${data.imported > 1 ? "s" : ""} from your events`);
+      } else {
+        toast.info("No new venues found in your events");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleDelete = async (id: string, name: string) => {
     try {
       const res = await fetch(`/api/venues/${id}`, { method: "DELETE" });
@@ -81,10 +102,16 @@ export function VenueSection() {
             aliases, and tags for future matching.
           </p>
         </div>
-        <Button size="sm" onClick={() => setShowForm((v) => !v)} className="gap-1.5 shrink-0">
-          <Plus className="size-4" />
-          Add Venue
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={handleImportFromEvents} disabled={importing} className="gap-1.5">
+            {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderSync className="size-4" />}
+            Import
+          </Button>
+          <Button size="sm" onClick={() => setShowForm((v) => !v)} className="gap-1.5">
+            <Plus className="size-4" />
+            Add Venue
+          </Button>
+        </div>
       </div>
 
       {/* Add form */}

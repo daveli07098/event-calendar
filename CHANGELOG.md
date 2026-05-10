@@ -1,3 +1,10 @@
+## [2026-05-10] — Session: venue import from events
+### Added
+- feat(venues): PUT /api/venues imports venue names from user's existing event locations/descriptions (e98d716)
+- feat(venues): "Import" button in VenueSection UI with loading state (e98d716)
+### Fixed
+- fix(venues): regenerate Prisma client so EventVenue model is available (e98d716)
+
 ## [2026-05-10] — Session: multi-slot, venue directory, sync diff
 ### Added
 - feat(tickets): slot picker for multi-night events (f37dd18)

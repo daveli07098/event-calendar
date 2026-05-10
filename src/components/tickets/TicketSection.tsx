@@ -798,8 +798,7 @@ export function TicketSection() {
                           onCheckedChange={(checked) =>
                             setSelectedSlots((prev) => {
                               const next = new Set(prev);
-                              if (checked) next.add(i);
-                              else next.delete(i);
+                              checked ? next.add(i) : next.delete(i);
                               return next;
                             })
                           }
