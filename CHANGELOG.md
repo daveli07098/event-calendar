@@ -1,3 +1,11 @@
+## [2026-05-10] — Session: event navigation + seating plan propagation
+### Changed
+- fix(events): clicking a calendar event now opens the DayDetailPanel (day schedule) first instead of jumping straight to the edit modal; user picks the event from the list (ca7b26d)
+- fix(events): clicking a related event from the event modal now navigates to that date and opens the event detail modal directly (works across months — fetches via new GET /api/events/:id) (ca7b26d)
+### Added
+- feat(api): GET /api/events/[id] — fetch a single event by id (ca7b26d)
+- feat(events): saving an event with a Seating Plan URL automatically propagates it to all other events that share the same Ticket URL (ca7b26d)
+
 ## [2026-05-10] — Session: seating plan + related event navigation
 ### Added
 - feat(modal): Seating Plan 座位圖 section — URL input with live image preview, clickable to open full image in new tab, drag-and-drop URL from browser; stored as `Seating Plan: URL` line in description (e91ed32)

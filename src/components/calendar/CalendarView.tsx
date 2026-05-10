@@ -153,10 +153,11 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   };
 
   const handleEventClick = (clickInfo: EventClickArg) => {
+    // Clicking an event in the calendar grid shows the day panel first
+    // so the user sees all events for that day before choosing to edit.
     const ev = clickInfo.event.extendedProps.event as EventType;
-    setSelectedRange(null);
-    setSelectedEvent(ev);
-    setModalOpen(true);
+    const date = ev.startTime.slice(0, 10);
+    setDayPanelDate(date);
     onEventOpen?.(ev.id, ev.startTime);
   };
 
@@ -488,14 +489,29 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
           setSelectedEvent(updated);
         }}
-        onEventSelect={(id, startTime) => {
-          // Navigate to the event's date and open the DayDetailPanel ("time schedule view"),
-          // letting the user choose to open the event detail from there.
-          // Works even if the event is outside the currently loaded date range.
+        onEventSelect={async (id, startTime) => {
+          // Clicking a related event from the modal: navigate to its date and open
+          // the event detail modal directly (fetch it so we handle out-of-range months).
           setModalOpen(false);
           const date = startTime.slice(0, 10);
-          setDayPanelDate(date);
           calendarRef.current?.getApi().gotoDate(date);
+          try {
+            const res = await fetch(`/api/events/${id}`);
+            if (res.ok) {
+              const ev: EventType = await res.json();
+              // Merge into events state so the modal can see a calendar object
+              setEvents((prev) => prev.some((e) => e.id === ev.id) ? prev : [...prev, ev]);
+              setSelectedRange(null);
+              setSelectedEvent(ev);
+              setDayPanelDate(null);
+              setModalOpen(true);
+            } else {
+              // Fallback: just show the day panel if fetch fails
+              setDayPanelDate(date);
+            }
+          } catch {
+            setDayPanelDate(date);
+          }
         }}
         readOnly={selectedEventReadOnly}
       />

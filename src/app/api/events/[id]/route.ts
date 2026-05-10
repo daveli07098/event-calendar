@@ -27,6 +27,20 @@ async function canAccessEvent(eventId: string, userId: string) {
   return { event, canWrite };
 }
 
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+  const access = await canAccessEvent(id, session.user.id);
+  if (!access) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json(access.event);
+}
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -68,6 +82,35 @@ export async function PUT(
     },
     include: { calendar: true },
   });
+
+  // Propagate seating plan changes to all related events that share the same Ticket URL
+  if (description !== undefined) {
+    const ticketUrl = description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1] ?? null;
+    const seatingUrl = description.match(/^Seating Plan: (https?:\/\/[^\s]+)/m)?.[1] ?? null;
+    if (ticketUrl) {
+      // Find all related events (same ticket URL, different event)
+      const relatedEvents = await prisma.event.findMany({
+        where: {
+          id: { not: id },
+          description: { contains: `Ticket URL: ${ticketUrl}` },
+          calendar: { userId: session.user.id },
+        },
+        select: { id: true, description: true },
+      });
+      for (const rel of relatedEvents) {
+        const prevDesc = rel.description ?? "";
+        // Remove existing seating plan line if any
+        let newDesc = prevDesc.replace(/^Seating Plan: https?:\/\/[^\n]*/m, "").replace(/\n{3,}/g, "\n\n");
+        if (seatingUrl) {
+          const line = `Seating Plan: ${seatingUrl}`;
+          newDesc = newDesc.trimEnd() + (newDesc.trim() ? "\n\n" : "") + line;
+        }
+        if (newDesc !== prevDesc) {
+          await prisma.event.update({ where: { id: rel.id }, data: { description: newDesc } });
+        }
+      }
+    }
+  }
 
   return NextResponse.json(updated);
 }
