@@ -488,12 +488,14 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
           setSelectedEvent(updated);
         }}
-        onEventSelect={(id) => {
-          const e = events.find((ev) => ev.id === id);
-          if (e) {
-            setSelectedRange(null);
-            setSelectedEvent(e);
-          }
+        onEventSelect={(id, startTime) => {
+          // Navigate to the event's date and open the DayDetailPanel ("time schedule view"),
+          // letting the user choose to open the event detail from there.
+          // Works even if the event is outside the currently loaded date range.
+          setModalOpen(false);
+          const date = startTime.slice(0, 10);
+          setDayPanelDate(date);
+          calendarRef.current?.getApi().gotoDate(date);
         }}
         readOnly={selectedEventReadOnly}
       />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw } from "lucide-react";
+import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon } from "lucide-react";
 import type { CalendarType, EventType, EventFormData } from "@/types";
 
 interface RelatedEvent {
@@ -43,7 +43,7 @@ interface EventModalProps {
   onCopy?: (data: EventFormData) => void;
   /** Called after a successful Sync so CalendarView can refresh the updated event */
   onSynced?: (updatedEvent: EventType) => void;
-  onEventSelect?: (eventId: string) => void;
+  onEventSelect?: (eventId: string, startTime: string) => void;
   readOnly?: boolean;
 }
 
@@ -87,6 +87,9 @@ export function EventModal({
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
+  const [seatingPlanUrl, setSeatingPlanUrl] = useState("");
+  const [seatingDragOver, setSeatingDragOver] = useState(false);
+  const seatingInputRef = useRef<HTMLInputElement>(null);
   /** Holds scrape + diff result to show a preview before applying */
   const [syncPreview, setSyncPreview] = useState<{
     changes: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }>;
@@ -94,10 +97,25 @@ export function EventModal({
     diffResult: { eventId: string | null; saleEventIds: Record<string, string>; saleEventId: string | null; presaleEventId: string | null };
   } | null>(null);
 
+  // Helper: extract seating plan URL from description text
+  const parseSeatingPlan = (desc: string) =>
+    desc.match(/^Seating Plan: (https?:\/\/[^\s]+)/m)?.[1] ?? "";
+
+  // Helper: update description to include/replace seating plan URL line
+  const applySeatingPlan = (desc: string, url: string): string => {
+    const line = url.trim() ? `Seating Plan: ${url.trim()}` : null;
+    const replaced = desc.replace(/^Seating Plan: https?:\/\/[^\n]*/m, line ?? "").replace(/\n{3,}/g, "\n\n");
+    if (line && !replaced.includes("Seating Plan:")) {
+      return replaced.trimEnd() + (replaced ? "\n\n" : "") + line;
+    }
+    return replaced;
+  };
+
   useEffect(() => {
     if (event) {
       setTitle(event.title);
       setDescription(event.description || "");
+      setSeatingPlanUrl(parseSeatingPlan(event.description || ""));
       setLocation(event.location || "");
       setAllDay(event.allDay);
       setCalendarId(event.calendarId);
@@ -111,6 +129,7 @@ export function EventModal({
     } else if (initialData) {
       setTitle(initialData.title ?? "");
       setDescription(initialData.description ?? "");
+      setSeatingPlanUrl(parseSeatingPlan(initialData.description ?? ""));
       setLocation(initialData.location ?? "");
       setAllDay(initialData.allDay ?? false);
       setCalendarId(initialData.calendarId ?? defaultCalendarId);
@@ -127,6 +146,7 @@ export function EventModal({
     } else if (initialRange) {
       setTitle("");
       setDescription("");
+      setSeatingPlanUrl("");
       setLocation("");
       setAllDay(initialRange.allDay);
       setCalendarId(defaultCalendarId);
@@ -140,6 +160,7 @@ export function EventModal({
     } else {
       setTitle("");
       setDescription("");
+      setSeatingPlanUrl("");
       setLocation("");
       setAllDay(false);
       setCalendarId(defaultCalendarId);
@@ -252,9 +273,13 @@ export function EventModal({
     if (!title.trim()) return;
     setSaving(true);
     try {
+      // Merge seatingPlanUrl back into description before saving
+      const finalDescription = seatingPlanUrl.trim()
+        ? applySeatingPlan(description, seatingPlanUrl)
+        : description;
       await onSave({
         title: title.trim(),
-        description: description || undefined,
+        description: finalDescription || undefined,
         location: location || undefined,
         startTime: new Date(startTime).toISOString(),
         endTime: new Date(endTime).toISOString(),
@@ -421,7 +446,7 @@ export function EventModal({
                   <button
                     key={re.id}
                     type="button"
-                    onClick={() => onEventSelect?.(re.id)}
+                    onClick={() => { onOpenChange(false); onEventSelect?.(re.id, re.startTime); }}
                     className="flex items-center gap-2 text-sm text-left hover:bg-muted/60 rounded px-1.5 py-1 transition-colors -mx-1 group"
                   >
                     <div className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: re.calendarColor }} />
@@ -464,6 +489,73 @@ export function EventModal({
               </div>
             ) : null;
           })()}
+
+          {/* Seating plan — URL input + clickable image preview + drag-drop */}
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground flex items-center gap-1">
+              <ImageIcon className="size-3" />
+              Seating Plan 座位圖
+            </Label>
+            {seatingPlanUrl ? (
+              <div
+                className={`relative rounded-md overflow-hidden border border-border cursor-pointer group transition-colors${seatingDragOver ? " ring-2 ring-primary border-primary" : ""}`}
+                onDragOver={(ev) => { ev.preventDefault(); setSeatingDragOver(true); }}
+                onDragLeave={() => setSeatingDragOver(false)}
+                onDrop={(ev) => {
+                  ev.preventDefault();
+                  setSeatingDragOver(false);
+                  const dropped = ev.dataTransfer.getData("text/uri-list") || ev.dataTransfer.getData("text/plain");
+                  if (dropped?.startsWith("http")) setSeatingPlanUrl(dropped.trim());
+                }}
+              >
+                <a href={seatingPlanUrl} target="_blank" rel="noopener noreferrer" title="Open seating plan">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={seatingPlanUrl}
+                    alt="Seating plan"
+                    className="w-full max-h-48 object-contain bg-muted/30"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                    <ExternalLink className="size-5 text-white opacity-0 group-hover:opacity-100 drop-shadow transition-opacity" />
+                  </div>
+                </a>
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setSeatingPlanUrl("")}
+                    className="absolute top-1.5 right-1.5 size-5 rounded bg-black/50 hover:bg-black/70 flex items-center justify-center text-white text-xs transition-colors"
+                    title="Remove seating plan"
+                  >✕</button>
+                )}
+              </div>
+            ) : null}
+            {!readOnly && (
+              <div
+                className={`flex items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1.5 transition-colors${seatingDragOver ? " ring-2 ring-primary border-primary" : ""}`}
+                onDragOver={(ev) => { ev.preventDefault(); setSeatingDragOver(true); }}
+                onDragLeave={() => setSeatingDragOver(false)}
+                onDrop={(ev) => {
+                  ev.preventDefault();
+                  setSeatingDragOver(false);
+                  const dropped = ev.dataTransfer.getData("text/uri-list") || ev.dataTransfer.getData("text/plain");
+                  if (dropped?.startsWith("http")) setSeatingPlanUrl(dropped.trim());
+                }}
+              >
+                <input
+                  ref={seatingInputRef}
+                  type="url"
+                  placeholder="Paste image URL or drag from browser…"
+                  value={seatingPlanUrl}
+                  onChange={(e) => setSeatingPlanUrl(e.target.value)}
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60 min-w-0"
+                />
+              </div>
+            )}
+            {readOnly && !seatingPlanUrl && (
+              <p className="text-xs text-muted-foreground/60">No seating plan attached</p>
+            )}
+          </div>
           </div>{/* end dimmed wrapper */}
         </form>
 

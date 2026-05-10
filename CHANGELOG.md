@@ -1,3 +1,9 @@
+## [2026-05-10] — Session: seating plan + related event navigation
+### Added
+- feat(modal): Seating Plan 座位圖 section — URL input with live image preview, clickable to open full image in new tab, drag-and-drop URL from browser; stored as `Seating Plan: URL` line in description (e91ed32)
+### Fixed
+- fix(modal): clicking a Related Event now closes the modal and navigates the calendar to that event's date, opening the DayDetailPanel (day schedule view) first instead of jumping straight into the edit modal; works for out-of-range events (e.g. Oct 21 concert from May sale event) since navigation uses the `startTime` already in the related-event list (e91ed32)
+
 ## [2026-05-10] — Session: venue dedup + text-based slot extraction
 ### Fixed
 - fix(venues): import now splits `"Venue Name, Address"` location strings — uses name as key, address as field; no more duplicate rows (4ccb368)
