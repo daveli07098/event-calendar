@@ -113,6 +113,7 @@ interface TicketData {
   saleFirstDate: string | null;     // earliest presale / fan-club / member sale date (kept for backward compat)
   saleDates: SaleWindow[] | null;   // all sale windows in chronological order
   sourceTimezone: string | null;    // IANA or ±HH:MM offset extracted from source (e.g. "+08:00" for HKT)
+  slots: EventSlot[];               // grouped performance timeslots (empty when ≤1)
 }
 
 /** A single ticket-sale window with a date, optional time, and a human label. */
@@ -160,6 +161,16 @@ function extractTextFromHtml(html: string): string {
 // ---------------------------------------------------------------------------
 // OG / Schema.org / JSON-LD meta fallback (no AI required)
 // ---------------------------------------------------------------------------
+
+/** A single grouped performance timeslot (after consecutive same-time nights are merged). */
+export interface EventSlot {
+  date: string;           // YYYY-MM-DD (first night)
+  endDate: string | null; // YYYY-MM-DD (last night if range, null if single day)
+  time: string | null;    // HH:MM
+  endTime: string | null; // HH:MM from JSON-LD endDate if available
+  label: string;          // human-readable e.g. "Jun 13–14 · 19:30"
+}
+
 interface MetaFallback {
   title: string | null;
   description: string | null;
@@ -174,6 +185,80 @@ interface MetaFallback {
   saleFirstDate: string | null;   // earliest presale/fan-club date from JSON-LD
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceTimezone: string | null;  // ±HH:MM offset detected from JSON-LD or URL domain
+  slots: EventSlot[];             // grouped performance timeslots (empty when ≤1 unique slot)
+}
+
+// ---------------------------------------------------------------------------
+// Multi-slot grouping: consecutive same-time nights → date range
+// ---------------------------------------------------------------------------
+function buildSlotLabel(date: string, endDate: string | null, time: string | null): string {
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const fmt = (d: string) => {
+    const parts = d.split("-");
+    const m = parseInt(parts[1] ?? "1", 10);
+    const day = parseInt(parts[2] ?? "1", 10);
+    return `${months[m - 1]} ${day}`;
+  };
+  const datePart = endDate ? `${fmt(date)}–${fmt(endDate)}` : fmt(date);
+  return time ? `${datePart} · ${time}` : datePart;
+}
+
+function groupIntoSlots(concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>): EventSlot[] {
+  if (concertEvents.length === 0) return [];
+
+  // Build per-night info including optional endTime from JSON-LD endDate
+  const nights = concertEvents.map((ev) => {
+    const parts = ev.startDate.split("T");
+    const date = parts[0] ?? ev.startDate.slice(0, 10);
+    const time = parts[1] ? parts[1].slice(0, 5) : null;
+    const rawEnd = typeof ev.raw.endDate === "string" ? ev.raw.endDate : null;
+    const endTime = rawEnd?.includes("T") ? rawEnd.split("T")[1]?.slice(0, 5) ?? null : null;
+    return { date, time, endTime, dateObj: ev.dateObj };
+  });
+
+  // Sort ascending
+  nights.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+  // Group by HH:MM time key
+  const groups = new Map<string, typeof nights>();
+  for (const n of nights) {
+    const key = n.time ?? "__allday__";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(n);
+  }
+
+  const slots: EventSlot[] = [];
+  for (const [timeKey, group] of groups) {
+    const time = timeKey === "__allday__" ? null : timeKey;
+    // Find runs of consecutive calendar days within this time group
+    let i = 0;
+    while (i < group.length) {
+      const runStart = group[i]!;
+      let j = i + 1;
+      while (j < group.length) {
+        const diffDays = Math.round(
+          (group[j]!.dateObj.getTime() - group[j - 1]!.dateObj.getTime()) / 86_400_000
+        );
+        if (diffDays === 1) j++;
+        else break;
+      }
+      const runEnd = group[j - 1]!;
+      const endDate = runStart.date !== runEnd.date ? runEnd.date : null;
+      slots.push({
+        date: runStart.date,
+        endDate,
+        time,
+        endTime: runStart.endTime,
+        label: buildSlotLabel(runStart.date, endDate, time),
+      });
+      i = j;
+    }
+  }
+
+  // Sort slots chronologically
+  slots.sort((a, b) => a.date.localeCompare(b.date));
+  // Only return when there are genuinely multiple distinct timeslots
+  return slots.length > 1 ? slots : [];
 }
 
 /** Extract ±HH:MM or "Z" timezone offset from the tail of an ISO datetime string. */
@@ -239,6 +324,8 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   let sourceTz: string | null = null;
   // Strategy A sale-window events (non-location Event blocks from JSON-LD)
   const stratASaleWindows: Array<{ date: string; time: string | null; label: string }> = [];
+  // All concert-night events (with location) — hoisted so groupIntoSlots can use them
+  let concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }> = [];
 
   const jsonldMatches = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi) ?? [];
 
@@ -276,7 +363,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     // Split by location presence:
     // Events WITH location = concert nights (have a venue)
     // Events WITHOUT location = sale windows (no venue)
-    const concertEvents = allJsonLdEvents.filter((e) => e.raw.location);
+    concertEvents = allJsonLdEvents.filter((e) => e.raw.location);
     const saleWindowEvents = allJsonLdEvents.filter((e) => !e.raw.location);
 
     if (concertEvents.length > 0) {
@@ -459,6 +546,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     saleFirstDate: schemaSaleFirstDate,
     saleDates: schemaSaleDates.length > 0 ? schemaSaleDates : null,
     sourceTimezone: sourceTz,
+    slots: groupIntoSlots(concertEvents),
   };
 }
 
@@ -821,6 +909,7 @@ export async function POST(req: NextRequest) {
       : meta.saleDates ?? null,
     // sourceTimezone comes only from meta (JSON-LD / URL domain) — AI doesn't return it
     sourceTimezone: meta.sourceTimezone,
+    slots: meta.slots,
   };
 
   if (!ticket.title || ticket.title === "Untitled Event") {

@@ -1,3 +1,13 @@
+## [2026-05-10] — Session: multi-slot, venue directory, sync diff
+### Added
+- feat(tickets): slot picker for multi-night events (f37dd18)
+- feat(tickets): Venues sidebar section with add/delete (f37dd18)
+- feat(tickets): EventVenue Prisma model + API (f37dd18)
+- feat(tickets): EventModal Sync now diffs before applying (f37dd18)
+- docs: multi-slot-event-rules.md decision table (f37dd18)
+### Changed
+- feat(tickets): removed Re-fix Times button (f37dd18)
+
 ## [2026-05-10] — Session: UI improvements
 ### Added
 - feat(ui): calendar favicon SVG (9189426)

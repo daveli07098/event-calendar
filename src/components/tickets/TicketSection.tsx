@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
-  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, Wrench,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin,
 } from "lucide-react";
+import { VenueSection } from "@/components/tickets/VenueSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
+
+interface EventSlot {
+  date: string;
+  endDate: string | null;
+  time: string | null;
+  endTime: string | null;
+  label: string;
+}
 
 interface ScrapedTicket {
   title: string;
@@ -34,6 +43,7 @@ interface ScrapedTicket {
   saleDate: string | null;
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  slots?: EventSlot[];
 }
 
 interface FieldChange {
@@ -124,32 +134,28 @@ function DiffTable({
 }
 
 export function TicketSection() {
+  const [section, setSection] = useState<"import" | "venues">("import");
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [addedCalendarName, setAddedCalendarName] = useState("");
   const [quota, setQuota] = useState<AiQuota | null>(null);
-  // Extraction method: "auto" uses AI when available; "og-meta" forces OG/Schema only (free, no quota)
   const [extractMethod, setExtractMethod] = useState<"auto" | "og-meta">("auto");
-  // Diff state
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
   const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
-  // Editable preview fields — pre-filled from scrape, user can correct before adding
   const [editTitle, setEditTitle] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editTime, setEditTime] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
   const [editVenue, setEditVenue] = useState("");
-  // Calendar picker — only shown when 2+ event-reminders or sale-ticket options exist
+  // Multi-slot picker
+  const [slots, setSlots] = useState<EventSlot[]>([]);
+  const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
   const [calendarOptions, setCalendarOptions] = useState<{ eventReminders: import('@/app/api/tickets/calendars/route').TicketCalendarOption[]; saleTicket: import('@/app/api/tickets/calendars/route').TicketCalendarOption[] } | null>(null);
   const [selectedEventCalId, setSelectedEventCalId] = useState<string | null>(null);
   const [selectedSaleCalId, setSelectedSaleCalId] = useState<string | null>(null);
-
-  // Bulk refix state
-  const [refixRunning, setRefixRunning] = useState(false);
-  const [refixSummary, setRefixSummary] = useState<{ fixed: number; skipped: number; errors: number } | null>(null);
 
   // Fetch quota on mount so badge shows before first scan
   useEffect(() => {
@@ -160,23 +166,7 @@ export function TicketSection() {
   }, []);
 
   const handleRefix = async () => {
-    setRefixRunning(true);
-    setRefixSummary(null);
-    try {
-      const res = await fetch("/api/tickets/refix", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const data = await res.json();
-      if (res.ok) {
-        setRefixSummary({ fixed: data.fixed, skipped: data.skipped, errors: data.errors });
-        if (data.fixed > 0) toast.success(`Re-fixed ${data.fixed} event time${data.fixed > 1 ? "s" : ""}`);
-        else toast.info("All event times already correct");
-      } else {
-        toast.error(data.error ?? "Re-fix failed");
-      }
-    } catch {
-      toast.error("Network error during re-fix");
-    } finally {
-      setRefixRunning(false);
-    }
+    // Re-fix Times has been removed from the UI; this handler is kept for safety but unused
   };
 
   const handleScrape = async () => {
@@ -216,6 +206,10 @@ export function TicketSection() {
       setEditTime(data.time ?? "");
       setEditEndDate(data.endDate ?? "");
       setEditEndTime(data.endTime ?? "");      setEditVenue(data.venue ?? data.location ?? "");
+      // Multi-slot picker — pre-select all slots
+      const dataSlots: EventSlot[] = data.slots ?? [];
+      setSlots(dataSlots);
+      setSelectedSlots(new Set(dataSlots.map((_, i) => i)));
 
       // Fetch available calendars to offer picker if multiple options exist
       fetch("/api/tickets/calendars")
@@ -268,62 +262,74 @@ export function TicketSection() {
     if (!ticket) return;
     setStatus("adding");
 
-    // Merge user edits back into the ticket before sending
-    const resolvedDate = editDate.trim() || ticket.date;
-    const resolvedTime = editTime.trim() || ticket.time;
+    const baseTitle = editTitle.trim() || ticket.title;
+    const baseVenue = editVenue.trim() || ticket.venue;
 
-    // Default end = start + 3 hours when not entered (pure string arithmetic — no UTC conversion)
-    let resolvedEndDate = editEndDate.trim() || null;
-    let resolvedEndTime = editEndTime.trim() || null;
-    if (!resolvedEndDate && !resolvedEndTime && resolvedDate && resolvedTime) {
-      const [h, m] = resolvedTime.split(":").map(Number);
-      const totalMins = h * 60 + m + 3 * 60;
-      const endH = Math.floor(totalMins / 60) % 24;
-      const endM = totalMins % 60;
-      const dayOverflow = Math.floor(totalMins / (24 * 60));
-      resolvedEndTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
-      if (dayOverflow > 0) {
-        const d = new Date(resolvedDate + "T00:00:00");
-        d.setDate(d.getDate() + dayOverflow);
-        resolvedEndDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      } else {
-        resolvedEndDate = resolvedDate;
+    // Helper: build end date/time (defaults to start + 3 h) and call add API
+    const addOneSlot = async (date: string | null, time: string | null, endDate: string | null, endTime: string | null) => {
+      const resolvedDate = (date ?? editDate.trim()) || ticket.date;
+      const resolvedTime = (time ?? editTime.trim()) || ticket.time;
+      let resolvedEndDate = (endDate ?? editEndDate.trim()) || null;
+      let resolvedEndTime = (endTime ?? editEndTime.trim()) || null;
+      if (!resolvedEndDate && !resolvedEndTime && resolvedDate && resolvedTime) {
+        const [h, m] = resolvedTime.split(":").map(Number);
+        const totalMins = h * 60 + m + 3 * 60;
+        const endH = Math.floor(totalMins / 60) % 24;
+        const endM = totalMins % 60;
+        const dayOverflow = Math.floor(totalMins / (24 * 60));
+        resolvedEndTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
+        if (dayOverflow > 0) {
+          const d = new Date(resolvedDate + "T00:00:00");
+          d.setDate(d.getDate() + dayOverflow);
+          resolvedEndDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        } else {
+          resolvedEndDate = resolvedDate;
+        }
       }
-    }
-
-    const ticketToAdd = {
-      ...ticket,
-      title: editTitle.trim() || ticket.title,
-      date: resolvedDate,
-      time: resolvedTime,
-      endDate: resolvedEndDate,
-      endTime: resolvedEndTime,
-      venue: editVenue.trim() || ticket.venue,
-    };
-
-    try {
-      const res = await fetch("/api/tickets/add", {
+      return fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticket: ticketToAdd,
+          ticket: { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue },
           tzOffsetMinutes: new Date().getTimezoneOffset(),
           ...(selectedEventCalId ? { targetCalendarId: selectedEventCalId } : {}),
           ...(selectedSaleCalId ? { targetSaleCalendarId: selectedSaleCalId } : {}),
         }),
       });
+    };
 
-      const data = await res.json();
+    try {
+      const slotsToAdd = slots.length > 1 ? slots.filter((_, i) => selectedSlots.has(i)) : null;
 
-      if (!res.ok) {
-        toast.error(data.error ?? "Failed to add event");
-        setStatus("scraped");
-        return;
+      if (slotsToAdd && slotsToAdd.length > 0) {
+        // Multi-slot: one event per selected slot
+        let calName = "event-reminders";
+        for (const slot of slotsToAdd) {
+          const res = await addOneSlot(slot.date, slot.time, slot.endDate, slot.endTime);
+          const data = await res.json();
+          if (!res.ok) {
+            toast.error(data.error ?? "Failed to add event");
+            setStatus("scraped");
+            return;
+          }
+          calName = data.calendarName ?? calName;
+        }
+        setAddedCalendarName(calName);
+        setStatus("done");
+        toast.success(`${slotsToAdd.length} slot${slotsToAdd.length > 1 ? "s" : ""} added to "${calName}"!`);
+      } else {
+        // Single event
+        const res = await addOneSlot(null, null, null, null);
+        const data = await res.json();
+        if (!res.ok) {
+          toast.error(data.error ?? "Failed to add event");
+          setStatus("scraped");
+          return;
+        }
+        setAddedCalendarName(data.calendarName ?? "event-reminders");
+        setStatus("done");
+        toast.success(`Event added to "${data.calendarName}"!`);
       }
-
-      setAddedCalendarName(data.calendarName ?? "event-reminders");
-      setStatus("done");
-      toast.success(`Event added to "${data.calendarName}"!`);
     } catch {
       toast.error("Network error — please try again");
       setStatus("scraped");
@@ -379,6 +385,8 @@ export function TicketSection() {
     setEditEndDate("");
     setEditEndTime("");
     setEditVenue("");
+    setSlots([]);
+    setSelectedSlots(new Set());
     setCalendarOptions(null);
     setSelectedEventCalId(null);
     setSelectedSaleCalId(null);
@@ -394,9 +402,9 @@ export function TicketSection() {
   const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="border-b border-border bg-card px-6 py-4 flex items-center gap-4">
+      <header className="border-b border-border bg-card px-6 py-4 flex items-center gap-4 shrink-0">
         <a href="/">
           <Button variant="ghost" size="icon" className="size-8">
             <ArrowLeft className="size-4" />
@@ -454,13 +462,11 @@ export function TicketSection() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground gap-1"
+            className="h-7 px-2 text-xs text-muted-foreground gap-1 hidden"
             onClick={handleRefix}
-            disabled={refixRunning}
-            title="Re-scrape all ticket events and correct timezone offsets"
+            disabled
+            title="Re-fix Times has been moved to settings"
           >
-            {refixRunning ? <Loader2 className="size-3 animate-spin" /> : <Wrench className="size-3" />}
-            {refixRunning ? "Re-fixing…" : refixSummary ? `Fixed ${refixSummary.fixed}` : "Re-fix Times"}
           </Button>
           {ticket?.aiUsed && (
             <Badge variant="secondary" className="text-xs font-mono">
@@ -471,6 +477,39 @@ export function TicketSection() {
         </div>
       </header>
 
+      {/* Body: left sidebar + main content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar nav */}
+        <nav className="w-44 border-r shrink-0 p-2 space-y-0.5">
+          <button
+            onClick={() => setSection("import")}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+              section === "import"
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <Ticket className="size-4 shrink-0" />
+            Import Event
+          </button>
+          <button
+            onClick={() => setSection("venues")}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+              section === "venues"
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <MapPin className="size-4 shrink-0" />
+            Venues
+          </button>
+        </nav>
+
+        {/* Main content */}
+        <div className="flex-1 overflow-auto">
+          {section === "venues" ? (
+            <VenueSection />
+          ) : (
       <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
         {/* Intro */}
         <div className="space-y-1">
@@ -740,6 +779,37 @@ export function TicketSection() {
                 />
               )}
 
+              {/* Slot picker — shown when scraper found multiple distinct timeslots */}
+              {slots.length > 1 && (
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1.5">
+                    Performance Slots ({selectedSlots.size}/{slots.length} selected)
+                  </label>
+                  <div className="space-y-1.5">
+                    {slots.map((slot, i) => (
+                      <label
+                        key={i}
+                        className={`flex items-center gap-2.5 cursor-pointer rounded-md border px-3 py-2 text-sm transition-colors ${
+                          selectedSlots.has(i) ? "border-primary/50 bg-primary/5" : "border-border hover:bg-muted/40"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={selectedSlots.has(i)}
+                          onCheckedChange={(checked) =>
+                            setSelectedSlots((prev) => {
+                              const next = new Set(prev);
+                              checked ? next.add(i) : next.delete(i);
+                              return next;
+                            })
+                          }
+                        />
+                        <span>{slot.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Editable fields */}
               <div className="space-y-2.5">
                 <div>
@@ -751,7 +821,7 @@ export function TicketSection() {
                     disabled={status === "adding"}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className={`grid grid-cols-2 gap-2 ${slots.length > 1 ? "hidden" : ""}`}>
                   <div>
                     <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Start Date</label>
                     <Input
@@ -906,9 +976,15 @@ export function TicketSection() {
               {/* Actions */}
               {status === "scraped" && (
                 <div className="flex gap-2 pt-2">
-                  <Button onClick={handleAddToCalendar} className="flex-1">
+                  <Button
+                    onClick={handleAddToCalendar}
+                    className="flex-1"
+                    disabled={slots.length > 1 && selectedSlots.size === 0}
+                  >
                     <CalendarPlus className="size-4 mr-2" />
-                    Add to event-reminders
+                    {slots.length > 1
+                      ? `Add ${selectedSlots.size} slot${selectedSlots.size !== 1 ? "s" : ""}`
+                      : "Add to event-reminders"}
                   </Button>
                   <Button variant="outline" onClick={handleReset}>Clear</Button>
                 </div>
@@ -978,6 +1054,9 @@ export function TicketSection() {
             </ol>
           </div>
         </details>
+      </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -87,6 +87,12 @@ export function EventModal({
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
+  /** Holds scrape + diff result to show a preview before applying */
+  const [syncPreview, setSyncPreview] = useState<{
+    changes: Array<{ field: string; label: string; oldValue: string | null; newValue: string | null }>;
+    ticket: Record<string, unknown>;
+    diffResult: { eventId: string | null; saleEventIds: Record<string, string>; saleEventId: string | null; presaleEventId: string | null };
+  } | null>(null);
 
   useEffect(() => {
     if (event) {
@@ -155,15 +161,16 @@ export function EventModal({
       .catch(() => setRelatedEvents([]));
   }, [event?.id, event?.description]);
 
-  // Sync: re-scrape the ticket URL and update this event + related sale events
+  // Sync: re-scrape the ticket URL, diff against stored event, show changes before applying
   const handleSync = async () => {
     if (!event) return;
     const ticketUrl = event.description?.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
     if (!ticketUrl) return;
     setSyncing(true);
     setSyncError(null);
+    setSyncPreview(null);
     try {
-      // 1. Re-scrape the ticket URL
+      // 1. Re-scrape
       const scrapeRes = await fetch("/api/tickets/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -172,31 +179,61 @@ export function EventModal({
       if (!scrapeRes.ok) throw new Error(await scrapeRes.text());
       const ticket = await scrapeRes.json();
 
-      // 2. Apply all fields to the main event + related sale events
-      const saleEventIds: Record<string, string> = {};
-      for (const re of relatedEvents) {
-        // Infer label from event title prefix (e.g. "Fan Presale:", "Sale Opens:")
-        const labelMatch = re.title.match(/^([^:]+):/);
-        if (labelMatch) saleEventIds[labelMatch[1].trim()] = re.id;
+      // 2. Diff against existing event
+      const diffRes = await fetch("/api/tickets/diff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: ticketUrl, ticket, tzOffsetMinutes: new Date().getTimezoneOffset() }),
+      });
+      if (!diffRes.ok) throw new Error("Diff check failed");
+      const diff = await diffRes.json();
+
+      if (!diff.hasChanges) {
+        setSyncError("✓ Already up to date — no changes found.");
+        setSyncing(false);
+        return;
       }
 
+      // 3. Show preview for user to confirm
+      setSyncPreview({
+        changes: diff.changes,
+        ticket,
+        diffResult: {
+          eventId: diff.eventId,
+          saleEventIds: diff.saleEventIds ?? {},
+          saleEventId: diff.saleEventId ?? null,
+          presaleEventId: diff.presaleEventId ?? null,
+        },
+      });
+    } catch (e) {
+      setSyncError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Apply the previewed sync changes
+  const handleApplySync = async () => {
+    if (!syncPreview || !event) return;
+    setSyncing(true);
+    setSyncError(null);
+    try {
       const applyRes = await fetch("/api/tickets/update", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          eventId: event.id,
-          saleEventIds,
-          appliedFields: ["title", "date", "time", "venue", "location",
-            "ticketPrices", "ticketPlatforms", "saleDate", "saleFirstDate",
-            ...Object.keys(saleEventIds).map((l) => `saleWin::${l}`)],
-          ticket,
+          eventId: syncPreview.diffResult.eventId ?? event.id,
+          saleEventIds: syncPreview.diffResult.saleEventIds,
+          saleEventId: syncPreview.diffResult.saleEventId,
+          presaleEventId: syncPreview.diffResult.presaleEventId,
+          appliedFields: syncPreview.changes.map((c) => c.field),
+          ticket: syncPreview.ticket,
           tzOffsetMinutes: -new Date().getTimezoneOffset(),
         }),
       });
       if (!applyRes.ok) throw new Error(await applyRes.text());
       const { updatedEvent } = await applyRes.json();
-
-      // 3. Refresh local form fields
+      setSyncPreview(null);
       if (updatedEvent) {
         setTitle(updatedEvent.title ?? title);
         setDescription(updatedEvent.description ?? description);
@@ -204,7 +241,7 @@ export function EventModal({
         onSynced?.(updatedEvent);
       }
     } catch (e) {
-      setSyncError(e instanceof Error ? e.message : "Sync failed");
+      setSyncError(e instanceof Error ? e.message : "Apply failed");
     } finally {
       setSyncing(false);
     }
@@ -433,7 +470,37 @@ export function EventModal({
         {/* Sticky footer — always visible regardless of scroll position */}
         <div className="flex flex-col gap-2 pt-3 border-t shrink-0">
           {syncError && (
-            <p className="text-xs text-destructive bg-destructive/10 rounded px-2 py-1">{syncError}</p>
+            <p className={`text-xs rounded px-2 py-1 ${syncError.startsWith("✓") ? "text-green-600 bg-green-500/10" : "text-destructive bg-destructive/10"}`}>{syncError}</p>
+          )}
+          {/* Sync diff preview */}
+          {syncPreview && (
+            <div className="rounded-md border border-border text-xs overflow-hidden">
+              <div className="bg-muted/50 px-3 py-2 font-medium flex items-center justify-between">
+                <span>{syncPreview.changes.length} change{syncPreview.changes.length > 1 ? "s" : ""} detected</span>
+                <button onClick={() => setSyncPreview(null)} className="text-muted-foreground hover:text-foreground">✕</button>
+              </div>
+              <div className="divide-y divide-border">
+                {syncPreview.changes.map((c) => (
+                  <div key={c.field} className="px-3 py-2 grid grid-cols-[1fr_auto_1fr] gap-2 items-start">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-0.5">{c.label}</p>
+                      <p className="line-through text-muted-foreground">{c.oldValue ?? "—"}</p>
+                    </div>
+                    <ArrowRight className="size-3 text-muted-foreground mt-4 shrink-0" />
+                    <div>
+                      <p className="text-[10px] text-muted-foreground mb-0.5">&nbsp;</p>
+                      <p className="text-foreground font-medium">{c.newValue ?? "—"}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="px-3 py-2 border-t bg-muted/30 flex gap-2">
+                <Button size="sm" className="flex-1 h-7 text-xs" onClick={handleApplySync} disabled={syncing}>
+                  {syncing ? "Applying…" : "Apply All Changes"}
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setSyncPreview(null)}>Dismiss</Button>
+              </div>
+            </div>
           )}
           <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

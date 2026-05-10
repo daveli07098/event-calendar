@@ -118,3 +118,18 @@ model Event {
   @@index([calendarId])
   @@index([startTime, endTime])
 }
+
+// Community venue directory — referenced when importing ticket events
+model EventVenue {
+  id        String   @id @default(cuid())
+  name      String                      // primary/official name
+  aliases   String[] @default([])       // other names used for the same venue
+  address   String?                     // street address
+  city      String   @default("Hong Kong")
+  country   String   @default("HK")
+  tags      String[] @default([])       // e.g. ["arena", "theatre", "concert-hall"]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name])
+}
