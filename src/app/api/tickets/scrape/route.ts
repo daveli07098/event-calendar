@@ -13,6 +13,14 @@ function getDayKey() {
   return hkt.toISOString().slice(0, 10); // "YYYY-MM-DD" in HKT
 }
 
+/** ISO UTC string of the next HKT midnight (quota reset point). */
+function getResetAt(): string {
+  const hktMs = Date.now() + 8 * 60 * 60 * 1000;
+  // Start of current HKT day (ms), then add one day to get next midnight HKT
+  const nextMidnightHktMs = Math.floor(hktMs / 86400000) * 86400000 + 86400000;
+  return new Date(nextMidnightHktMs - 8 * 60 * 60 * 1000).toISOString();
+}
+
 // In-memory fallback for quota (used when DB columns not yet migrated)
 const rateLimitMap = new Map<string, { count: number; dayKey: string }>();
 
@@ -829,7 +837,7 @@ export async function POST(req: NextRequest) {
     ...ticket,
     aiError,
     aiTokensUsed,
-    aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining },
+    aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining, resetAt: getResetAt() },
   });
 }
 
@@ -848,6 +856,7 @@ export async function GET() {
       used: AI_DAILY_LIMIT - remaining,
       limit: AI_DAILY_LIMIT,
       remaining,
+      resetAt: getResetAt(),
     },
   });
 }

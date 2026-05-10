@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 
-interface AiQuota { used: number; limit: number; remaining: number }
+interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 
 interface ScrapedTicket {
   title: string;
@@ -433,12 +433,23 @@ export function TicketSection() {
             </button>
           </div>
           {quota && (
-            <Badge
-              variant={quota.remaining <= 10 ? "destructive" : "outline"}
-              className="text-xs tabular-nums"
-            >
-              {quota.remaining}/{quota.limit} AI calls left
-            </Badge>
+            <div className="flex flex-col items-end gap-0.5">
+              <Badge
+                variant={quota.remaining <= 10 ? "destructive" : "outline"}
+                className="text-xs tabular-nums"
+              >
+                {quota.remaining}/{quota.limit} AI calls left
+              </Badge>
+              {quota.resetAt && (
+                <span className="text-[10px] text-muted-foreground leading-none">
+                  resets {new Date(quota.resetAt).toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    timeZoneName: "short",
+                  })}
+                </span>
+              )}
+            </div>
           )}
           <Button
             variant="ghost"

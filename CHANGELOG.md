@@ -1,3 +1,9 @@
+## [2026-05-10] — Session: UI improvements
+### Added
+- feat(ui): calendar favicon SVG (9189426)
+- feat(ui): always-visible search bar on desktop (9189426)
+- feat(ui): quota reset time displayed in user's local timezone (9189426)
+
 ## [2026-05-10] — Session: multi-day events & scraper fixes
 ### Fixed
 - fix(calendar): DayDetailPanel shows spanning events on day 2+ (2da4cab)
