@@ -206,15 +206,33 @@ function buildSlotLabel(date: string, endDate: string | null, time: string | nul
 function groupIntoSlots(concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>): EventSlot[] {
   if (concertEvents.length === 0) return [];
 
-  // Build per-night info including optional endTime from JSON-LD endDate
-  const nights = concertEvents.map((ev) => {
+  // Build per-night info, expanding multi-day JSON-LD events into individual nights.
+  // e.g. a single JSON-LD event with startDate=Jun 13 and endDate=Jun 14 at 19:30 becomes
+  // two entries (Jun 13 · 19:30 and Jun 14 · 19:30) so they merge into the correct "Jun 13–14" run.
+  const nights: Array<{ date: string; time: string | null; endTime: string | null; dateObj: Date }> = [];
+  for (const ev of concertEvents) {
     const parts = ev.startDate.split("T");
     const date = parts[0] ?? ev.startDate.slice(0, 10);
     const time = parts[1] ? parts[1].slice(0, 5) : null;
     const rawEnd = typeof ev.raw.endDate === "string" ? ev.raw.endDate : null;
     const endTime = rawEnd?.includes("T") ? rawEnd.split("T")[1]?.slice(0, 5) ?? null : null;
-    return { date, time, endTime, dateObj: ev.dateObj };
-  });
+    const endDateOnly = rawEnd ? (rawEnd.split("T")[0] ?? null) : null;
+
+    if (endDateOnly && endDateOnly > date) {
+      // Multi-day event: expand into one entry per night
+      let cur = date;
+      let step = 0;
+      while (cur <= endDateOnly && step < 366) {
+        nights.push({ date: cur, time, endTime, dateObj: new Date(cur + "T12:00:00Z") });
+        step++;
+        const d = new Date(cur + "T12:00:00Z");
+        d.setUTCDate(d.getUTCDate() + 1);
+        cur = d.toISOString().slice(0, 10);
+      }
+    } else {
+      nights.push({ date, time, endTime, dateObj: ev.dateObj });
+    }
+  }
 
   // Sort ascending
   nights.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
@@ -367,6 +385,23 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     const saleWindowEvents = allJsonLdEvents.filter((e) => !e.raw.location);
 
     if (concertEvents.length > 0) {
+      // Reclassify any location-less event that falls inside the concert's date range.
+      // Some ticketing sites (e.g. Timable) omit the `location` field on matinee /
+      // secondary-slot JSON-LD blocks — they would otherwise be misclassified as sale windows.
+      const concertStartDate0 = concertEvents.reduce(
+        (min, e) => (e.startDate.slice(0, 10) < min ? e.startDate.slice(0, 10) : min),
+        concertEvents[0]!.startDate.slice(0, 10)
+      );
+      const concertRangeEnd0 = concertEvents.reduce((max, e) => {
+        const rawEnd = typeof e.raw.endDate === "string" ? e.raw.endDate : null;
+        const tail = (rawEnd ?? e.startDate).slice(0, 10);
+        return tail > max ? tail : max;
+      }, concertStartDate0);
+      const reclassified = saleWindowEvents.filter(
+        (e) => e.startDate.slice(0, 10) >= concertStartDate0 && e.startDate.slice(0, 10) <= concertRangeEnd0
+      );
+      if (reclassified.length > 0) concertEvents = [...concertEvents, ...reclassified];
+
       // Multi-night concerts: sort ascending → first night is start date, last night is end date
       concertEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
       const firstNight = concertEvents[0]!;
@@ -696,10 +731,6 @@ function extractDateFromText(text: string): { date: string | null; time: string 
   }
 
   // ISO / Western: May 9, 2026 / 9 May 2026 / 2026-05-09
-  const months: Record<string, string> = {
-    january:"01",february:"02",march:"03",april:"04",may:"05",june:"06",
-    july:"07",august:"08",september:"09",october:"10",november:"11",december:"12",
-  };
   const westernDate = text.match(/(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(202\d)/i);
   if (westernDate) {
     const [full, day, year] = westernDate;

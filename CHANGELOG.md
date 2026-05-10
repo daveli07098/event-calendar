@@ -1,3 +1,9 @@
+## [2026-05-10] — Session: multi-slot classification fix
+### Fixed
+- fix(scrape): reclassify location-less JSON-LD events within concert date range as slots, not sale windows (4e1d8d8)
+- fix(scrape): expand multi-day JSON-LD events (e.g. Jun 13–14 block) into individual nights in `groupIntoSlots` so consecutive-day merging produces correct "Jun 13–14 · 19:30" label (4e1d8d8)
+- fix(scrape): remove unused `months` variable in `extractDateFromText` (4e1d8d8)
+
 ## [2026-05-10] — Session: venue import from events
 ### Added
 - feat(venues): PUT /api/venues imports venue names from user's existing event locations/descriptions (e98d716)
