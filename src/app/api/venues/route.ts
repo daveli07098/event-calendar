@@ -11,7 +11,22 @@ export async function GET() {
     orderBy: { name: "asc" },
     select: { id: true, name: true, aliases: true, address: true, city: true, country: true, tags: true, createdAt: true },
   });
-  return NextResponse.json(venues);
+
+  // 1. Filter out TBD / placeholder venues
+  const nonTbd = venues.filter((v) => !v.name.startsWith("地點待定"));
+
+  // 2. Deduplicate "X, Y" entries where "X" (base name) also exists — show only the base
+  const nameSet = new Set(nonTbd.map((v) => v.name.toLowerCase()));
+  const deduped = nonTbd.filter((v) => {
+    const commaIdx = v.name.indexOf(",");
+    if (commaIdx > 0) {
+      const baseName = v.name.slice(0, commaIdx).trim().toLowerCase();
+      if (nameSet.has(baseName)) return false; // suppress "X, Y" if "X" exists
+    }
+    return true;
+  });
+
+  return NextResponse.json(deduped);
 }
 
 export async function POST(req: NextRequest) {
@@ -70,6 +85,8 @@ export async function PUT() {
   for (const ev of events) {
     if (ev.location?.trim()) {
       const loc = ev.location.trim();
+      // Skip TBD / placeholder venues
+      if (loc.startsWith("地點待定")) continue;
       const commaIdx = loc.indexOf(",");
       const venueName = commaIdx > 0 ? loc.slice(0, commaIdx).trim() : loc;
       const venueAddress = commaIdx > 0 ? loc.slice(commaIdx + 1).trim() || null : null;
@@ -81,7 +98,9 @@ export async function PUT() {
       }
     }
     const fromDesc = ev.description?.match(/^Venue:\s*(.+)$/m)?.[1]?.trim();
-    if (fromDesc && !nameToAddress.has(fromDesc)) nameToAddress.set(fromDesc, null);
+    if (fromDesc && !fromDesc.startsWith("地點待定") && !nameToAddress.has(fromDesc)) {
+      nameToAddress.set(fromDesc, null);
+    }
   }
 
   if (nameToAddress.size === 0) {
@@ -92,9 +111,20 @@ export async function PUT() {
   const existing = await prisma.eventVenue.findMany({ select: { id: true, name: true, address: true } });
   const existingByName = new Map(existing.map((v) => [v.name.toLowerCase(), v]));
 
-  // Cleanup: venues whose name is "X, Y" where "X" already exists → update address on X, delete "X, Y"
+  // Cleanup pass 1: delete all "地點待定" placeholder venues
+  const tbdIds = existing.filter((v) => v.name.startsWith("地點待定")).map((v) => v.id);
+  if (tbdIds.length > 0) {
+    await prisma.eventVenue.deleteMany({ where: { id: { in: tbdIds } } });
+    for (const v of existing.filter((v) => v.name.startsWith("地點待定"))) {
+      existingByName.delete(v.name.toLowerCase());
+    }
+  }
+
+  // Cleanup pass 2: venues whose name is "X, Y" where "X" also exists → merge address onto X, delete "X, Y"
+  // Also handles the reverse: "X, Y" was created first, then "X" added → delete "X, Y"
   const toDelete: string[] = [];
   for (const v of existing) {
+    if (tbdIds.includes(v.id)) continue; // already removed
     const commaIdx = v.name.indexOf(",");
     if (commaIdx > 0) {
       const baseName = v.name.slice(0, commaIdx).trim();

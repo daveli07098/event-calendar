@@ -1,6 +1,7 @@
 "use client";
 
-import { X, Plus, Clock } from "lucide-react";
+import { X, Plus, Clock, MapPin } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CalendarType, EventType } from "@/types";
 
@@ -29,6 +30,13 @@ function formatPanelDate(dateStr: string): string {
     month: "long",
     day: "numeric",
   });
+}
+
+/** Derive a short location region tag from a venue location string. */
+function locationTag(location: string | null | undefined): string | null {
+  if (!location) return null;
+  if (location.includes("香港") || location.toLowerCase().includes("hong kong")) return "Hong Kong";
+  return null;
 }
 
 export function DayDetailPanel({
@@ -108,6 +116,19 @@ export function DayDetailPanel({
                     {formatTime(event.startTime)}
                     {event.endTime && ` – ${formatTime(event.endTime)}`}
                   </p>
+                )}
+                {event.location && (
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    <MapPin className="size-3 text-muted-foreground shrink-0" />
+                    <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+                      {event.location.split(",")[0]}
+                    </span>
+                    {locationTag(event.location) && (
+                      <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 leading-none shrink-0">
+                        {locationTag(event.location)}
+                      </Badge>
+                    )}
+                  </div>
                 )}
               </div>
             </button>

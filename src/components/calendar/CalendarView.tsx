@@ -13,6 +13,7 @@ import type {
   EventDropArg,
   DatesSetArg,
   EventContentArg,
+  MoreLinkArg,
 } from "@fullcalendar/core";
 import type {
   DateClickArg,
@@ -150,6 +151,13 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     if (clickInfo.view.type === "dayGridMonth") {
       setDayPanelDate(clickInfo.dateStr.slice(0, 10));
     }
+  };
+
+  // "+N more" link → open the day detail panel instead of FC's default popover
+  const handleMoreLinkClick = (arg: MoreLinkArg) => {
+    const dateStr = arg.date.toLocaleDateString("en-CA"); // "YYYY-MM-DD" in local timezone
+    setDayPanelDate(dateStr);
+    return "stop" as const;
   };
 
   const handleEventClick = (clickInfo: EventClickArg) => {
@@ -416,6 +424,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             }}
             select={handleDateSelect}
             dateClick={handleDateClick}
+            moreLinkClick={handleMoreLinkClick}
             eventClick={handleEventClick}
             eventDrop={handleEventDrop}
             eventResize={handleEventResize}

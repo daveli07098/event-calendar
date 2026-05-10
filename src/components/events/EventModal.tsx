@@ -425,7 +425,16 @@ export function EventModal({
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="location">Location</Label>
+            <div className="flex items-center gap-2">
+              <Label htmlFor="location">Location</Label>
+              {(() => {
+                if (!location) return null;
+                if (location.includes("香港") || location.toLowerCase().includes("hong kong")) {
+                  return <span className="text-[10px] bg-secondary text-secondary-foreground rounded px-1.5 py-0.5 leading-none">Hong Kong</span>;
+                }
+                return null;
+              })()}
+            </div>
             <Input
               id="location"
               placeholder="Add location"
