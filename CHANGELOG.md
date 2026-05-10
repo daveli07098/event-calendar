@@ -1,3 +1,11 @@
+## [2026-05-10] — Session: ticket scraper sale windows + platforms
+### Fixed
+- fix(tickets): Strategy A now uses JSON-LD event `name` as the sale-window label (e.g. "DBS 信用卡預訂") instead of generic positional "Priority Sale" (c071adc)
+- fix(tickets): Strategies A (sale-window events) and B (offers.validFrom) are now **merged** instead of one overriding the other — all sale windows appear for pages like Timable football that use both (c071adc)
+- fix(tickets): POST merge now unions AI saleDates + meta saleDates instead of AI winning outright; meta labels (from event names) survive when AI only returns a subset (c071adc)
+- fix(tickets): Ticket platforms (快達票, Cityline, etc.) are now extracted from JSON-LD offer.seller.name and offer.url, with HTML text-scan fallback — no longer purely AI-dependent (c071adc)
+- fix(tickets): "Buy Tickets 立即購票" section renamed to "Platforms 售票平台" and rendered as pill badges (c071adc)
+
 ## [2026-05-10] — Session: calendar UX + location tags + venue cleanup
 ### Added
 - feat(calendar): "+N more" link now opens DayDetailPanel instead of FC default popover (19b1e4e)

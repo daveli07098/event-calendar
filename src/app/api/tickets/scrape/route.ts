@@ -185,6 +185,7 @@ interface MetaFallback {
   saleDate: string | null;        // earliest public/general on-sale from JSON-LD
   saleFirstDate: string | null;   // earliest presale/fan-club date from JSON-LD
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  ticketPlatforms: string[] | null; // e.g. ["快達票 HK Ticketing", "Cityline"]
   sourceTimezone: string | null;  // ±HH:MM offset detected from JSON-LD or URL domain
   slots: EventSlot[];             // grouped performance timeslots (empty when ≤1 unique slot)
 }
@@ -450,7 +451,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
           // Skip dates that overlap with concert nights
           if (concertEvents.some((c) => c.startDate.slice(0, 10) === dStr)) continue;
           const tStr = ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null;
-          const label = i === saleOnly.length - 1 ? "Public Sale" : "Priority Sale";
+          // Prefer the JSON-LD event name (e.g. "DBS 信用卡預訂") as the human label; fall back to positional
+          const evName = typeof ev.raw.name === "string" && ev.raw.name.trim() ? ev.raw.name.trim() : null;
+          const label = evName ?? (i === saleOnly.length - 1 ? "Public Sale" : "Priority Sale");
           if (!stratASaleWindows.some((w) => w.date === dStr)) stratASaleWindows.push({ date: dStr, time: tStr, label });
         }
       }
@@ -513,26 +516,36 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     }
   }
 
-  if (offerWindows.length > 0) {
-    // Strategy B: use offers.validFrom dates
-    offerWindows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime()); // chrono asc
-    // Label last one "Public Sale" if still generic; earlier ones "Priority Sale"
-    if (offerWindows.length > 1) {
-      const last = offerWindows[offerWindows.length - 1]!;
-      if (last.label === "Sale") last.label = "Public Sale";
-      for (let i = 0; i < offerWindows.length - 1; i++) {
-        if (offerWindows[i]!.label === "Sale") offerWindows[i]!.label = "Priority Sale";
+  // Merge Strategy B (offers.validFrom) + Strategy A (sale-window JSON-LD events).
+  // Strategy A event-name labels are more descriptive (e.g. "DBS 信用卡預訂") so they override
+  // generic positional labels from Strategy B when the same date appears in both.
+  {
+    const saleDateMap = new Map<string, { date: string; time: string | null; label: string }>();
+
+    if (offerWindows.length > 0) {
+      offerWindows.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+      if (offerWindows.length > 1) {
+        const last = offerWindows[offerWindows.length - 1]!;
+        if (last.label === "Sale") last.label = "Public Sale";
+        for (let i = 0; i < offerWindows.length - 1; i++) {
+          if (offerWindows[i]!.label === "Sale") offerWindows[i]!.label = "Priority Sale";
+        }
+      }
+      for (const w of offerWindows) saleDateMap.set(w.dateStr, { date: w.dateStr, time: w.timeStr, label: w.label });
+    }
+
+    // Strategy A entries override generic B labels when dates overlap
+    for (const w of stratASaleWindows) {
+      const existing = saleDateMap.get(w.date);
+      if (!existing || ["Sale", "Priority Sale", "Public Sale"].includes(existing.label)) {
+        saleDateMap.set(w.date, w);
       }
     }
-    schemaSaleDates = offerWindows.map(w => ({ date: w.dateStr, time: w.timeStr, label: w.label }));
-    schemaSaleFirstDate = offerWindows[0]!.dateStr;
-    schemaSaleDate = offerWindows[offerWindows.length - 1]!.dateStr;
-  } else {
-    // Strategy A: use the non-location Event blocks identified during the concert/sale split
-    if (stratASaleWindows.length > 0) {
-      schemaSaleDates = stratASaleWindows;
-      schemaSaleFirstDate = stratASaleWindows[0]!.date;
-      schemaSaleDate = stratASaleWindows[stratASaleWindows.length - 1]!.date;
+
+    if (saleDateMap.size > 0) {
+      schemaSaleDates = Array.from(saleDateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+      schemaSaleFirstDate = schemaSaleDates[0]!.date;
+      schemaSaleDate = schemaSaleDates[schemaSaleDates.length - 1]!.date;
     }
   }
 
@@ -568,6 +581,66 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   // URL-based timezone fallback — kicks in when JSON-LD has no offset info
   if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl);
 
+  // ---------------------------------------------------------------------------
+  // Ticket platform extraction
+  // 1. JSON-LD offer.seller.name and offer.url domain → canonical platform name
+  // 2. HTML text scan for known platform names (fallback when JSON-LD has nothing)
+  // ---------------------------------------------------------------------------
+  const PLATFORM_URL_MAP: Array<[RegExp, string]> = [
+    [/hkticketing\.com/i, "快達票 HK Ticketing"],
+    [/cityline\.com/i, "Cityline"],
+    [/urbtix\.hk/i, "URBTIX"],
+    [/ticketmaster\.com\.hk/i, "Ticketmaster"],
+    [/kktix\.com/i, "KKTIX"],
+    [/klook\.com/i, "Klook"],
+    [/eventbrite\.com/i, "Eventbrite"],
+    [/damai\.cn/i, "大麥網"],
+    [/bookyay\.com/i, "BOOKYAY"],
+  ];
+  const PLATFORM_TEXT_PATTERNS: Array<[RegExp, string]> = [
+    [/快達票|HK\s*Ticketing/i, "快達票 HK Ticketing"],
+    [/cityline/i, "Cityline"],
+    [/\bURBTIX\b/i, "URBTIX"],
+    [/ticketmaster/i, "Ticketmaster"],
+    [/\bKKTIX\b/i, "KKTIX"],
+    [/\bklook\b/i, "Klook"],
+    [/eventbrite/i, "Eventbrite"],
+    [/大麥網?|\bdamai\b/i, "大麥網"],
+    [/\bBOOKYAY\b/i, "BOOKYAY"],
+    [/\bAccupass\b/i, "Accupass"],
+  ];
+
+  const platformSet = new Set<string>();
+  for (const evt of allJsonLdEvents) {
+    const offers = evt.raw.offers;
+    if (!offers) continue;
+    const offerList: Record<string, unknown>[] = Array.isArray(offers) ? offers : [offers];
+    for (const offer of offerList) {
+      // seller.name
+      const seller = offer.seller as Record<string, unknown> | null | undefined;
+      const sellerName = seller && typeof seller.name === "string" ? seller.name.trim() : null;
+      if (sellerName) platformSet.add(sellerName);
+      // offer URL → canonical platform name
+      if (typeof offer.url === "string") {
+        try {
+          const domain = new URL(offer.url).hostname.toLowerCase();
+          for (const [re, name] of PLATFORM_URL_MAP) {
+            if (re.test(domain)) { platformSet.add(name); break; }
+          }
+        } catch { /* invalid URL */ }
+      }
+    }
+  }
+
+  // Text-scan fallback — useful when JSON-LD offers don't include seller/URL info
+  if (platformSet.size === 0) {
+    for (const [re, name] of PLATFORM_TEXT_PATTERNS) {
+      if (re.test(html)) platformSet.add(name);
+    }
+  }
+
+  const metaPlatforms = platformSet.size > 0 ? Array.from(platformSet) : null;
+
   return {
     title: ogTitle ?? htmlTitle,
     description: decodeHtml(ogDesc),
@@ -582,6 +655,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     saleDate: schemaSaleDate,
     saleFirstDate: schemaSaleFirstDate,
     saleDates: schemaSaleDates.length > 0 ? schemaSaleDates : null,
+    ticketPlatforms: metaPlatforms,
     sourceTimezone: sourceTz,
     slots: groupIntoSlots(concertEvents),
   };
@@ -1007,14 +1081,39 @@ export async function POST(req: NextRequest) {
     sourceUrl: url,
     aiUsed,
     ticketPrices: (aiResult as Partial<TicketData>).ticketPrices ?? null,
-    ticketPlatforms: (aiResult as Partial<TicketData>).ticketPlatforms ?? null,
+    // Prefer meta.ticketPlatforms (structurally extracted from JSON-LD / HTML) as the reliable source;
+    // AI extraction is used as a supplement when meta found nothing.
+    ticketPlatforms: (() => {
+      const ai = (aiResult as Partial<TicketData>).ticketPlatforms;
+      const mt = meta.ticketPlatforms;
+      if (mt?.length && ai?.length) {
+        // Merge without exact duplicates (case-insensitive)
+        const merged = [...mt];
+        for (const p of ai) {
+          if (!merged.some(m => m.toLowerCase() === p.toLowerCase())) merged.push(p);
+        }
+        return merged;
+      }
+      return mt ?? ai ?? null;
+    })(),
     endDate: (aiResult as Partial<TicketData>).endDate ?? meta.endDate ?? null,
     endTime: (aiResult as Partial<TicketData>).endTime ?? meta.endTime ?? null,
     saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
     saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
-    saleDates: (aiResult as Partial<TicketData>).saleDates?.length
-      ? (aiResult as Partial<TicketData>).saleDates!
-      : meta.saleDates ?? null,
+    // Merge AI + meta saleDates: meta has structurally extracted all windows (with descriptive labels);
+    // AI may catch extra windows meta missed. Union by date, meta label wins on conflict.
+    saleDates: (() => {
+      const ai = (aiResult as Partial<TicketData>).saleDates;
+      const mt = meta.saleDates;
+      if (mt?.length && ai?.length) {
+        const merged = [...mt];
+        for (const d of ai) {
+          if (!merged.some(m => m.date === d.date)) merged.push(d);
+        }
+        return merged.sort((a, b) => a.date.localeCompare(b.date));
+      }
+      return ai?.length ? ai : mt ?? null;
+    })(),
     // sourceTimezone comes only from meta (JSON-LD / URL domain) — AI doesn't return it
     sourceTimezone: meta.sourceTimezone,
     slots: meta.slots,

@@ -899,9 +899,15 @@ export function TicketSection() {
               {ticket.ticketPlatforms && ticket.ticketPlatforms.length > 0 && (
                 <div>
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
-                    Buy Tickets 立即購票
+                    Platforms 售票平台
                   </p>
-                  <p className="text-sm">{ticket.ticketPlatforms.join(" · ")}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ticket.ticketPlatforms.map((platform) => (
+                      <span key={platform} className="inline-block bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded">
+                        {platform}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
 
