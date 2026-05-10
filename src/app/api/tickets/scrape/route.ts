@@ -193,13 +193,24 @@ interface MetaFallback {
 // ---------------------------------------------------------------------------
 function buildSlotLabel(date: string, endDate: string | null, time: string | null): string {
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const fmt = (d: string) => {
+  const fmtFull = (d: string) => {
     const parts = d.split("-");
     const m = parseInt(parts[1] ?? "1", 10);
     const day = parseInt(parts[2] ?? "1", 10);
     return `${months[m - 1]} ${day}`;
   };
-  const datePart = endDate ? `${fmt(date)}–${fmt(endDate)}` : fmt(date);
+  const fmtDay = (d: string) => parseInt(d.split("-")[2] ?? "1", 10).toString();
+
+  let datePart: string;
+  if (endDate) {
+    // Same month → "Jun 13–14"; cross-month → "Jun 29–Jul 1"
+    const sameMonth = date.slice(0, 7) === endDate.slice(0, 7);
+    datePart = sameMonth
+      ? `${fmtFull(date)}–${fmtDay(endDate)}`
+      : `${fmtFull(date)}–${fmtFull(endDate)}`;
+  } else {
+    datePart = fmtFull(date);
+  }
   return time ? `${datePart} · ${time}` : datePart;
 }
 
