@@ -749,6 +749,63 @@ function extractDateFromText(text: string): { date: string | null; time: string 
   return { date: null, time: null };
 }
 
+/**
+ * Extract EventSlots from Chinese date-range patterns in page text.
+ * Used as a fallback when JSON-LD has no concert blocks with location data.
+ *
+ * Handles two Timable formats visible in the page header:
+ *   Cross-month : "2026年7月31至8月1日 7:30 PM"  → { date: 2026-07-31, endDate: 2026-08-01 }
+ *   Same-month  : "2026年8月4至5日 7:30 PM"       → { date: 2026-08-04, endDate: 2026-08-05 }
+ *
+ * @param text         Plain text extracted from the page HTML.
+ * @param excludeDates YYYY-MM-DD strings of known sale-window dates to exclude.
+ */
+function extractTextSlots(text: string, excludeDates: string[]): EventSlot[] {
+  const excludeSet = new Set(excludeDates);
+  const raw: Array<{ date: string; endDate: string | null; time: string }> = [];
+
+  const to24h = (h: number, period: string) => {
+    if (period.toLowerCase() === "pm" && h < 12) return h + 12;
+    if (period.toLowerCase() === "am" && h === 12) return 0;
+    return h;
+  };
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+
+  // 1. Cross-month range: "2026年7月31至8月1日 7:30 PM"
+  const crossRe = /(\d{4})年(\d{1,2})月(\d{1,2})至(\d{1,2})月(\d{1,2})日[^0-9\n]{0,15}(\d{1,2}):(\d{2})\s+(AM|PM)/gi;
+  for (const m of text.matchAll(crossRe)) {
+    const [, y, m1, d1, m2, d2, h, min, period] = m;
+    const startDate = `${y}-${pad2(+m1!)}-${pad2(+d1!)}`;
+    const endDate   = `${y}-${pad2(+m2!)}-${pad2(+d2!)}`;
+    const time = `${pad2(to24h(+h!, period!))}:${min}`;
+    if (!raw.some((s) => s.date === startDate)) raw.push({ date: startDate, endDate: endDate > startDate ? endDate : null, time });
+  }
+
+  // 2. Same-month range: "2026年8月4至5日 7:30 PM"
+  const sameRe = /(\d{4})年(\d{1,2})月(\d{1,2})至(\d{1,2})日[^0-9\n]{0,15}(\d{1,2}):(\d{2})\s+(AM|PM)/gi;
+  for (const m of text.matchAll(sameRe)) {
+    const [, y, mo, d1, d2, h, min, period] = m;
+    const startDate = `${y}-${pad2(+mo!)}-${pad2(+d1!)}`;
+    const endDate   = `${y}-${pad2(+mo!)}-${pad2(+d2!)}`;
+    const time = `${pad2(to24h(+h!, period!))}:${min}`;
+    if (!raw.some((s) => s.date === startDate)) raw.push({ date: startDate, endDate: endDate > startDate ? endDate : null, time });
+  }
+
+  // Filter out dates that are known sale windows, sort, and only return when ≥2 slots
+  const slots = raw
+    .filter((s) => !excludeSet.has(s.date))
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((s) => ({
+      date: s.date,
+      endDate: s.endDate,
+      time: s.time,
+      endTime: null,
+      label: buildSlotLabel(s.date, s.endDate, s.time),
+    }));
+
+  return slots.length > 1 ? slots : [];
+}
+
 // ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
@@ -831,6 +888,21 @@ export async function POST(req: NextRequest) {
 
   const pageText = extractTextFromHtml(html);
   const uid = session.user.id;
+
+  // Text-based slot extraction — fires when JSON-LD had no concert blocks with location.
+  // Parses Chinese date-range patterns ("2026年7月31至8月1日 7:30 PM") directly from page text,
+  // excluding any dates already identified as sale windows.
+  if (!meta.dateConfident && meta.slots.length === 0) {
+    const saleDateStrs = (meta.saleDates ?? []).map((d) => d.date);
+    const textSlots = extractTextSlots(pageText, saleDateStrs);
+    if (textSlots.length > 0) {
+      meta.dateConfident = true;
+      meta.date = textSlots[0]!.date;
+      meta.time = textSlots[0]!.time;
+      meta.endDate = textSlots[0]!.endDate;
+      meta.slots = textSlots;
+    }
+  }
 
   // Only check quota if at least one AI provider is configured AND user didn't request OG-meta only.
   // Falls back to OG-meta if the user has hit their limit or no AI key exists.

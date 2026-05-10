@@ -1,3 +1,9 @@
+## [2026-05-10] — Session: venue dedup + text-based slot extraction
+### Fixed
+- fix(venues): import now splits `"Venue Name, Address"` location strings — uses name as key, address as field; no more duplicate rows (4ccb368)
+- fix(venues): PUT import runs a cleanup pass that finds existing `"Name, Address"` style venues, updates address on the clean-name entry, and deletes the malformed duplicate (4ccb368)
+- fix(scrape): add `extractTextSlots()` — parses Chinese date-range patterns directly from page text when JSON-LD event blocks have no `location` field (e.g. Timable football events); produces correct multi-slot output even without JSON-LD concert blocks (4ccb368)
+
 ## [2026-05-10] — Session: date extraction accuracy fix
 ### Fixed
 - fix(scrape): add `dateConfident` flag to MetaFallback — when date came from JSON-LD concert blocks (events with location), prefer it over AI result (which can confuse ticket-sale dates with performance dates) (15b2dbe)

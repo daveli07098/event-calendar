@@ -63,35 +63,70 @@ export async function PUT() {
     select: { location: true, description: true },
   });
 
-  // Extract venue names from event location field + "Venue: …" lines in description
-  const names = new Set<string>();
+  // Extract venue names (and optional addresses) from event location field + "Venue: …" lines.
+  // A location field may be "Venue Name, Street Address" — split on first comma so both
+  // variants ("Venue Name" and "Venue Name, Street Address") aren't created as separate entries.
+  const nameToAddress = new Map<string, string | null>();
   for (const ev of events) {
-    if (ev.location?.trim()) names.add(ev.location.trim());
+    if (ev.location?.trim()) {
+      const loc = ev.location.trim();
+      const commaIdx = loc.indexOf(",");
+      const venueName = commaIdx > 0 ? loc.slice(0, commaIdx).trim() : loc;
+      const venueAddress = commaIdx > 0 ? loc.slice(commaIdx + 1).trim() || null : null;
+      if (venueName) {
+        // Keep address if we already have one, or set it if newly found
+        if (!nameToAddress.has(venueName) || (!nameToAddress.get(venueName) && venueAddress)) {
+          nameToAddress.set(venueName, venueAddress);
+        }
+      }
+    }
     const fromDesc = ev.description?.match(/^Venue:\s*(.+)$/m)?.[1]?.trim();
-    if (fromDesc) names.add(fromDesc);
+    if (fromDesc && !nameToAddress.has(fromDesc)) nameToAddress.set(fromDesc, null);
   }
 
-  if (names.size === 0) {
+  if (nameToAddress.size === 0) {
     return NextResponse.json({ imported: 0, skipped: 0 });
   }
 
-  // Load existing venue names to skip duplicates
-  const existing = await prisma.eventVenue.findMany({ select: { name: true } });
-  const existingNames = new Set(existing.map((v) => v.name.toLowerCase()));
+  // Load existing venues to detect duplicates and clean up bad "name, address" entries
+  const existing = await prisma.eventVenue.findMany({ select: { id: true, name: true, address: true } });
+  const existingByName = new Map(existing.map((v) => [v.name.toLowerCase(), v]));
+
+  // Cleanup: venues whose name is "X, Y" where "X" already exists → update address on X, delete "X, Y"
+  const toDelete: string[] = [];
+  for (const v of existing) {
+    const commaIdx = v.name.indexOf(",");
+    if (commaIdx > 0) {
+      const baseName = v.name.slice(0, commaIdx).trim();
+      const addr = v.name.slice(commaIdx + 1).trim() || null;
+      const base = existingByName.get(baseName.toLowerCase());
+      if (base) {
+        if (!base.address && addr) {
+          await prisma.eventVenue.update({ where: { id: base.id }, data: { address: addr } });
+          base.address = addr; // update local cache
+        }
+        toDelete.push(v.id);
+        existingByName.delete(v.name.toLowerCase()); // remove from lookup so it's not counted as existing
+      }
+    }
+  }
+  if (toDelete.length > 0) {
+    await prisma.eventVenue.deleteMany({ where: { id: { in: toDelete } } });
+  }
 
   let imported = 0;
   let skipped = 0;
-  for (const name of names) {
-    if (existingNames.has(name.toLowerCase())) {
+  for (const [name, address] of nameToAddress) {
+    if (existingByName.has(name.toLowerCase())) {
       skipped++;
       continue;
     }
     await prisma.eventVenue.create({
-      data: { name, city: "Hong Kong", country: "HK" },
+      data: { name, address: address ?? null, city: "Hong Kong", country: "HK" },
     });
-    existingNames.add(name.toLowerCase());
+    existingByName.set(name.toLowerCase(), { id: "", name, address: address ?? null });
     imported++;
   }
 
-  return NextResponse.json({ imported, skipped });
+  return NextResponse.json({ imported, skipped, cleaned: toDelete.length });
 }
