@@ -193,7 +193,7 @@ interface MetaFallback {
 // ---------------------------------------------------------------------------
 // Multi-slot grouping: consecutive same-time nights → date range
 // ---------------------------------------------------------------------------
-function buildSlotLabel(date: string, endDate: string | null, time: string | null): string {
+function buildSlotLabel(date: string, endDate: string | null, time: string | null, endTime: string | null = null): string {
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const fmt = (d: string) => {
     const parts = d.split("-");
@@ -202,7 +202,8 @@ function buildSlotLabel(date: string, endDate: string | null, time: string | nul
     return `${months[m - 1]} ${day}`;
   };
   const datePart = endDate ? `${fmt(date)}–${fmt(endDate)}` : fmt(date);
-  return time ? `${datePart} · ${time}` : datePart;
+  if (!time) return datePart;
+  return endTime ? `${datePart} · ${time}–${endTime}` : `${datePart} · ${time}`;
 }
 
 function groupIntoSlots(concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>): EventSlot[] {
@@ -269,7 +270,7 @@ function groupIntoSlots(concertEvents: Array<{ startDate: string; dateObj: Date;
         endDate,
         time,
         endTime: runStart.endTime,
-        label: buildSlotLabel(runStart.date, endDate, time),
+        label: buildSlotLabel(runStart.date, endDate, time, runStart.endTime),
       });
       i = j;
     }
@@ -825,18 +826,26 @@ function extractDateFromText(text: string): { date: string | null; time: string 
 
 /**
  * Extract EventSlots from Chinese date-range patterns in page text.
- * Used as a fallback when JSON-LD has no concert blocks with location data.
+ * Always runs — used as primary slot source when JSON-LD has no concert blocks,
+ * and as a supplement to enrich endTimes when JSON-LD only covers one time group
+ * (e.g. only the matinee 14:30–17:10 block has location, but the page text also
+ * shows an evening 19:30–22:10 row for the same date range).
  *
- * Handles two Timable formats visible in the page header:
- *   Cross-month : "2026年7月31至8月1日 7:30 PM"  → { date: 2026-07-31, endDate: 2026-08-01 }
- *   Same-month  : "2026年8月4至5日 7:30 PM"       → { date: 2026-08-04, endDate: 2026-08-05 }
+ * Multiple time rows for the same date range are merged into one slot:
+ *   time    = earliest start (14:30)
+ *   endTime = latest end    (22:10)
+ *
+ * Handles two Timable formats:
+ *   Cross-month : "2026年7月31至8月1日 7:30 PM – 10:10 PM"
+ *   Same-month  : "2026年8月4至5日 7:30 PM – 10:10 PM"
  *
  * @param text         Plain text extracted from the page HTML.
  * @param excludeDates YYYY-MM-DD strings of known sale-window dates to exclude.
  */
 function extractTextSlots(text: string, excludeDates: string[]): EventSlot[] {
   const excludeSet = new Set(excludeDates);
-  const raw: Array<{ date: string; endDate: string | null; time: string }> = [];
+  // Key: "startDate_endDate" — merge rows with the same date range
+  const rawMap = new Map<string, { date: string; endDate: string | null; time: string; endTime: string | null }>();
 
   const to24h = (h: number, period: string) => {
     if (period.toLowerCase() === "pm" && h < 12) return h + 12;
@@ -845,36 +854,51 @@ function extractTextSlots(text: string, excludeDates: string[]): EventSlot[] {
   };
   const pad2 = (n: number) => String(n).padStart(2, "0");
 
-  // 1. Cross-month range: "2026年7月31至8月1日 7:30 PM"
-  const crossRe = /(\d{4})年(\d{1,2})月(\d{1,2})至(\d{1,2})月(\d{1,2})日[^0-9\n]{0,15}(\d{1,2}):(\d{2})\s+(AM|PM)/gi;
+  const upsert = (startDate: string, rawEnd: string | null, time: string, endTime: string | null) => {
+    const endDate = rawEnd && rawEnd > startDate ? rawEnd : null;
+    const key = `${startDate}_${endDate ?? ""}`;
+    const existing = rawMap.get(key);
+    if (!existing) {
+      rawMap.set(key, { date: startDate, endDate, time, endTime });
+    } else {
+      // Merge: keep earliest start time and latest end time
+      if (time < existing.time) existing.time = time;
+      if (endTime && (!existing.endTime || endTime > existing.endTime)) existing.endTime = endTime;
+    }
+  };
+
+  // 1. Cross-month range: "2026年7月31至8月1日 7:30 PM" (optionally "– 10:10 PM")
+  const crossRe = /(\d{4})年(\d{1,2})月(\d{1,2})至(\d{1,2})月(\d{1,2})日[^0-9\n]{0,15}(\d{1,2}):(\d{2})\s*(AM|PM)(?:\s*[–—\-]\s*(\d{1,2}):(\d{2})\s*(AM|PM))?/gi;
   for (const m of text.matchAll(crossRe)) {
-    const [, y, m1, d1, m2, d2, h, min, period] = m;
+    const [, y, m1, d1, m2, d2, h, min, period, endH, endMin, endPeriod] = m;
     const startDate = `${y}-${pad2(+m1!)}-${pad2(+d1!)}`;
     const endDate   = `${y}-${pad2(+m2!)}-${pad2(+d2!)}`;
     const time = `${pad2(to24h(+h!, period!))}:${min}`;
-    if (!raw.some((s) => s.date === startDate)) raw.push({ date: startDate, endDate: endDate > startDate ? endDate : null, time });
+    const endTime = endH && endMin && endPeriod ? `${pad2(to24h(+endH!, endPeriod!))}:${endMin}` : null;
+    upsert(startDate, endDate, time, endTime);
   }
 
-  // 2. Same-month range: "2026年8月4至5日 7:30 PM"
-  const sameRe = /(\d{4})年(\d{1,2})月(\d{1,2})至(\d{1,2})日[^0-9\n]{0,15}(\d{1,2}):(\d{2})\s+(AM|PM)/gi;
+  // 2. Same-month range: "2026年8月4至5日 7:30 PM" (optionally "– 10:10 PM")
+  const sameRe = /(\d{4})年(\d{1,2})月(\d{1,2})至(\d{1,2})日[^0-9\n]{0,15}(\d{1,2}):(\d{2})\s*(AM|PM)(?:\s*[–—\-]\s*(\d{1,2}):(\d{2})\s*(AM|PM))?/gi;
   for (const m of text.matchAll(sameRe)) {
-    const [, y, mo, d1, d2, h, min, period] = m;
+    const [, y, mo, d1, d2, h, min, period, endH, endMin, endPeriod] = m;
     const startDate = `${y}-${pad2(+mo!)}-${pad2(+d1!)}`;
     const endDate   = `${y}-${pad2(+mo!)}-${pad2(+d2!)}`;
     const time = `${pad2(to24h(+h!, period!))}:${min}`;
-    if (!raw.some((s) => s.date === startDate)) raw.push({ date: startDate, endDate: endDate > startDate ? endDate : null, time });
+    const endTime = endH && endMin && endPeriod ? `${pad2(to24h(+endH!, endPeriod!))}:${endMin}` : null;
+    upsert(startDate, endDate, time, endTime);
   }
 
-  // Filter out dates that are known sale windows, sort, and only return when ≥2 slots
-  const slots = raw
+  // Filter out known sale-window dates, sort chronologically, require ≥2 distinct slots
+  const slots = Array.from(rawMap.values())
     .filter((s) => !excludeSet.has(s.date))
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((s) => ({
       date: s.date,
       endDate: s.endDate,
       time: s.time,
-      endTime: null,
-      label: buildSlotLabel(s.date, s.endDate, s.time),
+      endTime: s.endTime,
+      label: buildSlotLabel(s.date, s.endDate, s.time, s.endTime),
     }));
 
   return slots.length > 1 ? slots : [];
@@ -963,18 +987,41 @@ export async function POST(req: NextRequest) {
   const pageText = extractTextFromHtml(html);
   const uid = session.user.id;
 
-  // Text-based slot extraction — fires when JSON-LD had no concert blocks with location.
-  // Parses Chinese date-range patterns ("2026年7月31至8月1日 7:30 PM") directly from page text,
-  // excluding any dates already identified as sale windows.
-  if (!meta.dateConfident && meta.slots.length === 0) {
+  // Text-based slot extraction — always runs:
+  //   a) Primary: when JSON-LD had no concert blocks, use text as the slot source
+  //   b) Supplement: when JSON-LD has slots (e.g. only the 14:30 matinee block), enrich
+  //      each slot's endTime using the later 19:30–22:10 evening row from page text
+  {
     const saleDateStrs = (meta.saleDates ?? []).map((d) => d.date);
     const textSlots = extractTextSlots(pageText, saleDateStrs);
     if (textSlots.length > 0) {
-      meta.dateConfident = true;
-      meta.date = textSlots[0]!.date;
-      meta.time = textSlots[0]!.time;
-      meta.endDate = textSlots[0]!.endDate;
-      meta.slots = textSlots;
+      if (!meta.dateConfident && meta.slots.length === 0) {
+        // Full fallback: use text slots as the primary source
+        meta.dateConfident = true;
+        meta.date = textSlots[0]!.date;
+        meta.time = textSlots[0]!.time;
+        meta.endDate = textSlots[0]!.endDate;
+        meta.slots = textSlots;
+      } else if (meta.slots.length > 0) {
+        // Supplement: enrich existing slots with endTimes where text extraction provides a later time
+        const textByKey = new Map(textSlots.map((s) => [`${s.date}_${s.endDate ?? ""}`, s]));
+        meta.slots = meta.slots.map((s) => {
+          const match = textByKey.get(`${s.date}_${s.endDate ?? ""}`);
+          const betterEndTime =
+            match?.endTime && (!s.endTime || match.endTime > s.endTime) ? match.endTime : null;
+          const endTime = betterEndTime ?? s.endTime;
+          // Re-build label whenever endTime changed or was previously omitted
+          if (endTime !== s.endTime || (endTime && !s.label.includes("–" + endTime))) {
+            return { ...s, endTime, label: buildSlotLabel(s.date, s.endDate, s.time, endTime) };
+          }
+          return s;
+        });
+      }
+    } else if (meta.slots.length > 0) {
+      // No text slots — still re-build labels to include any endTime already in the slot
+      meta.slots = meta.slots.map((s) =>
+        s.endTime ? { ...s, label: buildSlotLabel(s.date, s.endDate, s.time, s.endTime) } : s
+      );
     }
   }
 

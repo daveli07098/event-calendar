@@ -1,3 +1,10 @@
+## [2026-05-10] — Session: ticket slot end time extraction
+### Fixed
+- fix(tickets): `extractTextSlots` now parses optional end time from Chinese date-range patterns ("2026年8月6至16日 7:30 PM – 10:10 PM") — end time 22:10 is captured and shown in slot label (3a33c78)
+- fix(tickets): multiple time rows for the same date range (matinee 14:30–17:10 + evening 19:30–22:10) are merged into one slot — time = earliest start (14:30), endTime = latest end (22:10) — matches user expectation of "2 slots" for Cats/Timable pages (3a33c78)
+- fix(tickets): `buildSlotLabel` now includes `–endTime` in the chip label when present: `Aug 6–16 · 14:30–22:10` (3a33c78)
+- fix(tickets): text slot extraction now always runs (not gated on `!dateConfident`) so it can supplement endTimes on JSON-LD-derived slots even when JSON-LD only has the matinee block with location (3a33c78)
+
 ## [2026-05-10] — Session: ticket scraper sale windows + platforms
 ### Fixed
 - fix(tickets): Strategy A now uses JSON-LD event `name` as the sale-window label (e.g. "DBS 信用卡預訂") instead of generic positional "Priority Sale" (c071adc)
