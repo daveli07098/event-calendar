@@ -1,6 +1,7 @@
 ## [2026-05-12] — Session: DB migration infra for Supabase
 ### Fixed
 - fix(modal): category select trigger now shows emoji + label (e.g. "🎵 Concert") instead of raw value "concert" (28157fc)
+- feat(types): added `ticket` category ("🎟️ Ticket Sale") to `EVENT_CATEGORIES` and `CATEGORY_LABELS` (5201ac4)
 ### Fixed
 - fix(db): `prisma.config.ts` `datasource.url` set to `DIRECT_URL` (port 5432) — correct Prisma 7 API for bypassing Supabase PgBouncer during migrations (`directUrl` was removed in v7) (c347d90)
 - fix(db): `prisma.config.ts` simplified — removed non-functional `datasource.directUrl` override from `defineConfig` (b5abf15)
