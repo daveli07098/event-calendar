@@ -1237,16 +1237,16 @@ export async function POST(req: NextRequest) {
   const remaining = await remainingAiCalls(uid);
 
   // ---------------------------------------------------------------------------
-  // Duplicate detection: find existing events on the same day with a similar title
+  // Duplicate detection: find existing events within ±12 h with similar title
   // ---------------------------------------------------------------------------
-  type DuplicateCandidate = { id: string; title: string; startTime: string; location: string | null };
+  type DuplicateCandidate = { id: string; title: string; startTime: string; location: string | null; similarityScore: number };
   let duplicateCandidates: DuplicateCandidate[] = [];
   if (ticket.date) {
     try {
-      // Build a ±1.5 day UTC window to cover any timezone offset (HKT = UTC+8)
+      // ±12h UTC window — enough to cover HKT offset (UTC+8) without spanning too many events
       const midpoint = new Date(`${ticket.date}T12:00:00Z`);
-      const windowStart = new Date(midpoint.getTime() - 36 * 3600 * 1000);
-      const windowEnd   = new Date(midpoint.getTime() + 36 * 3600 * 1000);
+      const windowStart = new Date(midpoint.getTime() - 12 * 3600 * 1000);
+      const windowEnd   = new Date(midpoint.getTime() + 12 * 3600 * 1000);
 
       const [ownedCals, memberships] = await Promise.all([
         prisma.calendar.findMany({ where: { userId: uid }, select: { id: true } }),
@@ -1262,22 +1262,59 @@ export async function POST(req: NextRequest) {
         select: { id: true, title: true, startTime: true, location: true },
       });
 
-      // Tokenise both titles and look for ≥2 non-trivial word overlaps
-      const ticketTokens = ticket.title.toLowerCase()
-        .split(/[\s《》〈〉【】「」『』・\-—]+/)
-        .filter((w) => w.length > 2);
+      if (eventsOnDay.length > 0) {
+        // Try AI similarity scoring (batch all candidates in one call, cheap prompt)
+        let aiScores: Record<string, number> | null = null;
+        if (geminiKey) {
+          try {
+            const candidateTitles = eventsOnDay.map((e, i) => `${i}: ${e.title}`).join("\n");
+            const similarityPrompt = `Given the scraped event title and a list of existing calendar event titles, return a JSON object mapping each index (as a string key) to a similarity score between 0.0 and 1.0.
+Score 1.0 = definitely the same event (even if wording differs, e.g. different language or extra venue info).
+Score 0.0 = completely unrelated event.
 
-      duplicateCandidates = eventsOnDay
-        .filter((ev) => {
-          const evTokens = ev.title.toLowerCase()
-            .split(/[\s《》〈〉【】「」『』・\-—]+/)
-            .filter((w) => w.length > 2);
-          const overlap = ticketTokens.filter((w) =>
-            evTokens.some((ew) => ew.includes(w) || w.includes(ew))
-          );
-          return overlap.length >= 2;
-        })
-        .map((ev) => ({ ...ev, startTime: ev.startTime.toISOString() }));
+Scraped title: "${ticket.title}"
+
+Candidates:
+${candidateTitles}
+
+Return ONLY a JSON object like {"0":0.95,"1":0.1,...}`;
+
+            const simEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiKey}`;
+            const simRes = await fetch(simEndpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: similarityPrompt }] }],
+                generationConfig: { responseMimeType: "application/json", maxOutputTokens: 256 },
+              }),
+              signal: AbortSignal.timeout(8000), // 8 s max for this lightweight call
+            });
+            if (simRes.ok) {
+              const simData = await simRes.json();
+              const raw = simData.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+              const cleaned = raw.replace(/```json\n?|```/g, "").trim();
+              aiScores = JSON.parse(cleaned) as Record<string, number>;
+            }
+          } catch {
+            // non-critical — fall back to no-AI filter below
+          }
+        }
+
+        // Filter candidates: if AI scored them, keep score >= 0.85; otherwise exact title match
+        duplicateCandidates = eventsOnDay
+          .filter((ev, i) => {
+            if (aiScores !== null) {
+              return (aiScores[String(i)] ?? 0) >= 0.85;
+            }
+            // No AI: exact title match only
+            return ev.title.toLowerCase().trim() === ticket.title.toLowerCase().trim();
+          })
+          .map((ev, i) => ({
+            ...ev,
+            startTime: ev.startTime.toISOString(),
+            similarityScore: aiScores ? (aiScores[String(i)] ?? 0) : 1,
+          }));
+      }
     } catch {
       // non-critical — ignore errors
     }

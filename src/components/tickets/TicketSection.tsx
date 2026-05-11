@@ -44,7 +44,7 @@ interface ScrapedTicket {
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   slots?: EventSlot[];
-  duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null }>;
+  duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null; similarityScore: number }>;
 }
 
 interface FieldChange {
@@ -158,6 +158,8 @@ export function TicketSection() {
   const [selectedEventCalId, setSelectedEventCalId] = useState<string | null>(null);
   const [selectedSaleCalId, setSelectedSaleCalId] = useState<string | null>(null);
   const [merging, setMerging] = useState(false);
+  // Merge mode: when user ticks "merge into existing", this holds the target event id
+  const [mergeTarget, setMergeTarget] = useState<string | null>(null);
 
   // Fetch quota on mount so badge shows before first scan
   useEffect(() => {
@@ -246,6 +248,11 @@ export function TicketSection() {
       } catch { /* diff check failure is non-fatal */ }
 
       setStatus("scraped");
+
+      // Auto-select merge target if a high-confidence duplicate was found (score >= 0.9)
+      const bestDup = data.duplicateCandidates?.find((c: { similarityScore: number }) => c.similarityScore >= 0.9);
+      if (bestDup) setMergeTarget(bestDup.id);
+      else setMergeTarget(null);
     } catch {
       setErrorMsg("Network error — please try again");
       setStatus("error");
@@ -474,6 +481,7 @@ export function TicketSection() {
     setCalendarOptions(null);
     setSelectedEventCalId(null);
     setSelectedSaleCalId(null);
+    setMergeTarget(null);
   };
 
   // Auto-reset 3 s after a successful add so the input is ready for the next scan
@@ -859,26 +867,40 @@ export function TicketSection() {
                 <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm space-y-2">
                   <p className="font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
                     <AlertCircle className="size-3.5 shrink-0" />
-                    Similar event already in your calendar
+                    Similar event{ticket.duplicateCandidates.length > 1 ? "s" : ""} already in your calendar
                   </p>
                   {ticket.duplicateCandidates.map((c) => (
-                    <div key={c.id} className="flex items-start justify-between gap-2 pl-5">
-                      <p className="text-xs text-muted-foreground">
-                        &ldquo;{c.title}&rdquo;{c.location ? ` · ${c.location}` : ""}
-                      </p>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-6 text-xs px-2 shrink-0"
-                        disabled={merging}
-                        onClick={() => handleMerge(c.id)}
-                      >
-                        {merging ? <Loader2 className="size-3 animate-spin" /> : null}
-                        Merge URL
-                      </Button>
-                    </div>
+                    <label
+                      key={c.id}
+                      className={`flex items-start gap-2.5 cursor-pointer rounded-md border px-3 py-2 transition-colors ${
+                        mergeTarget === c.id
+                          ? "border-amber-500/60 bg-amber-500/10"
+                          : "border-transparent hover:bg-amber-500/10"
+                      }`}
+                    >
+                      <Checkbox
+                        checked={mergeTarget === c.id}
+                        onCheckedChange={(checked) =>
+                          setMergeTarget(checked ? c.id : null)
+                        }
+                        className="mt-0.5 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium truncate">{c.title}</p>
+                        {c.location && <p className="text-xs text-muted-foreground truncate">{c.location}</p>}
+                        {c.similarityScore > 0 && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            {Math.round(c.similarityScore * 100)}% match
+                          </p>
+                        )}
+                      </div>
+                    </label>
                   ))}
-                  <p className="text-xs text-muted-foreground pl-5">Merge to add this ticket URL + any new info to the existing event, or add as a new event below.</p>
+                  <p className="text-xs text-muted-foreground">
+                    {mergeTarget
+                      ? "Checked: clicking the button below will merge info into the existing event."
+                      : "Tick an event above to merge this URL into it, or ignore to add as a new event."}
+                  </p>
                 </div>
               )}
 
@@ -1094,16 +1116,27 @@ export function TicketSection() {
               {/* Actions */}
               {status === "scraped" && (
                 <div className="flex gap-2 pt-2">
-                  <Button
-                    onClick={handleAddToCalendar}
-                    className="flex-1"
-                    disabled={slots.length > 1 && selectedSlots.size === 0}
-                  >
-                    <CalendarPlus className="size-4 mr-2" />
-                    {slots.length > 1
-                      ? `Add ${selectedSlots.size} slot${selectedSlots.size !== 1 ? "s" : ""}`
-                      : "Add to event-reminders"}
-                  </Button>
+                  {mergeTarget ? (
+                    <Button
+                      onClick={() => handleMerge(mergeTarget)}
+                      className="flex-1"
+                      disabled={merging}
+                    >
+                      {merging ? <Loader2 className="size-4 mr-2 animate-spin" /> : <RefreshCw className="size-4 mr-2" />}
+                      Update existing event
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleAddToCalendar}
+                      className="flex-1"
+                      disabled={slots.length > 1 && selectedSlots.size === 0}
+                    >
+                      <CalendarPlus className="size-4 mr-2" />
+                      {slots.length > 1
+                        ? `Add ${selectedSlots.size} slot${selectedSlots.size !== 1 ? "s" : ""}`
+                        : "Add to event-reminders"}
+                    </Button>
+                  )}
                   <Button variant="outline" onClick={handleReset}>Clear</Button>
                 </div>
               )}

@@ -1,3 +1,10 @@
+## [2026-05-12] — Session: smarter duplicate detection + merge UX
+### Changed
+- feat(tickets): duplicate detection window tightened from ±36 h to ±12 h (6b72b76)
+- feat(tickets): when AI (Gemini Flash Lite) is available, title similarity is scored 0–1 in a single batch call; only candidates ≥ 0.85 are shown. Without AI, falls back to exact title match (6b72b76)
+- feat(tickets): each duplicate candidate is now a checkbox — tick to select merge target; score % shown per candidate (6b72b76)
+- feat(tickets): primary action button switches to "Update existing event" when a merge target is selected; event with score ≥ 0.9 is auto-selected on scan (6b72b76)
+
 ## [2026-05-12] — Session: multi-day events + duplicate merge
 ### Added
 - feat(calendar): multi-day timed events (endDate > startDate) now display as all-day spanning banners in month/week view — popup stores, opera runs, multi-week exhibitions no longer appear as a single dot on the start day (3e31bfa)
