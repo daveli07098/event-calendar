@@ -97,20 +97,31 @@ export async function GET(_req: NextRequest) {
 
 // ---------------------------------------------------------------------------
 // POST /api/events/classify — AI-classify all (or unclassified) events
-// Body: { onlyUnclassified?: boolean }
+// Body: { onlyUnclassified?: boolean; calendarIds?: string[] }
 // ---------------------------------------------------------------------------
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const body = await req.json().catch(() => ({})) as { onlyUnclassified?: boolean };
+  const body = await req.json().catch(() => ({})) as { onlyUnclassified?: boolean; calendarIds?: string[] };
   const onlyUnclassified = body.onlyUnclassified !== false; // default true
 
   const [owned, memberships] = await Promise.all([
     prisma.calendar.findMany({ where: { userId: session.user.id }, select: { id: true } }),
     prisma.calendarMember.findMany({ where: { userId: session.user.id }, select: { calendarId: true } }),
   ]);
-  const calIds = [...owned.map((c) => c.id), ...memberships.map((m) => m.calendarId)];
+  const accessibleCalIds = new Set([...owned.map((c) => c.id), ...memberships.map((m) => m.calendarId)]);
+
+  // If caller specified calendar IDs, intersect with accessible set (security check)
+  let calIds: string[];
+  if (body.calendarIds?.length) {
+    calIds = body.calendarIds.filter((id) => accessibleCalIds.has(id));
+    if (calIds.length === 0) {
+      return NextResponse.json({ error: "No accessible calendars in the provided list" }, { status: 403 });
+    }
+  } else {
+    calIds = [...accessibleCalIds];
+  }
 
   const events = await prisma.event.findMany({
     where: {

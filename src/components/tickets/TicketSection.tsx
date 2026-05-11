@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
-  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag,
 } from "lucide-react";
 import { VenueSection } from "@/components/tickets/VenueSection";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { EVENT_CATEGORIES, CATEGORY_LABELS, type EventCategory } from "@/types";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 
@@ -69,6 +70,13 @@ interface DiffResult {
 }
 
 type Status = "idle" | "scraping" | "checking" | "scraped" | "diff" | "adding" | "updating" | "done" | "error";
+
+interface ClassifyCalOption {
+  id: string;
+  name: string;
+  color: string;
+  eventCount?: number;
+}
 
 /** Add N hours to a "HH:MM" string and return "HH:MM". Used for UTC→HKT display. */
 function addHours(hhmm: string, hours: number): string {
@@ -135,7 +143,7 @@ function DiffTable({
 }
 
 export function TicketSection() {
-  const [section, setSection] = useState<"import" | "venues">("import");
+  const [section, setSection] = useState<"import" | "venues" | "classify">("import");
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
@@ -161,6 +169,15 @@ export function TicketSection() {
   // Merge mode: when user ticks "merge into existing", this holds the target event id
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
 
+  // ── Category Classification state ──────────────────────────────
+  const [classifyCalendars, setClassifyCalendars] = useState<ClassifyCalOption[]>([]);
+  const [selectedClassifyCalIds, setSelectedClassifyCalIds] = useState<Set<string>>(new Set());
+  const [classifying, setClassifying] = useState(false);
+  const [classifyOnlyUnclassified, setClassifyOnlyUnclassified] = useState(true);
+  const [classifyResult, setClassifyResult] = useState<{ updated: number; total: number; message: string } | null>(null);
+  const [classifyCounts, setClassifyCounts] = useState<Array<{ category: string | null; count: number }> | null>(null);
+  const SALE_CALENDAR_NAME = "sale-ticket";
+
   // Fetch quota on mount so badge shows before first scan
   useEffect(() => {
     fetch("/api/tickets/scrape")
@@ -168,6 +185,31 @@ export function TicketSection() {
       .then((d) => { if (d.aiQuota) setQuota(d.aiQuota); })
       .catch(() => null);
   }, []);
+
+  // Load calendar list when classify section opens
+  useEffect(() => {
+    if (section !== "classify") return;
+    if (classifyCalendars.length > 0) return; // already loaded
+    fetch("/api/calendars")
+      .then((r) => r.json())
+      .then((data: Array<{ id: string; name: string; color: string }>) => {
+        // Exclude sale-ticket calendar from classification targets
+        const filtered = data.filter((c) => c.name !== SALE_CALENDAR_NAME);
+        setClassifyCalendars(filtered);
+        // Default: select event-reminders calendar; if absent, select all
+        const defaultIds = filtered
+          .filter((c) => c.name === "event-reminders")
+          .map((c) => c.id);
+        setSelectedClassifyCalIds(new Set(defaultIds.length ? defaultIds : filtered.map((c) => c.id)));
+      })
+      .catch(() => null);
+
+    // Also fetch category counts
+    fetch("/api/events/classify")
+      .then((r) => r.json())
+      .then((d) => { if (d.counts) setClassifyCounts(d.counts); })
+      .catch(() => null);
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRefix = async () => {
     // Re-fix Times has been removed from the UI; this handler is kept for safety but unused
@@ -504,7 +546,7 @@ export function TicketSection() {
         </a>
         <div className="flex items-center gap-2">
           <Ticket className="size-5 text-primary" />
-          <h1 className="text-lg font-semibold">Ticket Section</h1>
+          <h1 className="text-lg font-semibold">Event Section</h1>
         </div>
         <div className="ml-auto flex items-center gap-2">
           {/* Extraction method selector */}
@@ -585,6 +627,17 @@ export function TicketSection() {
             Import Event
           </button>
           <button
+            onClick={() => setSection("classify")}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+              section === "classify"
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <Tag className="size-4 shrink-0" />
+            Category Detection
+          </button>
+          <button
             onClick={() => setSection("venues")}
             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "venues"
@@ -601,6 +654,195 @@ export function TicketSection() {
         <div className="flex-1 overflow-auto">
           {section === "venues" ? (
             <VenueSection />
+          ) : section === "classify" ? (
+            <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+              <div className="space-y-1">
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Tag className="size-6" />
+                  Event Category Detection
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  Use AI to automatically classify your calendar events into categories
+                  (Concert, Exhibition, Theatre, Anime, Pop-up store, etc.)
+                </p>
+              </div>
+
+              {/* Current distribution */}
+              {classifyCounts && classifyCounts.filter((c) => c.category).length > 0 && (
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Current Category Distribution</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-wrap gap-1.5">
+                      {classifyCounts
+                        .filter((c) => c.category)
+                        .sort((a, b) => b.count - a.count)
+                        .map((c) => (
+                          <span
+                            key={c.category}
+                            className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-muted border border-border"
+                          >
+                            {CATEGORY_LABELS[c.category as EventCategory] ?? c.category}
+                            <span className="font-semibold ml-0.5">{c.count}</span>
+                          </span>
+                        ))}
+                      {classifyCounts.find((c) => !c.category) && (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full bg-muted/50 border border-dashed border-border text-muted-foreground">
+                          Unclassified <span className="font-semibold ml-0.5">{classifyCounts.find((c) => !c.category)?.count}</span>
+                        </span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Calendar selector */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Select Calendars to Classify</CardTitle>
+                  <CardDescription>
+                    Choose which calendars to scan. <em>sale-ticket</em> is always excluded.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {classifyCalendars.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Loading calendars…</p>
+                  ) : (
+                    <>
+                      <div className="flex gap-3 text-xs mb-3">
+                        <button
+                          className="text-primary hover:underline"
+                          onClick={() => setSelectedClassifyCalIds(new Set(classifyCalendars.map((c) => c.id)))}
+                        >
+                          Select all
+                        </button>
+                        <span className="text-muted-foreground">·</span>
+                        <button
+                          className="hover:underline text-muted-foreground"
+                          onClick={() => setSelectedClassifyCalIds(new Set())}
+                        >
+                          Deselect all
+                        </button>
+                      </div>
+                      {classifyCalendars.map((cal) => (
+                        <label
+                          key={cal.id}
+                          className={`flex items-center gap-3 cursor-pointer rounded-md border px-3 py-2.5 transition-colors ${
+                            selectedClassifyCalIds.has(cal.id)
+                              ? "border-primary/50 bg-primary/5"
+                              : "border-border hover:bg-muted/40"
+                          }`}
+                        >
+                          <Checkbox
+                            checked={selectedClassifyCalIds.has(cal.id)}
+                            onCheckedChange={(checked) =>
+                              setSelectedClassifyCalIds((prev) => {
+                                const next = new Set(prev);
+                                if (checked) next.add(cal.id);
+                                else next.delete(cal.id);
+                                return next;
+                              })
+                            }
+                          />
+                          <span
+                            className="size-3 rounded-full shrink-0"
+                            style={{ backgroundColor: cal.color }}
+                          />
+                          <span className="text-sm flex-1">{cal.name}</span>
+                        </label>
+                      ))}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Options + Run */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">Classification Options</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <label className="flex items-center gap-3 cursor-pointer">
+                    <Checkbox
+                      checked={classifyOnlyUnclassified}
+                      onCheckedChange={(v) => setClassifyOnlyUnclassified(Boolean(v))}
+                    />
+                    <div>
+                      <p className="text-sm font-medium">Only classify unclassified events</p>
+                      <p className="text-xs text-muted-foreground">Skip events that already have a category assigned</p>
+                    </div>
+                  </label>
+
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      disabled={classifying || selectedClassifyCalIds.size === 0}
+                      onClick={async () => {
+                        setClassifying(true);
+                        setClassifyResult(null);
+                        try {
+                          const res = await fetch("/api/events/classify", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              onlyUnclassified: classifyOnlyUnclassified,
+                              calendarIds: [...selectedClassifyCalIds],
+                            }),
+                          });
+                          const data = await res.json();
+                          setClassifyResult({ updated: data.updated ?? 0, total: data.total ?? 0, message: data.message ?? "Done." });
+                          // Refresh counts
+                          fetch("/api/events/classify")
+                            .then((r) => r.json())
+                            .then((d) => { if (d.counts) setClassifyCounts(d.counts); })
+                            .catch(() => null);
+                          if (data.updated > 0) toast.success(data.message);
+                          else toast.info(data.message ?? "No events to classify.");
+                        } catch {
+                          toast.error("Classification failed — check AI quota.");
+                        } finally {
+                          setClassifying(false);
+                        }
+                      }}
+                    >
+                      {classifying ? (
+                        <><Loader2 className="size-4 mr-2 animate-spin" />Classifying…</>
+                      ) : (
+                        <><Tag className="size-4 mr-2" />Run Classification</>
+                      )}
+                    </Button>
+                  </div>
+
+                  {classifyResult && (
+                    <div className={`text-sm rounded-md px-3 py-2.5 ${
+                      classifyResult.updated > 0
+                        ? "bg-green-500/10 text-green-600 dark:text-green-400 border border-green-500/30"
+                        : "bg-muted text-muted-foreground"
+                    }`}>
+                      {classifyResult.updated > 0 ? (
+                        <span className="flex items-center gap-1.5">
+                          <CheckCircle2 className="size-4 shrink-0" />
+                          {classifyResult.message}
+                        </span>
+                      ) : (
+                        classifyResult.message
+                      )}
+                    </div>
+                  )}
+
+                  <div className="text-xs text-muted-foreground space-y-1 pt-1 border-t border-border">
+                    <p className="font-medium">Available categories:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {EVENT_CATEGORIES.map((cat) => (
+                        <span key={cat} className="bg-muted px-1.5 py-0.5 rounded text-[11px]">
+                          {CATEGORY_LABELS[cat]}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           ) : (
       <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
         {/* Intro */}

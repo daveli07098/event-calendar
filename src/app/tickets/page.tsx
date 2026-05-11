@@ -3,8 +3,8 @@ import { auth } from "@/lib/auth";
 import { TicketSection } from "@/components/tickets/TicketSection";
 
 export const metadata = {
-  title: "Ticket Section — Event Calendar",
-  description: "Paste any ticket URL and auto-add it to your calendar",
+  title: "Event Section — Event Calendar",
+  description: "Import events from ticket URLs, manage venues, and classify your calendar events",
 };
 
 export default async function TicketsPage() {

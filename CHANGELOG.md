@@ -1,3 +1,10 @@
+## [2026-05-12] — Session: Event Section + Category Detection UI
+### Changed
+- feat(events): "Ticket Section" renamed to "Event Section" — page title, header, and sidebar link (1372810)
+- feat(events): `/api/events/classify` POST now accepts optional `calendarIds[]` to restrict classification to specific calendars (security-checked against user's accessible set) (1372810)
+### Added
+- feat(events): "Category Detection" left-nav section added to Event Section — calendar multi-select (sale-ticket excluded, event-reminders pre-selected), only-unclassified toggle, Run Classification button, live result + updated category distribution panel (1372810)
+
 ## [2026-05-12] — Session: event categories
 ### Added
 - feat(events): `category` field (`String?`) added to `Event` Prisma model; migration `20260511180724_add_event_category` applied (2e95583)

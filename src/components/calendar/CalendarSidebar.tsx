@@ -266,7 +266,7 @@ export function CalendarSidebar({
         <Link href="/tickets">
           <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
             <Ticket className="size-4" />
-            Ticket Section
+            Event Section
           </Button>
         </Link>
         <Link href="/settings">
