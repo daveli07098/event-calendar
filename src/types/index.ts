@@ -9,6 +9,7 @@ export const EVENT_CATEGORIES = [
   "comedy",     // stand-up comedy
   "film",       // screenings, premieres
   "food",       // food festivals, wine tasting
+  "ticket",     // ticket sale / presale events
   "other",      // catch-all
 ] as const;
 
@@ -25,6 +26,7 @@ export const CATEGORY_LABELS: Record<EventCategory, string> = {
   comedy:     "😂 Comedy",
   film:       "🎬 Film",
   food:       "🍜 Food",
+  ticket:     "🎟️ Ticket Sale",
   other:      "📅 Other",
 };
 
