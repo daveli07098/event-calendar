@@ -1,8 +1,8 @@
 ## [2026-05-12] — Session: DB migration infra for Supabase
 ### Fixed
-- fix(db): `prisma.config.ts` now loads `.env.local` before `.env` so `prisma migrate deploy` uses Supabase `DIRECT_URL` (port 5432, bypasses PgBouncer) (cce61ae)
-- fix(db): renamed `db:migrate:prod` → `db:migrate:dev` and `vercel:deploy` → `vercel:deploy:dev` in `package.json` for clarity (cce61ae)
-- chore(git): `.env*.local` added to `.gitignore` to prevent secrets leaking (cce61ae)
+- fix(db): `prisma/schema.prisma` datasource now has `url = env("DATABASE_URL")` and `directUrl = env("DIRECT_URL")` — this is the correct way Prisma uses the direct connection for migrations (b5abf15)
+- fix(db): `prisma.config.ts` simplified — removed non-functional `datasource.directUrl` override from `defineConfig` (b5abf15)
+- fix(db): `prisma.config.ts` now loads `.env.local` before `.env` so Supabase URLs are picked up (cce61ae)
 
 ## [2026-05-12] — Session: Event Section + Category Detection UI
 ### Changed
