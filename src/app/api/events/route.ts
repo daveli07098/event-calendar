@@ -105,3 +105,73 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json(event, { status: 201 });
 }
+
+// Known HK ticketing domains — mirrors the scraper and add/route constants
+const HK_DOMAINS_BACKFILL = [
+  "timable.com",
+  "cityline.com",
+  "hkticketing.com",
+  "ticketmaster.com.hk",
+  "urbtix.hk",
+  "ticketflap.com",
+  "klook.com",
+  "kktix.com",
+];
+
+function isHkUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return HK_DOMAINS_BACKFILL.some((d) => host === d || host.endsWith(`.${d}`));
+  } catch {
+    return false;
+  }
+}
+
+/** PUT /api/events — backfill "Hong Kong" into location for ticket-imported events missing it */
+export async function PUT(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const calIds = await accessibleCalendarIds(session.user.id);
+
+  // Fetch all events whose description contains a Ticket URL
+  const candidates = await prisma.event.findMany({
+    where: {
+      calendarId: { in: calIds },
+      description: { contains: "Ticket URL:" },
+    },
+    select: { id: true, location: true, description: true },
+  });
+
+  const updates: Array<{ id: string; location: string }> = [];
+
+  for (const ev of candidates) {
+    // Already has HK in location
+    const loc = ev.location ?? "";
+    if (loc.toLowerCase().includes("hong kong") || loc.includes("香港")) continue;
+
+    // Extract the ticket URL from description
+    const match = ev.description?.match(/Ticket URL:\s*(https?:\/\/\S+)/);
+    if (!match) continue;
+    const ticketUrl = match[1];
+    if (!isHkUrl(ticketUrl)) continue;
+
+    const newLocation = loc ? `${loc}, Hong Kong` : "Hong Kong";
+    updates.push({ id: ev.id, location: newLocation });
+  }
+
+  if (updates.length === 0) {
+    return NextResponse.json({ updated: 0, message: "No events needed backfilling." });
+  }
+
+  // Apply updates in parallel
+  await Promise.all(
+    updates.map(({ id, location }) =>
+      prisma.event.update({ where: { id }, data: { location } })
+    )
+  );
+
+  return NextResponse.json({ updated: updates.length, message: `Updated ${updates.length} event(s) with Hong Kong location.` });
+}

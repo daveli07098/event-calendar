@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, Trash2, Building2, Loader2, FolderSync } from "lucide-react";
+import { Plus, Trash2, Building2, Loader2, FolderSync, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ export function VenueSection() {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", address: "", city: "Hong Kong", tags: "" });
 
@@ -58,6 +59,24 @@ export function VenueSection() {
       toast.error(e instanceof Error ? e.message : "Failed to add venue");
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleBackfillHKLocations = async () => {
+    setBackfilling(true);
+    try {
+      const res = await fetch("/api/events", { method: "PUT" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Backfill failed");
+      if (data.updated > 0) {
+        toast.success(`Updated ${data.updated} event${data.updated > 1 ? "s" : ""} with Hong Kong location`);
+      } else {
+        toast.info(data.message ?? "No events needed updating");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Backfill failed");
+    } finally {
+      setBackfilling(false);
     }
   };
 
@@ -103,6 +122,10 @@ export function VenueSection() {
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={handleBackfillHKLocations} disabled={backfilling} className="gap-1.5" title="Add 'Hong Kong' to imported events missing location">
+            {backfilling ? <Loader2 className="size-4 animate-spin" /> : <MapPin className="size-4" />}
+            Fix Locations
+          </Button>
           <Button variant="outline" size="sm" onClick={handleImportFromEvents} disabled={importing} className="gap-1.5">
             {importing ? <Loader2 className="size-4 animate-spin" /> : <FolderSync className="size-4" />}
             Import

@@ -8,6 +8,35 @@ const TICKET_CALENDAR_COLOR = "#f97316"; // warm orange — distinct from defaul
 const SALE_CALENDAR_NAME = "sale-ticket";
 const SALE_CALENDAR_COLOR = "#8b5cf6"; // purple — alerts for when sales open
 
+// HK ticketing domains — same list as the scraper
+const HK_DOMAINS = [
+  "timable.com",
+  "cityline.com",
+  "hkticketing.com",
+  "ticketmaster.com.hk",
+  "urbtix.hk",
+  "ticketflap.com",
+  "klook.com",
+  "kktix.com",
+];
+
+function isHkSourceUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return HK_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
+  } catch {
+    return false;
+  }
+}
+
+function enrichLocationWithHK(rawLocation: string | null, sourceUrl: string): string | null {
+  if (!isHkSourceUrl(sourceUrl)) return rawLocation || null;
+  if (!rawLocation) return "Hong Kong";
+  const lower = rawLocation.toLowerCase();
+  if (lower.includes("hong kong") || rawLocation.includes("香港")) return rawLocation;
+  return `${rawLocation}, Hong Kong`;
+}
+
 interface TicketData {
   title: string;
   date: string | null;
@@ -191,12 +220,13 @@ export async function POST(req: NextRequest) {
   const description = descParts.join("\n\n");
 
   // Create the event
+  const rawLocation = [ticket.venue, ticket.location].filter(Boolean).join(", ") || null;
   const eventData = {
     title: ticket.title,
     description,
     startTime: start,
     endTime: end,
-    location: [ticket.venue, ticket.location].filter(Boolean).join(", ") || null,
+    location: enrichLocationWithHK(rawLocation, ticket.sourceUrl),
   };
 
   const event = await prisma.event.create({

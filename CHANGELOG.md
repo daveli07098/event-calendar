@@ -1,3 +1,9 @@
+## [2026-05-11] — Session: HK location enrichment for ticket imports
+### Fixed
+- feat(location): new imports from HK ticketing domains (timable.com, cityline.com, hkticketing.com, urbtix.hk, etc.) now automatically append ", Hong Kong" to the event location when not already present (8efe466)
+- feat(location): PUT /api/events backfills existing ticket-imported events missing "Hong Kong" in location — scans description for "Ticket URL:", checks HK domain, updates location in bulk (8efe466)
+- feat(ui): "Fix Locations" button added to Venue Settings section — triggers backfill with one click (8efe466)
+
 ## [2026-05-11] — Session: multi-slot sale dedup
 ### Fixed
 - fix(tickets): when adding a multi-slot event, sale-ticket calendar events (presale, priority, public sale) are now created only once — tied to the first slot — instead of once per slot, eliminating duplicate sale reminders (b2c5e56)
