@@ -253,13 +253,25 @@ export function EventModal({
         }),
       });
       if (!applyRes.ok) throw new Error(await applyRes.text());
-      const { updatedEvent } = await applyRes.json();
+      const applyData = await applyRes.json();
+      const { updatedEvent, createdSaleCount } = applyData;
       setSyncPreview(null);
       if (updatedEvent) {
         setTitle(updatedEvent.title ?? title);
         setDescription(updatedEvent.description ?? description);
         setLocation(updatedEvent.location ?? location);
         onSynced?.(updatedEvent);
+      }
+      // Re-fetch related events — new sale windows may have been created
+      const syncedUrl = syncPreview.ticket.sourceUrl;
+      if (event && syncedUrl) {
+        fetch(`/api/events/related?url=${encodeURIComponent(syncedUrl)}&excludeId=${event.id}`)
+          .then((r) => r.json())
+          .then((data) => setRelatedEvents(Array.isArray(data) ? data : []))
+          .catch(() => null);
+      }
+      if (createdSaleCount > 0) {
+        setSyncError(`✓ Synced — ${createdSaleCount} new sale reminder${createdSaleCount > 1 ? "s" : ""} created.`);
       }
     } catch (e) {
       setSyncError(e instanceof Error ? e.message : "Apply failed");

@@ -1,3 +1,10 @@
+## [2026-05-12] — Session: sync creates new sale reminders
+### Fixed
+- feat(sync): `Sync` in EventModal now **creates** new sale-ticket calendar events when the re-scraped page contains a sale window that didn't exist before — previously these were silently skipped (ad753a6)
+- feat(sync): existing sale windows with updated dates are still updated in-place (ad753a6)
+- feat(sync): after applying a sync, the Related Events panel in the modal refreshes immediately so newly-created sale reminder events appear without reopening (ad753a6)
+- feat(sync): a notice is shown when sync created new reminders: "✓ Synced — N new sale reminder(s) created" (ad753a6)
+
 ## [2026-05-12] — Session: smarter duplicate detection + merge UX
 ### Changed
 - feat(tickets): duplicate detection window tightened from ±36 h to ±12 h (6b72b76)

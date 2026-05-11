@@ -93,13 +93,15 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "eventId, appliedFields, ticket required" }, { status: 400 });
   }
 
+  const uid = session.user.id;
+
   try {
   // Verify ownership
   const existingEvent = await prisma.event.findUnique({
     where: { id: eventId },
     include: { calendar: true },
   });
-  if (!existingEvent || existingEvent.calendar.userId !== session.user.id) {
+  if (!existingEvent || existingEvent.calendar.userId !== uid) {
     return NextResponse.json({ error: "Event not found or access denied" }, { status: 404 });
   }
 
@@ -147,15 +149,34 @@ export async function PATCH(req: NextRequest) {
 
   const updatedSaleEventIds: Record<string, string> = {};
 
-  // Handle per-window saleWin::${label} changes
+  const SALE_CALENDAR_NAME = "sale-ticket";
+  const SALE_CALENDAR_COLOR = "#8b5cf6";
+
+  // Resolve the sale-ticket calendar once, lazily
+  let resolvedSaleCalId: string | null = null;
+  async function getSaleCalendarId(): Promise<string> {
+    if (resolvedSaleCalId) return resolvedSaleCalId;
+    // Prefer the calendar where an existing sale event lives
+    const firstExistingId = Object.values(saleEventIds)[0] ?? saleEventId ?? presaleEventId;
+    if (firstExistingId) {
+      const ev = await prisma.event.findUnique({ where: { id: firstExistingId }, select: { calendarId: true } });
+      if (ev?.calendarId) { resolvedSaleCalId = ev.calendarId; return resolvedSaleCalId; }
+    }
+    // Fallback: find or create the named sale-ticket calendar
+    let cal = await prisma.calendar.findFirst({ where: { userId: uid, name: SALE_CALENDAR_NAME } });
+    if (!cal) {
+      cal = await prisma.calendar.create({
+        data: { userId: uid, name: SALE_CALENDAR_NAME, color: SALE_CALENDAR_COLOR, isDefault: false, isVisible: true },
+      });
+    }
+    resolvedSaleCalId = cal.id;
+    return resolvedSaleCalId;
+  }
+
+  // Handle per-window saleWin::${label} changes — update if event exists, create if new
   for (const field of apply) {
     if (!field.startsWith("saleWin::")) continue;
     const label = field.slice("saleWin::".length);
-    // Look up event ID in saleEventIds (new), fall back to legacy mapping
-    const seId = saleEventIds[label]
-      ?? (label.toLowerCase().includes("public") || label === "Sale Opens" ? saleEventId : null)
-      ?? (label.toLowerCase().includes("presale") || label.toLowerCase().includes("fan") ? presaleEventId : null);
-    if (!seId) continue;
 
     const window = ticket.saleDates?.find((w) => w.label === label);
     if (!window) continue;
@@ -164,11 +185,42 @@ export async function PATCH(req: NextRequest) {
     if (!winStart) continue;
     const winEnd = new Date(winStart.getTime() + 3_600_000);
 
-    const updatedWin = await prisma.event.update({
-      where: { id: seId },
-      data: { startTime: winStart, endTime: winEnd },
-    });
-    updatedSaleEventIds[label] = updatedWin.id;
+    // Look up event ID in saleEventIds (new map), fall back to legacy fields
+    const seId = saleEventIds[label]
+      ?? (label.toLowerCase().includes("public") || label === "Sale Opens" ? saleEventId : null)
+      ?? (label.toLowerCase().includes("presale") || label.toLowerCase().includes("fan") ? presaleEventId : null);
+
+    if (seId) {
+      // Update existing sale event
+      const updatedWin = await prisma.event.update({
+        where: { id: seId },
+        data: { startTime: winStart, endTime: winEnd },
+      });
+      updatedSaleEventIds[label] = updatedWin.id;
+    } else {
+      // NEW window — create sale-ticket event
+      const salCalId = await getSaleCalendarId();
+      const isPublic = label.toLowerCase().includes("public") || label.toLowerCase().includes("公開");
+      const emoji = isPublic ? "🎫" : "⭐";
+      const wDesc = [
+        `${label} for: ${ticket.title}`,
+        ticket.ticketPrices?.length ? `票價 Prices: ${ticket.ticketPrices.join(" / ")}` : null,
+        ticket.ticketPlatforms?.length ? `平台 Platforms: ${ticket.ticketPlatforms.join(", ")}` : null,
+        ticket.date ? `演出日期 Event date: ${ticket.date}${ticket.time ? " " + ticket.time : ""}` : null,
+        `Ticket URL: ${ticket.sourceUrl}`,
+      ].filter(Boolean).join("\n\n");
+      const newSaleEvent = await prisma.event.create({
+        data: {
+          calendarId: salCalId,
+          title: `${emoji} ${label}: ${ticket.title}`,
+          description: wDesc,
+          startTime: winStart,
+          endTime: winEnd,
+          allDay: false,
+        },
+      });
+      updatedSaleEventIds[label] = newSaleEvent.id;
+    }
   }
 
   // Legacy: update sale/presale events if saleDate / saleFirstDate were applied
@@ -239,6 +291,7 @@ export async function PATCH(req: NextRequest) {
     saleEventId: updatedSaleEvent?.id ?? null,
     presaleEventId: updatedPresaleEvent?.id ?? null,
     updatedSaleEventIds,
+    createdSaleCount: Object.keys(updatedSaleEventIds).filter((k) => !saleEventIds[k]).length,
     appliedFields,
   });
   } catch (e) {
