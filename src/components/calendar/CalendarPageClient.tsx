@@ -5,7 +5,7 @@ import { CalendarView } from "@/components/calendar/CalendarView";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
 import { SearchDialog } from "@/components/calendar/SearchDialog";
-import type { CalendarType, EventType } from "@/types";
+import type { CalendarType, EventType, EventCategory } from "@/types";
 
 interface CalendarPageClientProps {
   initialCalendars: CalendarType[];
@@ -21,6 +21,7 @@ export function CalendarPageClient({
   const [searchOpen, setSearchOpen] = useState(false);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>(null);
 
   // On mount: open event + navigate to date if URL has ?event=id
   useEffect(() => {
@@ -91,6 +92,8 @@ export function CalendarPageClient({
         onAddCalendar={() => setAddCalendarOpen(true)}
         mobileOpen={mobileSidebarOpen}
         onMobileClose={() => setMobileSidebarOpen(false)}
+        categoryFilter={categoryFilter}
+        onCategoryFilter={setCategoryFilter}
       />
       <CalendarView
         calendars={calendars}
@@ -101,6 +104,7 @@ export function CalendarPageClient({
         onEventClose={handleEventClose}
         onSearchOpen={() => setSearchOpen(true)}
         onMobileMenuOpen={() => setMobileSidebarOpen(true)}
+        categoryFilter={categoryFilter}
       />
       <AddCalendarDialog
         open={addCalendarOpen}

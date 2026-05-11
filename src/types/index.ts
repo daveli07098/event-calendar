@@ -1,3 +1,33 @@
+export const EVENT_CATEGORIES = [
+  "concert",    // live music, band shows
+  "exhibition", // art galleries, exhibitions, museums
+  "theatre",    // theatre, musicals, opera, dance
+  "sports",     // sporting events, matches
+  "festival",   // cultural festivals, fairs, parades
+  "anime",      // anime/manga/IP events, character pop-up stores
+  "popup",      // pop-up stores, limited retail, brand activations
+  "comedy",     // stand-up comedy
+  "film",       // screenings, premieres
+  "food",       // food festivals, wine tasting
+  "other",      // catch-all
+] as const;
+
+export type EventCategory = typeof EVENT_CATEGORIES[number];
+
+export const CATEGORY_LABELS: Record<EventCategory, string> = {
+  concert:    "🎵 Concert",
+  exhibition: "🖼️ Exhibition",
+  theatre:    "🎭 Theatre",
+  sports:     "⚽ Sports",
+  festival:   "🎉 Festival",
+  anime:      "🌸 Anime / IP",
+  popup:      "🏪 Pop-up Store",
+  comedy:     "😂 Comedy",
+  film:       "🎬 Film",
+  food:       "🍜 Food",
+  other:      "📅 Other",
+};
+
 export interface CalendarMemberType {
   id: string;
   calendarId: string;
@@ -40,6 +70,7 @@ export interface EventType {
   allDay: boolean;
   recurrenceRule: string | null;
   googleEventId: string | null;
+  category: EventCategory | null;
   createdAt: string;
   updatedAt: string;
   calendar?: CalendarType;
@@ -53,4 +84,5 @@ export interface EventFormData {
   endTime: string;
   allDay: boolean;
   calendarId: string;
+  category?: EventCategory | null;
 }

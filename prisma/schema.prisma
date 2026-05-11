@@ -110,6 +110,7 @@ model Event {
   allDay         Boolean  @default(false)
   recurrenceRule String?
   googleEventId  String?
+  category       String?  // e.g. "concert", "exhibition", "theatre", "sports", "festival", "anime", "popup", "comedy", "film", "food", "other"
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

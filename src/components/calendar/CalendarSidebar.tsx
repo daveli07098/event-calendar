@@ -5,7 +5,8 @@ import { Plus, ChevronLeft, ChevronRight, Settings, Users, Megaphone, Ticket, X 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
-import type { CalendarType } from "@/types";
+import type { CalendarType, EventCategory } from "@/types";
+import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 
 interface CalendarSidebarProps {
   calendars: CalendarType[];
@@ -15,6 +16,9 @@ interface CalendarSidebarProps {
   mobileOpen?: boolean;
   /** Mobile: callback to close the drawer */
   onMobileClose?: () => void;
+  /** Active category filter — null = show all */
+  categoryFilter?: EventCategory | null;
+  onCategoryFilter?: (cat: EventCategory | null) => void;
 }
 
 export function CalendarSidebar({
@@ -23,6 +27,8 @@ export function CalendarSidebar({
   onAddCalendar,
   mobileOpen = false,
   onMobileClose,
+  categoryFilter,
+  onCategoryFilter,
 }: CalendarSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -222,6 +228,38 @@ export function CalendarSidebar({
           </>
         )}
       </div>
+
+      {/* Category filter chips */}
+      {onCategoryFilter && (
+        <div className="px-3 pb-2 border-b border-border">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Category</span>
+            {categoryFilter && (
+              <button
+                onClick={() => onCategoryFilter(null)}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {EVENT_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => onCategoryFilter(categoryFilter === cat ? null : cat)}
+                className={`text-[11px] px-1.5 py-0.5 rounded-full border transition-colors ${
+                  categoryFilter === cat
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "border-border hover:bg-accent"
+                }`}
+              >
+                {CATEGORY_LABELS[cat]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Bottom nav links */}
       <div className="p-3 border-t border-border space-y-1">

@@ -114,6 +114,7 @@ interface TicketData {
   saleDates: SaleWindow[] | null;   // all sale windows in chronological order
   sourceTimezone: string | null;    // IANA or ±HH:MM offset extracted from source (e.g. "+08:00" for HKT)
   slots: EventSlot[];               // grouped performance timeslots (empty when ≤1)
+  category: string | null;          // AI-detected category: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other
 }
 
 /** A single ticket-sale window with a date, optional time, and a human label. */
@@ -686,7 +687,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}]}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other"}
 
 CRITICAL — performance date vs sale dates:
   • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
@@ -705,6 +706,8 @@ CRITICAL — extract ALL sale windows into saleDates (one entry per distinct dat
 
 CRITICAL — multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "Aug 6–16"), set date=FIRST night and endDate=LAST night.
 CRITICAL — endTime: extract from patterns like "7:30 PM – 10:10 PM" (→ 22:10) or JSON-LD endDate.
+
+CRITICAL — category: choose the single best fit from: concert (live music/bands), exhibition (art/gallery/museum), theatre (play/musical/opera/dance), sports (matches/tournaments), festival (cultural fair/parade), anime (anime/manga/IP/character merch), popup (pop-up store/limited retail), comedy (stand-up), film (screening/premiere), food (food fair/dining event), other.
 
 URL: ${url}
 ${text}`.trim();
@@ -1212,6 +1215,8 @@ export async function POST(req: NextRequest) {
     // sourceTimezone comes only from meta (JSON-LD / URL domain) — AI doesn't return it
     sourceTimezone: meta.sourceTimezone,
     slots: meta.slots,
+    // category: detected by AI from title + description + venue cues
+    category: (aiResult as Partial<TicketData>).category ?? null,
   };
 
   // Post-build sanitization: remove any sale-window dates that equal the concert date.

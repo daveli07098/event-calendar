@@ -55,6 +55,7 @@ interface TicketData {
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceTimezone?: string | null;  // ±HH:MM offset from scrape route (e.g. "+08:00" for HKT)
+  category?: string | null;        // AI-detected event category
 }
 
 /** Parse a single date+time into a UTC Date.
@@ -230,13 +231,13 @@ export async function POST(req: NextRequest) {
   };
 
   const event = await prisma.event.create({
-    data: { calendarId: calendar.id, ...eventData },
+    data: { calendarId: calendar.id, ...eventData, ...(ticket.category ? { category: ticket.category } : {}) },
   });
 
   // If target is collaborative, create a hidden shadow copy in user's own calendar
   if (isCollaborative) {
     const shadowCal = await ensureShadowCalendar(TICKET_CALENDAR_NAME, TICKET_CALENDAR_COLOR);
-    await prisma.event.create({ data: { calendarId: shadowCal.id, ...eventData } });
+    await prisma.event.create({ data: { calendarId: shadowCal.id, ...eventData, ...(ticket.category ? { category: ticket.category } : {}) } });
   }
 
   // Create sale-ticket calendar reminders — one per sale window

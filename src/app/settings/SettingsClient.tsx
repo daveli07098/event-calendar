@@ -17,7 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
 import { ICSImport } from "@/components/settings/ICSImport";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
-import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown, RefreshCw } from "lucide-react";
+import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown, RefreshCw, Tag } from "lucide-react";
 import {
   Popover,
   PopoverTrigger,
@@ -157,6 +157,8 @@ export function SettingsClient({ user }: SettingsClientProps) {
   const [openColorPicker, setOpenColorPicker] = useState<string | null>(null);
   const [shareCalendar, setShareCalendar] = useState<CalendarType | null>(null);
   const [syncingCalendarId, setSyncingCalendarId] = useState<string | null>(null);
+  const [classifying, setClassifying] = useState(false);
+  const [classifyResult, setClassifyResult] = useState<string | null>(null);
 
   const syncCalendar = async (cal: CalendarType) => {
     setSyncingCalendarId(cal.id);
@@ -448,7 +450,7 @@ export function SettingsClient({ user }: SettingsClientProps) {
         </Card>
 
         {/* ICS File Import */}
-        <Card>
+        <Card className="mb-6">
           <CardHeader>
             <CardTitle>Import from ICS File</CardTitle>
             <CardDescription>
@@ -462,6 +464,82 @@ export function SettingsClient({ user }: SettingsClientProps) {
               Supports standard iCalendar (.ics) files exported from Google
               Calendar, Apple Calendar, Outlook, and others.
             </p>
+          </CardContent>
+        </Card>
+
+        {/* AI Category Classification */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Tag className="size-4" />
+              Event Categories
+            </CardTitle>
+            <CardDescription>
+              Use AI to automatically classify all your events into categories (Concert, Exhibition, Theatre, Anime, etc.)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              Scans every event and assigns the best-matching category using Gemini AI.
+              Events are processed in batches — this may take a few seconds for large calendars.
+              Only unclassified events are processed by default.
+            </p>
+            <div className="flex items-center gap-3">
+              <Button
+                size="sm"
+                disabled={classifying}
+                onClick={async () => {
+                  setClassifying(true);
+                  setClassifyResult(null);
+                  try {
+                    const res = await fetch("/api/events/classify", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ onlyUnclassified: true }),
+                    });
+                    const data = await res.json();
+                    setClassifyResult(data.message ?? "Done.");
+                  } catch {
+                    setClassifyResult("Classification failed — check your AI quota.");
+                  } finally {
+                    setClassifying(false);
+                  }
+                }}
+              >
+                {classifying ? (
+                  <><RefreshCw className="size-3 mr-1 animate-spin" />Classifying…</>
+                ) : (
+                  <><Tag className="size-3 mr-1" />Classify Unclassified Events</>
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={classifying}
+                onClick={async () => {
+                  setClassifying(true);
+                  setClassifyResult(null);
+                  try {
+                    const res = await fetch("/api/events/classify", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ onlyUnclassified: false }),
+                    });
+                    const data = await res.json();
+                    setClassifyResult(data.message ?? "Done.");
+                  } catch {
+                    setClassifyResult("Classification failed — check your AI quota.");
+                  } finally {
+                    setClassifying(false);
+                  }
+                }}
+              >
+                Re-classify All
+              </Button>
+            </div>
+            {classifyResult && (
+              <p className="text-sm text-muted-foreground">{classifyResult}</p>
+            )}
           </CardContent>
         </Card>
       </div>

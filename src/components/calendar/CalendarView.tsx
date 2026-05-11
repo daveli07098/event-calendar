@@ -20,7 +20,8 @@ import type {
   EventResizeDoneArg,
 } from "@fullcalendar/interaction";
 import { Plus, Search } from "lucide-react";
-import type { CalendarType, EventType, EventFormData } from "@/types";
+import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
+import { CATEGORY_LABELS } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
 import { EventReminder } from "@/components/calendar/EventReminder";
@@ -39,9 +40,11 @@ interface CalendarViewProps {
   onEventOpen?: (id: string, startTime: string) => void;
   /** Called when the event modal closes — used to clear the URL params */
   onEventClose?: () => void;
+  /** Active category filter — null = show all */
+  categoryFilter?: EventCategory | null;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -114,9 +117,11 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     .filter((c) => c.isVisible)
     .map((c) => c.id);
 
-  const filteredEvents = events.filter((e) =>
-    visibleCalendarIds.includes(e.calendarId)
-  );
+  const filteredEvents = events.filter((e) => {
+    if (!visibleCalendarIds.includes(e.calendarId)) return false;
+    if (categoryFilter && e.category !== categoryFilter) return false;
+    return true;
+  });
 
   const fcEvents = filteredEvents.map((event) => {
     // Multi-day timed events (e.g. popup stores, multi-week runs) are displayed as

@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon } from "lucide-react";
-import type { CalendarType, EventType, EventFormData } from "@/types";
+import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
+import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 
 interface RelatedEvent {
   id: string;
@@ -83,6 +84,7 @@ export function EventModal({
   const [endTime, setEndTime] = useState("");
   const [allDay, setAllDay] = useState(false);
   const [calendarId, setCalendarId] = useState(defaultCalendarId);
+  const [category, setCategory] = useState<EventCategory | null>(null);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -119,6 +121,7 @@ export function EventModal({
       setLocation(event.location || "");
       setAllDay(event.allDay);
       setCalendarId(event.calendarId);
+      setCategory(event.category ?? null);
       if (event.allDay) {
         setStartTime(toLocalDateString(event.startTime));
         setEndTime(toLocalDateString(event.endTime));
@@ -133,6 +136,7 @@ export function EventModal({
       setLocation(initialData.location ?? "");
       setAllDay(initialData.allDay ?? false);
       setCalendarId(initialData.calendarId ?? defaultCalendarId);
+      setCategory(initialData.category ?? null);
       if (initialData.startTime) {
         setStartTime(initialData.allDay
           ? toLocalDateString(initialData.startTime)
@@ -150,6 +154,7 @@ export function EventModal({
       setLocation("");
       setAllDay(initialRange.allDay);
       setCalendarId(defaultCalendarId);
+      setCategory(null);
       if (initialRange.allDay) {
         setStartTime(toLocalDateString(initialRange.start));
         setEndTime(toLocalDateString(initialRange.end));
@@ -164,6 +169,7 @@ export function EventModal({
       setLocation("");
       setAllDay(false);
       setCalendarId(defaultCalendarId);
+      setCategory(null);
       const now = new Date();
       setStartTime(toLocalDateTimeString(now.toISOString()));
       const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
@@ -297,6 +303,7 @@ export function EventModal({
         endTime: new Date(endTime).toISOString(),
         allDay,
         calendarId,
+        category: category ?? null,
       });
     } finally {
       setSaving(false);
@@ -430,6 +437,27 @@ export function EventModal({
                       />
                       {cal.name}
                     </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="category">Category</Label>
+            <Select
+              value={category ?? ""}
+              onValueChange={(v) => setCategory((v || null) as EventCategory | null)}
+              disabled={readOnly}
+            >
+              <SelectTrigger id="category">
+                <SelectValue placeholder="Select category…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">— None —</SelectItem>
+                {EVENT_CATEGORIES.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {CATEGORY_LABELS[cat]}
                   </SelectItem>
                 ))}
               </SelectContent>

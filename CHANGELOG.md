@@ -1,3 +1,14 @@
+## [2026-05-12] — Session: event categories
+### Added
+- feat(events): `category` field (`String?`) added to `Event` Prisma model; migration `20260511180724_add_event_category` applied (2e95583)
+- feat(types): `EVENT_CATEGORIES`, `EventCategory`, `CATEGORY_LABELS` exported from `src/types/index.ts` (2e95583)
+- feat(scrape): AI prompt now extracts `category` during ticket import — Gemini picks one of 11 categories from title/venue cues (2e95583)
+- feat(api): `POST /api/events/classify` — AI batch-classifies all (or only unclassified) events in batches of 30 via Gemini (2e95583)
+- feat(api): `GET /api/events/classify` — returns category counts and unclassified count (2e95583)
+- feat(settings): "Event Categories" card with **Classify Unclassified Events** + **Re-classify All** buttons (2e95583)
+- feat(sidebar): category filter chips (Concert, Exhibition, Theatre, Anime, Pop-up …) toggled per-click; active filter highlights in primary colour; "Clear" link resets (2e95583)
+- feat(modal): Category dropdown selector in EventModal — persists with event save/edit (2e95583)
+
 ## [2026-05-12] — Session: venue image upload
 ### Added
 - feat(venues): Vercel Blob storage for venue images — upload multiple photos per venue, delete individual images (5273ea7)
