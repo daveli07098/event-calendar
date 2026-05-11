@@ -1131,15 +1131,29 @@ export async function POST(req: NextRequest) {
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        if (msg.includes("429") || msg.includes("404") || msg.includes("503")) {
-          const reason = msg.includes("404") ? "not found" : msg.includes("503") ? "unavailable (503)" : "quota exceeded (429)";
+        // Transient errors: HTTP 429/503 (quota/unavailable), 404 (model not found),
+        // and any network-level failure (socket closed, connection refused, fetch failed).
+        const isTransient =
+          msg.includes("429") ||
+          msg.includes("503") ||
+          msg.includes("404") ||
+          msg.toLowerCase().includes("fetch failed") ||
+          msg.toLowerCase().includes("socket") ||
+          msg.toLowerCase().includes("econnrefused") ||
+          msg.toLowerCase().includes("etimedout") ||
+          msg.toLowerCase().includes("network");
+        if (isTransient) {
+          const reason = msg.includes("429") ? "quota exceeded (429)"
+            : msg.includes("404") ? "not found (404)"
+            : msg.includes("503") ? "unavailable (503)"
+            : "network error";
           console.warn(`[tickets/scrape] ${reason} for ${currentProviderName} — trying next provider`);
-          aiError = "AI quota exceeded — results from OG-meta only";
+          aiError = "AI temporarily unavailable — trying next provider";
           // continue to next provider
         } else {
           console.error(`[tickets/scrape] AI provider failed (${currentProviderName}):`, e);
           aiError = msg;
-          break; // non-quota error — stop chain
+          break; // non-transient error — stop chain
         }
       }
     }
@@ -1222,11 +1236,59 @@ export async function POST(req: NextRequest) {
   // Read remaining AFTER potential increment so badge reflects actual post-scan value
   const remaining = await remainingAiCalls(uid);
 
+  // ---------------------------------------------------------------------------
+  // Duplicate detection: find existing events on the same day with a similar title
+  // ---------------------------------------------------------------------------
+  type DuplicateCandidate = { id: string; title: string; startTime: string; location: string | null };
+  let duplicateCandidates: DuplicateCandidate[] = [];
+  if (ticket.date) {
+    try {
+      // Build a ±1.5 day UTC window to cover any timezone offset (HKT = UTC+8)
+      const midpoint = new Date(`${ticket.date}T12:00:00Z`);
+      const windowStart = new Date(midpoint.getTime() - 36 * 3600 * 1000);
+      const windowEnd   = new Date(midpoint.getTime() + 36 * 3600 * 1000);
+
+      const [ownedCals, memberships] = await Promise.all([
+        prisma.calendar.findMany({ where: { userId: uid }, select: { id: true } }),
+        prisma.calendarMember.findMany({ where: { userId: uid }, select: { calendarId: true } }),
+      ]);
+      const calIds = [
+        ...ownedCals.map((c) => c.id),
+        ...memberships.map((m) => m.calendarId),
+      ];
+
+      const eventsOnDay = await prisma.event.findMany({
+        where: { calendarId: { in: calIds }, startTime: { gte: windowStart, lte: windowEnd } },
+        select: { id: true, title: true, startTime: true, location: true },
+      });
+
+      // Tokenise both titles and look for ≥2 non-trivial word overlaps
+      const ticketTokens = ticket.title.toLowerCase()
+        .split(/[\s《》〈〉【】「」『』・\-—]+/)
+        .filter((w) => w.length > 2);
+
+      duplicateCandidates = eventsOnDay
+        .filter((ev) => {
+          const evTokens = ev.title.toLowerCase()
+            .split(/[\s《》〈〉【】「」『』・\-—]+/)
+            .filter((w) => w.length > 2);
+          const overlap = ticketTokens.filter((w) =>
+            evTokens.some((ew) => ew.includes(w) || w.includes(ew))
+          );
+          return overlap.length >= 2;
+        })
+        .map((ev) => ({ ...ev, startTime: ev.startTime.toISOString() }));
+    } catch {
+      // non-critical — ignore errors
+    }
+  }
+
   return NextResponse.json({
     ...ticket,
     aiError,
     aiTokensUsed,
     aiQuota: { used: AI_DAILY_LIMIT - remaining, limit: AI_DAILY_LIMIT, remaining, resetAt: getResetAt() },
+    duplicateCandidates,
   });
 }
 

@@ -44,6 +44,7 @@ interface ScrapedTicket {
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   slots?: EventSlot[];
+  duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null }>;
 }
 
 interface FieldChange {
@@ -776,6 +777,22 @@ export function TicketSection() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* Duplicate warning — when a similar event already exists on the same day */}
+              {ticket.duplicateCandidates && ticket.duplicateCandidates.length > 0 && (
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm space-y-1.5">
+                  <p className="font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    Similar event already in your calendar
+                  </p>
+                  {ticket.duplicateCandidates.map((c) => (
+                    <p key={c.id} className="text-xs text-muted-foreground pl-5">
+                      &ldquo;{c.title}&rdquo;{c.location ? ` · ${c.location}` : ""}
+                    </p>
+                  ))}
+                  <p className="text-xs text-muted-foreground pl-5">You can still add this as a separate event if it&apos;s from a different source.</p>
+                </div>
+              )}
+
               {ticket.imageUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img

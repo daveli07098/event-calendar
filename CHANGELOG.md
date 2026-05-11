@@ -1,3 +1,10 @@
+## [2026-05-12] — Session: AI resilience + duplicate detection
+### Fixed
+- fix(ai): network-level errors (`UND_ERR_SOCKET`, `fetch failed`, `ECONNREFUSED`, `ETIMEDOUT`) now fall through to the next AI provider in the cascade instead of stopping — Gemini socket drops no longer abort all AI extraction (3670bd8)
+### Added
+- feat(tickets): scrape route now checks user's calendar for events on the same day with a similar title and returns `duplicateCandidates[]` in the response (3670bd8)
+- feat(ui): amber warning banner shown in the ticket review card when a similar event already exists in the calendar (3670bd8)
+
 ## [2026-05-11] — Session: HK location enrichment for ticket imports
 ### Fixed
 - feat(location): new imports from HK ticketing domains (timable.com, cityline.com, hkticketing.com, urbtix.hk, etc.) now automatically append ", Hong Kong" to the event location when not already present (8efe466)
