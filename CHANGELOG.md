@@ -1,3 +1,10 @@
+## [2026-05-12] — Session: multi-day events + duplicate merge
+### Added
+- feat(calendar): multi-day timed events (endDate > startDate) now display as all-day spanning banners in month/week view — popup stores, opera runs, multi-week exhibitions no longer appear as a single dot on the start day (3e31bfa)
+- feat(tickets): "Merge URL" button in duplicate warning — appends the new ticket URL as an additional `Ticket URL:` line in the existing event, and merges any new platforms/prices not already present (3e31bfa)
+### Fixed
+- feat(modal): EventModal "Ticket Link" section now shows ALL ticket URLs in the description (via `matchAll`) — events merged from multiple sources display all links (3e31bfa)
+
 ## [2026-05-12] — Session: AI resilience + duplicate detection
 ### Fixed
 - fix(ai): network-level errors (`UND_ERR_SOCKET`, `fetch failed`, `ECONNREFUSED`, `ETIMEDOUT`) now fall through to the next AI provider in the cascade instead of stopping — Gemini socket drops no longer abort all AI extraction (3670bd8)

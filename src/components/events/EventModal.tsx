@@ -479,24 +479,28 @@ export function EventModal({
             />
           </div>
 
-          {/* Ticket URL — parsed from description; shown as a clickable link when present */}
+          {/* Ticket URLs — all "Ticket URL: <url>" lines shown as clickable links */}
           {(() => {
-            const ticketUrl = description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
-            return ticketUrl ? (
+            const ticketUrls = [...description.matchAll(/^Ticket URL: (https?:\/\/\S+)/gm)].map((m) => m[1]);
+            if (!ticketUrls.length) return null;
+            return (
               <div className="flex flex-col gap-1.5">
                 <Label className="text-xs text-muted-foreground">Ticket Link 購票連結</Label>
-                <a
-                  href={ticketUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={ticketUrl}
-                  className="flex items-center gap-1.5 text-sm text-primary hover:underline min-w-0"
-                >
-                  <ExternalLink className="size-3.5 shrink-0" />
-                  <span className="truncate">{ticketUrl}</span>
-                </a>
+                {ticketUrls.map((ticketUrl, i) => (
+                  <a
+                    key={i}
+                    href={ticketUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={ticketUrl}
+                    className="flex items-center gap-1.5 text-sm text-primary hover:underline min-w-0"
+                  >
+                    <ExternalLink className="size-3.5 shrink-0" />
+                    <span className="truncate">{ticketUrl}</span>
+                  </a>
+                ))}
               </div>
-            ) : null;
+            );
           })()}
 
           {/* Seating plan — URL input + clickable image preview + drag-drop */}

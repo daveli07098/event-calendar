@@ -157,6 +157,7 @@ export function TicketSection() {
   const [calendarOptions, setCalendarOptions] = useState<{ eventReminders: import('@/app/api/tickets/calendars/route').TicketCalendarOption[]; saleTicket: import('@/app/api/tickets/calendars/route').TicketCalendarOption[] } | null>(null);
   const [selectedEventCalId, setSelectedEventCalId] = useState<string | null>(null);
   const [selectedSaleCalId, setSelectedSaleCalId] = useState<string | null>(null);
+  const [merging, setMerging] = useState(false);
 
   // Fetch quota on mount so badge shows before first scan
   useEffect(() => {
@@ -257,6 +258,82 @@ export function TicketSection() {
       next.has(field) ? next.delete(field) : next.add(field);
       return next;
     });
+  };
+
+  const handleMerge = async (targetEventId: string) => {
+    if (!ticket) return;
+    setMerging(true);
+    try {
+      // Load the existing event's current description
+      const evRes = await fetch(`/api/events/${targetEventId}`);
+      if (!evRes.ok) throw new Error("Could not load existing event");
+      const existing = await evRes.json();
+      const prevDesc: string = existing.description ?? "";
+
+      // 1. Append new Ticket URL line if not already present
+      const newUrl = ticket.sourceUrl;
+      let newDesc = prevDesc;
+      if (!prevDesc.includes(newUrl)) {
+        newDesc = newDesc.trimEnd() + `\nTicket URL: ${newUrl}`;
+      }
+
+      // 2. Merge new platforms (add to existing "Platforms:" line, or append section)
+      if (ticket.ticketPlatforms?.length) {
+        const platformLine = newDesc.match(/^售票平台 Platforms: (.+)$/m);
+        if (platformLine) {
+          const existing_platforms = platformLine[1].split(/,\s*/);
+          const toAdd = ticket.ticketPlatforms.filter(
+            (p) => !existing_platforms.some((ep) => ep.toLowerCase() === p.toLowerCase())
+          );
+          if (toAdd.length) {
+            newDesc = newDesc.replace(
+              /^售票平台 Platforms: .+$/m,
+              `售票平台 Platforms: ${[...existing_platforms, ...toAdd].join(", ")}`
+            );
+          }
+        } else if (!newDesc.includes("售票平台 Platforms:")) {
+          newDesc = newDesc.trimEnd() + `\n\n售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`;
+        }
+      }
+
+      // 3. Merge new prices (add to existing "Ticket Prices:" line, or append section)
+      if (ticket.ticketPrices?.length) {
+        const priceLine = newDesc.match(/^門票票價 Ticket Prices: (.+)$/m);
+        if (priceLine) {
+          const existing_prices = priceLine[1].split(/\s*\/\s*/);
+          const toAdd = ticket.ticketPrices.filter(
+            (p) => !existing_prices.some((ep) => ep.toLowerCase() === p.toLowerCase())
+          );
+          if (toAdd.length) {
+            newDesc = newDesc.replace(
+              /^門票票價 Ticket Prices: .+$/m,
+              `門票票價 Ticket Prices: ${[...existing_prices, ...toAdd].join(" / ")}`
+            );
+          }
+        } else if (!newDesc.includes("門票票價 Ticket Prices:")) {
+          newDesc = newDesc.trimEnd() + `\n\n門票票價 Ticket Prices: ${ticket.ticketPrices.join(" / ")}`;
+        }
+      }
+
+      if (newDesc === prevDesc) {
+        toast.info("No new information to merge — event is already up to date");
+        return;
+      }
+
+      const patchRes = await fetch(`/api/events/${targetEventId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description: newDesc }),
+      });
+      if (!patchRes.ok) throw new Error("Failed to update event");
+
+      toast.success("Merged ticket info into existing event");
+      handleReset();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Merge failed");
+    } finally {
+      setMerging(false);
+    }
   };
 
   const handleAddToCalendar = async () => {
@@ -779,17 +856,29 @@ export function TicketSection() {
             <CardContent className="space-y-3">
               {/* Duplicate warning — when a similar event already exists on the same day */}
               {ticket.duplicateCandidates && ticket.duplicateCandidates.length > 0 && (
-                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm space-y-1.5">
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-sm space-y-2">
                   <p className="font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
                     <AlertCircle className="size-3.5 shrink-0" />
                     Similar event already in your calendar
                   </p>
                   {ticket.duplicateCandidates.map((c) => (
-                    <p key={c.id} className="text-xs text-muted-foreground pl-5">
-                      &ldquo;{c.title}&rdquo;{c.location ? ` · ${c.location}` : ""}
-                    </p>
+                    <div key={c.id} className="flex items-start justify-between gap-2 pl-5">
+                      <p className="text-xs text-muted-foreground">
+                        &ldquo;{c.title}&rdquo;{c.location ? ` · ${c.location}` : ""}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 text-xs px-2 shrink-0"
+                        disabled={merging}
+                        onClick={() => handleMerge(c.id)}
+                      >
+                        {merging ? <Loader2 className="size-3 animate-spin" /> : null}
+                        Merge URL
+                      </Button>
+                    </div>
                   ))}
-                  <p className="text-xs text-muted-foreground pl-5">You can still add this as a separate event if it&apos;s from a different source.</p>
+                  <p className="text-xs text-muted-foreground pl-5">Merge to add this ticket URL + any new info to the existing event, or add as a new event below.</p>
                 </div>
               )}
 

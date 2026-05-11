@@ -118,16 +118,29 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     visibleCalendarIds.includes(e.calendarId)
   );
 
-  const fcEvents = filteredEvents.map((event) => ({
-    id: event.id,
-    title: event.title,
-    start: event.startTime,
-    end: event.endTime,
-    allDay: event.allDay,
-    backgroundColor: event.calendar?.color || "#4285f4",
-    borderColor: event.calendar?.color || "#4285f4",
-    extendedProps: { event },
-  }));
+  const fcEvents = filteredEvents.map((event) => {
+    // Multi-day timed events (e.g. popup stores, multi-week runs) are displayed as
+    // all-day spanning banners so they visually cover the full date range.
+    // Only apply when endDate (UTC) is strictly after startDate (UTC).
+    const startDate = event.startTime.slice(0, 10);
+    const endDate = event.endTime.slice(0, 10);
+    const isMultiDayTimed = !event.allDay && endDate > startDate;
+    // FullCalendar all-day end is exclusive → add 1 calendar day to endDate
+    const fcEnd = isMultiDayTimed
+      ? new Date(new Date(endDate + "T00:00:00Z").getTime() + 86400000).toISOString().slice(0, 10)
+      : event.endTime;
+
+    return {
+      id: event.id,
+      title: event.title,
+      start: isMultiDayTimed ? startDate : event.startTime,
+      end: fcEnd,
+      allDay: event.allDay || isMultiDayTimed,
+      backgroundColor: event.calendar?.color || "#4285f4",
+      borderColor: event.calendar?.color || "#4285f4",
+      extendedProps: { event },
+    };
+  });
 
   const handleDateSelect = (selectInfo: DateSelectArg) => {
     // Single all-day click in month view — let dateClick / day panel handle it
