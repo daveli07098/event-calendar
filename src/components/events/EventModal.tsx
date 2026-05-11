@@ -451,7 +451,9 @@ export function EventModal({
               disabled={readOnly}
             >
               <SelectTrigger id="category">
-                <SelectValue placeholder="Select category…" />
+                <SelectValue placeholder="Select category…">
+                  {category ? CATEGORY_LABELS[category] : "Select category…"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="">— None —</SelectItem>
