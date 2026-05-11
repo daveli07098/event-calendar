@@ -101,6 +101,7 @@ export default async function CalendarPage() {
     endTime: e.endTime.toISOString(),
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString(),
+    category: e.category as import("@/types").EventCategory | null,
     calendar: e.calendar
       ? {
           ...e.calendar,
