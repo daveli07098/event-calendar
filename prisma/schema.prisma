@@ -128,6 +128,7 @@ model EventVenue {
   city      String   @default("Hong Kong")
   country   String   @default("HK")
   tags      String[] @default([])       // e.g. ["arena", "theatre", "concert-hall"]
+  imageUrls String[] @default([])       // uploaded venue / seating-view images (Vercel Blob URLs)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -9,7 +9,7 @@ export async function GET() {
   }
   const venues = await prisma.eventVenue.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, name: true, aliases: true, address: true, city: true, country: true, tags: true, createdAt: true },
+    select: { id: true, name: true, aliases: true, address: true, city: true, country: true, tags: true, imageUrls: true, createdAt: true },
   });
 
   // 1. Filter out TBD / placeholder venues

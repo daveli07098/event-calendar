@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Plus, Trash2, Building2, Loader2, FolderSync, MapPin } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, Trash2, Building2, Loader2, FolderSync, MapPin, ImagePlus, X, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ interface Venue {
   city: string;
   country: string;
   tags: string[];
+  imageUrls: string[];
   createdAt: string;
 }
 
@@ -26,6 +27,11 @@ export function VenueSection() {
   const [backfilling, setBackfilling] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: "", address: "", city: "Hong Kong", tags: "" });
+  // Per-venue image upload state
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const [expandedImages, setExpandedImages] = useState<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingUploadVenueId, setPendingUploadVenueId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/venues")
@@ -97,6 +103,41 @@ export function VenueSection() {
       toast.error(e instanceof Error ? e.message : "Import failed");
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleImageUpload = async (venueId: string, files: FileList | null) => {
+    if (!files?.length) return;
+    setUploadingFor(venueId);
+    try {
+      const formData = new FormData();
+      for (const file of Array.from(files)) formData.append("file", file);
+      const res = await fetch(`/api/venues/${venueId}/images`, { method: "POST", body: formData });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Upload failed");
+      const { imageUrls } = await res.json() as { imageUrls: string[] };
+      setVenues((prev) => prev.map((v) => v.id === venueId ? { ...v, imageUrls } : v));
+      setExpandedImages((prev) => new Set(prev).add(venueId));
+      toast.success(`${files.length} image${files.length > 1 ? "s" : ""} uploaded`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploadingFor(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleImageDelete = async (venueId: string, imageUrl: string) => {
+    try {
+      const res = await fetch(`/api/venues/${venueId}/images`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: imageUrl }),
+      });
+      if (!res.ok) throw new Error("Failed to delete image");
+      const { imageUrls } = await res.json() as { imageUrls: string[] };
+      setVenues((prev) => prev.map((v) => v.id === venueId ? { ...v, imageUrls } : v));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
     }
   };
 
@@ -197,53 +238,108 @@ export function VenueSection() {
           <p className="text-sm">No venues yet. Add one to get started.</p>
         </div>
       ) : (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/50 text-xs text-muted-foreground uppercase tracking-wide">
-                <th className="text-left px-4 py-2.5 font-medium">Venue</th>
-                <th className="text-left px-4 py-2.5 font-medium hidden sm:table-cell">City</th>
-                <th className="text-left px-4 py-2.5 font-medium hidden md:table-cell">Tags</th>
-                <th className="w-8 px-2 py-2.5" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {venues.map((v) => (
-                <tr key={v.id} className="hover:bg-muted/20 transition-colors group">
-                  <td className="px-4 py-3">
+        <div className="space-y-2">
+          {/* Hidden shared file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (pendingUploadVenueId) handleImageUpload(pendingUploadVenueId, e.target.files);
+              setPendingUploadVenueId(null);
+            }}
+          />
+
+          {venues.map((v) => {
+            const imagesExpanded = expandedImages.has(v.id);
+            return (
+              <div key={v.id} className="rounded-lg border border-border bg-card overflow-hidden">
+                {/* Venue header row */}
+                <div className="flex items-start gap-3 px-4 py-3 group">
+                  <div className="flex-1 min-w-0">
                     <p className="font-medium text-foreground">{v.name}</p>
-                    {v.address && (
-                      <p className="text-xs text-muted-foreground mt-0.5">{v.address}</p>
-                    )}
+                    {v.address && <p className="text-xs text-muted-foreground mt-0.5">{v.address}, {v.city}</p>}
+                    {!v.address && v.city && <p className="text-xs text-muted-foreground mt-0.5">{v.city}</p>}
                     {v.aliases.length > 0 && (
-                      <p className="text-xs text-muted-foreground mt-0.5 italic">
-                        aka {v.aliases.join(", ")}
-                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 italic">aka {v.aliases.join(", ")}</p>
                     )}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
-                    {v.city}
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    <div className="flex flex-wrap gap-1">
-                      {v.tags.map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0">{tag}</Badge>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="px-2 py-3">
+                    {v.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {v.tags.map((tag) => (
+                          <Badge key={tag} variant="secondary" className="text-[10px] px-1.5 py-0">{tag}</Badge>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* Upload image button */}
+                    <button
+                      onClick={() => { setPendingUploadVenueId(v.id); fileInputRef.current?.click(); }}
+                      disabled={uploadingFor === v.id}
+                      className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                      title="Upload venue images"
+                    >
+                      {uploadingFor === v.id
+                        ? <Loader2 className="size-3.5 animate-spin" />
+                        : <ImagePlus className="size-3.5" />
+                      }
+                    </button>
+                    {/* Toggle images */}
+                    {v.imageUrls.length > 0 && (
+                      <button
+                        onClick={() => setExpandedImages((prev) => {
+                          const next = new Set(prev);
+                          next.has(v.id) ? next.delete(v.id) : next.add(v.id);
+                          return next;
+                        })}
+                        className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors text-xs flex items-center gap-0.5"
+                        title="Toggle images"
+                      >
+                        <span>{v.imageUrls.length}</span>
+                        {imagesExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                      </button>
+                    )}
+                    {/* Delete venue */}
                     <button
                       onClick={() => handleDelete(v.id, v.name)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                       title="Remove venue"
                     >
                       <Trash2 className="size-3.5" />
                     </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+
+                {/* Image gallery — collapsible */}
+                {imagesExpanded && v.imageUrls.length > 0 && (
+                  <div className="border-t border-border px-4 py-3 bg-muted/20">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                      {v.imageUrls.map((url, i) => (
+                        <div key={url} className="relative group/img aspect-video rounded-md overflow-hidden border border-border bg-muted">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={url}
+                            alt={`${v.name} image ${i + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            onClick={() => handleImageDelete(v.id, url)}
+                            className="absolute top-1 right-1 size-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity hover:bg-destructive"
+                            title="Remove image"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

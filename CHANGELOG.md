@@ -1,3 +1,11 @@
+## [2026-05-12] — Session: venue image upload
+### Added
+- feat(venues): Vercel Blob storage for venue images — upload multiple photos per venue, delete individual images (5273ea7)
+- feat(venues): `imageUrls String[]` field added to `EventVenue` Prisma model; migration applied (5273ea7)
+- feat(venues): `POST /api/venues/[id]/images` — multipart upload, validates type (jpeg/png/webp/gif) + size (≤5 MB), stores under `venues/{id}/{timestamp}-{random}.ext` (5273ea7)
+- feat(venues): `DELETE /api/venues/[id]/images` — removes image from Vercel Blob and DB array (5273ea7)
+- feat(venues): VenueSection card layout with collapsible image gallery grid and per-image delete (5273ea7)
+
 ## [2026-05-12] — Session: sync creates new sale reminders
 ### Fixed
 - feat(sync): `Sync` in EventModal now **creates** new sale-ticket calendar events when the re-scraped page contains a sale window that didn't exist before — previously these were silently skipped (ad753a6)
