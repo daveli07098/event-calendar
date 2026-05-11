@@ -614,7 +614,7 @@ export function TicketSection() {
       {/* Body: left sidebar + main content */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar nav */}
-        <nav className="w-44 border-r shrink-0 p-2 space-y-0.5">
+        <nav className="w-52 border-r shrink-0 p-2 space-y-0.5">
           <button
             onClick={() => setSection("import")}
             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
