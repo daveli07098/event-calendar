@@ -263,7 +263,7 @@ export function EventModal({
         onSynced?.(updatedEvent);
       }
       // Re-fetch related events — new sale windows may have been created
-      const syncedUrl = syncPreview.ticket.sourceUrl;
+      const syncedUrl = syncPreview.ticket.sourceUrl as string | undefined;
       if (event && syncedUrl) {
         fetch(`/api/events/related?url=${encodeURIComponent(syncedUrl)}&excludeId=${event.id}`)
           .then((r) => r.json())
