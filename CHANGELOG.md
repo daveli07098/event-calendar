@@ -1,3 +1,7 @@
+## [2026-05-11] — Session: multi-slot sale dedup
+### Fixed
+- fix(tickets): when adding a multi-slot event, sale-ticket calendar events (presale, priority, public sale) are now created only once — tied to the first slot — instead of once per slot, eliminating duplicate sale reminders (b2c5e56)
+
 ## [2026-05-10] — Session: scraper end time + sale date accuracy
 ### Fixed
 - fix(tickets): `extractMeta` now extracts end time from JSON-LD concert event's `endDate` field — single-night shows (e.g. "20:00–22:30") now populate the END TIME field in the form instead of leaving it blank (f31cc05)

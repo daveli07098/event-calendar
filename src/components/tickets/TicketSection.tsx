@@ -265,8 +265,9 @@ export function TicketSection() {
     const baseTitle = editTitle.trim() || ticket.title;
     const baseVenue = editVenue.trim() || ticket.venue;
 
-    // Helper: build end date/time (defaults to start + 3 h) and call add API
-    const addOneSlot = async (date: string | null, time: string | null, endDate: string | null, endTime: string | null) => {
+    // Helper: build end date/time (defaults to start + 3 h) and call add API.
+    // omitSales=true strips sale-window fields so only the first slot creates sale-ticket events.
+    const addOneSlot = async (date: string | null, time: string | null, endDate: string | null, endTime: string | null, omitSales = false) => {
       const resolvedDate = (date ?? editDate.trim()) || ticket.date;
       const resolvedTime = (time ?? editTime.trim()) || ticket.time;
       let resolvedEndDate = (endDate ?? editEndDate.trim()) || null;
@@ -286,14 +287,17 @@ export function TicketSection() {
           resolvedEndDate = resolvedDate;
         }
       }
+      const ticketPayload = omitSales
+        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue, saleDates: null, saleDate: null, saleFirstDate: null }
+        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue };
       return fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ticket: { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue },
+          ticket: ticketPayload,
           tzOffsetMinutes: new Date().getTimezoneOffset(),
           ...(selectedEventCalId ? { targetCalendarId: selectedEventCalId } : {}),
-          ...(selectedSaleCalId ? { targetSaleCalendarId: selectedSaleCalId } : {}),
+          ...(omitSales ? {} : selectedSaleCalId ? { targetSaleCalendarId: selectedSaleCalId } : {}),
         }),
       });
     };
@@ -302,10 +306,12 @@ export function TicketSection() {
       const slotsToAdd = slots.length > 1 ? slots.filter((_, i) => selectedSlots.has(i)) : null;
 
       if (slotsToAdd && slotsToAdd.length > 0) {
-        // Multi-slot: one event per selected slot
+        // Multi-slot: one performance event per slot.
+        // Sale-ticket events (presale, public sale, etc.) are created only on the FIRST slot
+        // — they apply to all performance dates equally and should not be duplicated.
         let calName = "event-reminders";
-        for (const slot of slotsToAdd) {
-          const res = await addOneSlot(slot.date, slot.time, slot.endDate, slot.endTime);
+        for (const [i, slot] of slotsToAdd.entries()) {
+          const res = await addOneSlot(slot.date, slot.time, slot.endDate, slot.endTime, i > 0);
           const data = await res.json();
           if (!res.ok) {
             toast.error(data.error ?? "Failed to add event");
