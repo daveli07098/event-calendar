@@ -10,11 +10,11 @@
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:migrate:prod": "set -a && source .env.local && set +a && npx prisma migrate deploy",
+    "db:migrate:dev": "set -a && source .env.local && set +a && npx prisma migrate deploy",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "vercel:deploy": "pnpm dlx vercel deploy --prod"
+    "vercel:deploy:dev": "pnpm dlx vercel deploy --prod"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

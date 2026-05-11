@@ -1,3 +1,9 @@
+## [2026-05-12] — Session: DB migration infra for Supabase
+### Fixed
+- fix(db): `prisma.config.ts` now loads `.env.local` before `.env` so `prisma migrate deploy` uses Supabase `DIRECT_URL` (port 5432, bypasses PgBouncer) (cce61ae)
+- fix(db): renamed `db:migrate:prod` → `db:migrate:dev` and `vercel:deploy` → `vercel:deploy:dev` in `package.json` for clarity (cce61ae)
+- chore(git): `.env*.local` added to `.gitignore` to prevent secrets leaking (cce61ae)
+
 ## [2026-05-12] — Session: Event Section + Category Detection UI
 ### Changed
 - feat(events): "Ticket Section" renamed to "Event Section" — page title, header, and sidebar link (1372810)
