@@ -42,12 +42,25 @@ interface CalendarViewProps {
   onEventClose?: () => void;
   /** Active category filter — null = show all */
   categoryFilter?: EventCategory | null;
+  /** Active location (country) filter — null = show all */
+  locationFilter?: string | null;
+  /** Called on mount with a gotoDate function so parent can navigate the calendar */
+  onGotoDateReady?: (fn: (date: Date) => void) => void;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
+
+  // Expose gotoDate to parent on mount
+  useEffect(() => {
+    if (!onGotoDateReady) return;
+    onGotoDateReady((date: Date) => {
+      const api: CalendarApi | undefined = calendarRef.current?.getApi();
+      if (api) api.gotoDate(date);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
@@ -120,6 +133,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   const filteredEvents = events.filter((e) => {
     if (!visibleCalendarIds.includes(e.calendarId)) return false;
     if (categoryFilter && e.category !== categoryFilter) return false;
+    if (locationFilter) {
+      const loc = e.location ?? "";
+      if (!loc.toLowerCase().includes(locationFilter.toLowerCase())) return false;
+    }
     return true;
   });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
@@ -22,12 +22,24 @@ export function CalendarPageClient({
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string | null>(null);
+  const [locationCounts, setLocationCounts] = useState<Record<string, number>>({});
+  // Ref to CalendarView's gotoDate function (set by CalendarView via callback)
+  const gotoDateRef = useRef<((date: Date) => void) | null>(null);
 
   // On mount: open event + navigate to date if URL has ?event=id
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get("event");
     if (eventId) setOpenEventId(eventId);
+  }, []);
+
+  // Fetch location counts on mount (for sidebar chips)
+  useEffect(() => {
+    fetch("/api/events/tag-location")
+      .then((r) => r.json())
+      .then((d) => { if (d.counts) setLocationCounts(d.counts); })
+      .catch(() => null);
   }, []);
 
   // Write ?event=id&date=YYYY-MM-DD into the URL (no page reload)
@@ -60,11 +72,9 @@ export function CalendarPageClient({
   }, []);
 
   const handleCalendarToggle = async (id: string, visible: boolean) => {
-    // Optimistic update
     setCalendars((prev) =>
       prev.map((c) => (c.id === id ? { ...c, isVisible: visible } : c))
     );
-
     await fetch(`/api/calendars/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -94,6 +104,10 @@ export function CalendarPageClient({
         onMobileClose={() => setMobileSidebarOpen(false)}
         categoryFilter={categoryFilter}
         onCategoryFilter={setCategoryFilter}
+        locationFilter={locationFilter}
+        onLocationFilter={setLocationFilter}
+        locationCounts={locationCounts}
+        onMiniDateClick={(date) => gotoDateRef.current?.(date)}
       />
       <CalendarView
         calendars={calendars}
@@ -105,6 +119,8 @@ export function CalendarPageClient({
         onSearchOpen={() => setSearchOpen(true)}
         onMobileMenuOpen={() => setMobileSidebarOpen(true)}
         categoryFilter={categoryFilter}
+        locationFilter={locationFilter}
+        onGotoDateReady={(fn) => { gotoDateRef.current = fn; }}
       />
       <AddCalendarDialog
         open={addCalendarOpen}

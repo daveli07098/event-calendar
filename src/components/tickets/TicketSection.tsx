@@ -176,6 +176,9 @@ export function TicketSection() {
   const [classifyOnlyUnclassified, setClassifyOnlyUnclassified] = useState(true);
   const [classifyResult, setClassifyResult] = useState<{ updated: number; total: number; message: string } | null>(null);
   const [classifyCounts, setClassifyCounts] = useState<Array<{ category: string | null; count: number }> | null>(null);
+  // ── Location Tagging state ─────────────────────────────────────
+  const [taggingLocation, setTaggingLocation] = useState(false);
+  const [locationResult, setLocationResult] = useState<{ updated: number; total: number; message: string } | null>(null);
   const SALE_CALENDAR_NAME = "sale-ticket";
 
   // Fetch quota on mount so badge shows before first scan
@@ -769,14 +772,17 @@ export function TicketSection() {
                       onCheckedChange={(v) => setClassifyOnlyUnclassified(Boolean(v))}
                     />
                     <div>
-                      <p className="text-sm font-medium">Only classify unclassified events</p>
-                      <p className="text-xs text-muted-foreground">Skip events that already have a category assigned</p>
+                      <p className="text-sm font-medium">Skip already-processed events</p>
+                      <p className="text-xs text-muted-foreground">Skip events that already have a category / location tag assigned</p>
                     </div>
                   </label>
 
-                  <div className="flex gap-2 pt-1">
+                  {/* 3 action buttons */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {/* Classify Category */}
                     <Button
-                      disabled={classifying || selectedClassifyCalIds.size === 0}
+                      variant="default"
+                      disabled={classifying || taggingLocation || selectedClassifyCalIds.size === 0}
                       onClick={async () => {
                         setClassifying(true);
                         setClassifyResult(null);
@@ -784,35 +790,72 @@ export function TicketSection() {
                           const res = await fetch("/api/events/classify", {
                             method: "POST",
                             headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              onlyUnclassified: classifyOnlyUnclassified,
-                              calendarIds: [...selectedClassifyCalIds],
-                            }),
+                            body: JSON.stringify({ onlyUnclassified: classifyOnlyUnclassified, calendarIds: [...selectedClassifyCalIds] }),
                           });
                           const data = await res.json();
                           setClassifyResult({ updated: data.updated ?? 0, total: data.total ?? 0, message: data.message ?? "Done." });
-                          // Refresh counts
-                          fetch("/api/events/classify")
-                            .then((r) => r.json())
-                            .then((d) => { if (d.counts) setClassifyCounts(d.counts); })
-                            .catch(() => null);
+                          fetch("/api/events/classify").then((r) => r.json()).then((d) => { if (d.counts) setClassifyCounts(d.counts); }).catch(() => null);
                           if (data.updated > 0) toast.success(data.message);
                           else toast.info(data.message ?? "No events to classify.");
-                        } catch {
-                          toast.error("Classification failed — check AI quota.");
-                        } finally {
-                          setClassifying(false);
-                        }
+                        } catch { toast.error("Classification failed — check AI quota."); }
+                        finally { setClassifying(false); }
                       }}
                     >
-                      {classifying ? (
-                        <><Loader2 className="size-4 mr-2 animate-spin" />Classifying…</>
-                      ) : (
-                        <><Tag className="size-4 mr-2" />Run Classification</>
-                      )}
+                      {classifying ? <><Loader2 className="size-4 mr-2 animate-spin" />Classifying…</> : <><Tag className="size-4 mr-2" />Classify Category</>}
+                    </Button>
+
+                    {/* Tag Location */}
+                    <Button
+                      variant="outline"
+                      disabled={classifying || taggingLocation || selectedClassifyCalIds.size === 0}
+                      onClick={async () => {
+                        setTaggingLocation(true);
+                        setLocationResult(null);
+                        try {
+                          const res = await fetch("/api/events/tag-location", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ onlyUntagged: classifyOnlyUnclassified, calendarIds: [...selectedClassifyCalIds] }),
+                          });
+                          const data = await res.json();
+                          setLocationResult({ updated: data.updated ?? 0, total: data.total ?? 0, message: data.message ?? "Done." });
+                          if (data.updated > 0) toast.success(data.message);
+                          else toast.info(data.message ?? "No events needed tagging.");
+                        } catch { toast.error("Location tagging failed."); }
+                        finally { setTaggingLocation(false); }
+                      }}
+                    >
+                      {taggingLocation ? <><Loader2 className="size-4 mr-2 animate-spin" />Tagging…</> : <><MapPin className="size-4 mr-2" />Tag Location</>}
+                    </Button>
+
+                    {/* Classify All */}
+                    <Button
+                      variant="secondary"
+                      disabled={classifying || taggingLocation || selectedClassifyCalIds.size === 0}
+                      onClick={async () => {
+                        setClassifying(true);
+                        setTaggingLocation(true);
+                        setClassifyResult(null);
+                        setLocationResult(null);
+                        try {
+                          const calIds = [...selectedClassifyCalIds];
+                          const [catRes, locRes] = await Promise.all([
+                            fetch("/api/events/classify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ onlyUnclassified: classifyOnlyUnclassified, calendarIds: calIds }) }).then((r) => r.json()),
+                            fetch("/api/events/tag-location", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ onlyUntagged: classifyOnlyUnclassified, calendarIds: calIds }) }).then((r) => r.json()),
+                          ]);
+                          setClassifyResult({ updated: catRes.updated ?? 0, total: catRes.total ?? 0, message: catRes.message ?? "Done." });
+                          setLocationResult({ updated: locRes.updated ?? 0, total: locRes.total ?? 0, message: locRes.message ?? "Done." });
+                          fetch("/api/events/classify").then((r) => r.json()).then((d) => { if (d.counts) setClassifyCounts(d.counts); }).catch(() => null);
+                          toast.success(`Classified ${catRes.updated ?? 0} categories, tagged ${locRes.updated ?? 0} locations.`);
+                        } catch { toast.error("Classify All failed."); }
+                        finally { setClassifying(false); setTaggingLocation(false); }
+                      }}
+                    >
+                      {(classifying || taggingLocation) ? <><Loader2 className="size-4 mr-2 animate-spin" />Running…</> : <><Sparkles className="size-4 mr-2" />Classify All</>}
                     </Button>
                   </div>
 
+                  {/* Results */}
                   {classifyResult && (
                     <div className={`text-sm rounded-md px-3 py-2.5 ${
                       classifyResult.updated > 0
@@ -820,12 +863,22 @@ export function TicketSection() {
                         : "bg-muted text-muted-foreground"
                     }`}>
                       {classifyResult.updated > 0 ? (
-                        <span className="flex items-center gap-1.5">
-                          <CheckCircle2 className="size-4 shrink-0" />
-                          {classifyResult.message}
-                        </span>
+                        <span className="flex items-center gap-1.5"><CheckCircle2 className="size-4 shrink-0" /><strong>Category:</strong> {classifyResult.message}</span>
                       ) : (
-                        classifyResult.message
+                        <><strong>Category:</strong> {classifyResult.message}</>
+                      )}
+                    </div>
+                  )}
+                  {locationResult && (
+                    <div className={`text-sm rounded-md px-3 py-2.5 ${
+                      locationResult.updated > 0
+                        ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30"
+                        : "bg-muted text-muted-foreground"
+                    }`}>
+                      {locationResult.updated > 0 ? (
+                        <span className="flex items-center gap-1.5"><CheckCircle2 className="size-4 shrink-0" /><strong>Location:</strong> {locationResult.message}</span>
+                      ) : (
+                        <><strong>Location:</strong> {locationResult.message}</>
                       )}
                     </div>
                   )}
@@ -834,9 +887,7 @@ export function TicketSection() {
                     <p className="font-medium">Available categories:</p>
                     <div className="flex flex-wrap gap-1">
                       {EVENT_CATEGORIES.map((cat) => (
-                        <span key={cat} className="bg-muted px-1.5 py-0.5 rounded text-[11px]">
-                          {CATEGORY_LABELS[cat]}
-                        </span>
+                        <span key={cat} className="bg-muted px-1.5 py-0.5 rounded text-[11px]">{CATEGORY_LABELS[cat]}</span>
                       ))}
                     </div>
                   </div>

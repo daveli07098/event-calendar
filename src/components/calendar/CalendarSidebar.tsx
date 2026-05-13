@@ -19,6 +19,13 @@ interface CalendarSidebarProps {
   /** Active category filter — null = show all */
   categoryFilter?: EventCategory | null;
   onCategoryFilter?: (cat: EventCategory | null) => void;
+  /** Active location (country) filter — null = show all */
+  locationFilter?: string | null;
+  onLocationFilter?: (loc: string | null) => void;
+  /** Location counts from events — for showing filter chips */
+  locationCounts?: Record<string, number>;
+  /** Called when user clicks a date on the mini calendar */
+  onMiniDateClick?: (date: Date) => void;
 }
 
 export function CalendarSidebar({
@@ -29,6 +36,10 @@ export function CalendarSidebar({
   onMobileClose,
   categoryFilter,
   onCategoryFilter,
+  locationFilter,
+  onLocationFilter,
+  locationCounts,
+  onMiniDateClick,
 }: CalendarSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -117,13 +128,15 @@ export function CalendarSidebar({
               day === today.getDate() &&
               month === today.getMonth() &&
               year === today.getFullYear();
+            const clickDate = new Date(year, month, day);
             return (
               <div
                 key={day}
-                className={`text-[11px] py-0.5 rounded-full ${
+                onClick={() => onMiniDateClick?.(clickDate)}
+                className={`text-[11px] py-0.5 rounded-full cursor-pointer select-none ${
                   isToday
                     ? "bg-primary text-primary-foreground font-bold"
-                    : "hover:bg-accent cursor-pointer"
+                    : "hover:bg-accent"
                 }`}
               >
                 {day}
@@ -133,8 +146,8 @@ export function CalendarSidebar({
         </div>
       </div>
 
-      {/* Calendar list */}
-      <div className="flex-1 overflow-auto p-3">
+      {/* Calendar list — scrollable when there are many calendars */}
+      <div className="flex-1 overflow-y-auto p-3 min-h-0">
         {/* My Calendars */}
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -149,7 +162,8 @@ export function CalendarSidebar({
             <Plus className="size-3" />
           </Button>
         </div>
-        <div className="flex flex-col gap-1 mb-3">
+        {/* Constrain to ~7 rows before scrolling */}
+        <div className="flex flex-col gap-1 mb-3 overflow-y-auto" style={{ maxHeight: "calc(7 * 2.5rem)" }}>
           {(() => {
             const TICKET_NAMES = ["event-reminders", "sale-ticket"];
             const myCalendars = calendars.filter((c) => !c.memberRole);
@@ -228,6 +242,40 @@ export function CalendarSidebar({
           </>
         )}
       </div>
+
+      {/* Location filter chips */}
+      {onLocationFilter && locationCounts && Object.keys(locationCounts).length > 0 && (
+        <div className="px-3 pb-2 border-b border-border">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Location</span>
+            {locationFilter && (
+              <button
+                onClick={() => onLocationFilter(null)}
+                className="text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(locationCounts)
+              .sort((a, b) => b[1] - a[1])
+              .map(([loc, count]) => (
+                <button
+                  key={loc}
+                  onClick={() => onLocationFilter(locationFilter === loc ? null : loc)}
+                  className={`text-[11px] px-1.5 py-0.5 rounded-full border transition-colors ${
+                    locationFilter === loc
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border hover:bg-accent"
+                  }`}
+                >
+                  {loc} <span className="opacity-60">{count}</span>
+                </button>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Category filter chips */}
       {onCategoryFilter && (

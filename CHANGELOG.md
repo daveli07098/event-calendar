@@ -1,4 +1,12 @@
-## [2026-05-14] — Session: scraper fixes
+## [2026-05-14] — Session: classify UI + sidebar enhancements
+### Added
+- feat(api): `GET/POST /api/events/tag-location` — rule-based location tagging: detects country (Hong Kong, Japan, Korea, Singapore, etc.) from event title+location and prepends it (c8a018a)
+- feat(classify): Category Detection section now has 3 buttons: **Classify Category** (AI), **Tag Location** (rule-based, no quota), **Classify All** (both in parallel); separate result banners for each (c8a018a)
+- feat(sidebar): **Location filter** chips — country tags derived from events, sorted by frequency; clicking filters the calendar view (c8a018a)
+- feat(sidebar): **Mini calendar click** — clicking any date navigates the main calendar to that month/date (c8a018a)
+- feat(sidebar): Calendar list is now **scrollable** when there are more than ~7 calendars, keeping the sidebar from growing too tall (c8a018a)
+
+
 ### Fixed
 - fix(scrape): Timable (and similar) pages embed `location` on ALL JSON-LD event blocks — sale windows were misclassified as concert nights. Now also checks event `name` for sale keywords (優先/訂票/presale/priority/member/visa/etc.) before treating a block as a concert night. This fixes The Weeknd HK 2026 showing May 18 (presale) as the concert date instead of Oct 30-31 (b48164d)
 - fix(scrape): `isSaleWindow` now also matches ticketing platform names (`購票通`/`cityline`/`大麥網`/`damai`/etc.) — previously named sale events like "購票通 Cityline" had no sale keywords so were misclassified as concert nights, causing wrong concert date (eabe519)
