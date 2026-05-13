@@ -294,7 +294,16 @@ function extractTzFromIso(isoStr: string): string | null {
  * This avoids showing UTC values when the source data stores times in UTC but the sale
  * window is in the local timezone (e.g. 04:00 UTC = 12:00 noon HKT).
  */
-function utcToLocalStrings(d: Date, tz: string): { date: string; time: string } {
+function utcToLocalStrings(d: Date, tz: string, originalIso?: string): { date: string; time: string } {
+  // Timezone-naive string (e.g. "2026-05-14T12:00:00" — no Z or ±offset) is already stored
+  // in local time. Do NOT add the timezone offset or we'd double-count it (12:00 + 8h = 20:00).
+  if (originalIso?.includes("T")) {
+    const hasTzSuffix = /Z$|[+-]\d{2}:?\d{2}$/.test(originalIso.trim());
+    if (!hasTzSuffix) {
+      const [datePart, timePart = ""] = originalIso.split("T");
+      return { date: datePart!, time: timePart.slice(0, 5) };
+    }
+  }
   const sign = tz.startsWith("-") ? -1 : 1;
   const [hh = "0", mm = "0"] = tz.replace(/[+-]/, "").split(":");
   const offsetMs = sign * (parseInt(hh, 10) * 60 + parseInt(mm, 10)) * 60_000;
@@ -401,14 +410,19 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   }
 
   // Returns true when a JSON-LD event represents a ticket-sale window rather than a
-  // performance. Timable (and similar sites) attach `location` to EVERY event block,
+  // performance. Timable and similar sites attach `location` to EVERY event block,
   // including presale/priority/public-sale slots, so we can't rely solely on location
-  // presence. Instead we also inspect the event `name` for sale-related keywords.
+  // presence. We inspect the event `name` for sale-related keywords AND ticketing
+  // platform names (e.g. "購票通 Cityline", "大麥網 DAMAI") — those blocks are always
+  // sale windows, not concert nights.
   const isSaleWindow = (e: { startDate: string; dateObj: Date; raw: Record<string, unknown> }) => {
     if (!e.raw.location) return true; // no location → definitely a sale window
     const name = typeof e.raw.name === "string" ? e.raw.name : "";
-    // Matches presale / priority / member / ticket-sale terms in Chinese and English
-    return /presale|pre-sale|priority|優先|訂票|pre.?order|on.?sale|public.?sale|公開發售|fan.?club|會員|member.?sale|vip(?!\s*area)|visa|mastercard|credit.?card|信用卡/i.test(name);
+    // Sale-type keywords (presale / priority / member / public-sale terms)
+    const hasSaleKeywords = /presale|pre-sale|priority|優先|訂票|pre.?order|on.?sale|public.?sale|公開發售|fan.?club|會員|member.?sale|vip(?!\s*area)|visa|mastercard|credit.?card|信用卡/i.test(name);
+    // Ticketing platform names — sale events on Timable are often named after the platform
+    const hasPlatformName = /購票通|cityline|大麥網|damai|快達票|hk.?ticketing|ticketmaster|kktix|urbtix|klook|eventbrite|bookyay|accupass|膠紙座|trip\.?com/i.test(name);
+    return hasSaleKeywords || hasPlatformName;
   };
 
   if (allJsonLdEvents.length > 0) {
@@ -494,15 +508,15 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       if (saleWindowEvents.length > 0) {
         // Pre-compute concert dates in local timezone so overlap check is tz-consistent
         const concertLocalDates = new Set(
-          concertEvents.map((c) => sourceTz ? utcToLocalStrings(c.dateObj, sourceTz).date : c.startDate.slice(0, 10))
+          concertEvents.map((c) => sourceTz ? utcToLocalStrings(c.dateObj, sourceTz, c.startDate).date : c.startDate.slice(0, 10))
         );
         const saleOnly = [...saleWindowEvents].sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
         for (let i = 0; i < saleOnly.length; i++) {
           const ev = saleOnly[i]!;
-          // Convert UTC timestamp to local timezone so "2026-05-13T20:00:00Z" (=12:00 noon HKT)
-          // shows as date=2026-05-14 time=04:00 HKT, not date=2026-05-13 time=20:00 UTC
+          // Convert UTC timestamp to local timezone (pass originalIso to avoid double-converting
+          // timezone-naive strings like "2026-05-14T12:00:00" which are already in local time)
           const { date: dStr, time: localTime } = sourceTz
-            ? utcToLocalStrings(ev.dateObj, sourceTz)
+            ? utcToLocalStrings(ev.dateObj, sourceTz, ev.startDate)
             : { date: ev.startDate.slice(0, 10), time: ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : "" };
           // Skip dates that overlap with concert nights
           if (concertLocalDates.has(dStr)) continue;
@@ -557,7 +571,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
           let dateStr: string;
           let timeStr: string | null;
           if (sourceTz) {
-            const local = utcToLocalStrings(d, sourceTz);
+            const local = utcToLocalStrings(d, sourceTz, iso);
             dateStr = local.date;
             timeStr = iso.includes("T") ? local.time : null;
           } else {

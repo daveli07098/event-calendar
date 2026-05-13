@@ -1,7 +1,9 @@
 ## [2026-05-14] — Session: scraper fixes
 ### Fixed
 - fix(scrape): Timable (and similar) pages embed `location` on ALL JSON-LD event blocks — sale windows were misclassified as concert nights. Now also checks event `name` for sale keywords (優先/訂票/presale/priority/member/visa/etc.) before treating a block as a concert night. This fixes The Weeknd HK 2026 showing May 18 (presale) as the concert date instead of Oct 30-31 (b48164d)
-- fix(scrape): sale window times now shown in source timezone (HKT) not UTC — previously "2026-05-14T04:00:00Z" (12:00 noon HKT) showed as "04:00"; now correctly shows "12:00". Added `utcToLocalStrings()` helper + initialize `sourceTz` early from URL domain so both Strategy A and Strategy B extraction use local time (29129ee)
+- fix(scrape): `isSaleWindow` now also matches ticketing platform names (`購票通`/`cityline`/`大麥網`/`damai`/etc.) — previously named sale events like "購票通 Cityline" had no sale keywords so were misclassified as concert nights, causing wrong concert date (eabe519)
+- fix(scrape): `utcToLocalStrings` now handles timezone-naive ISO strings (e.g. `"2026-05-14T12:00:00"` with no Z/±) — previously Node.js treated them as UTC and adding +8h gave 20:00 instead of 12:00 (eabe519)
+ — previously "2026-05-14T04:00:00Z" (12:00 noon HKT) showed as "04:00"; now correctly shows "12:00". Added `utcToLocalStrings()` helper + initialize `sourceTz` early from URL domain so both Strategy A and Strategy B extraction use local time (29129ee)
 
 
 ### Fixed
