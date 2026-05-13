@@ -289,6 +289,22 @@ function extractTzFromIso(isoStr: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Convert a UTC Date to local date+time strings using a tz offset like "+08:00" or "-05:00".
+ * This avoids showing UTC values when the source data stores times in UTC but the sale
+ * window is in the local timezone (e.g. 04:00 UTC = 12:00 noon HKT).
+ */
+function utcToLocalStrings(d: Date, tz: string): { date: string; time: string } {
+  const sign = tz.startsWith("-") ? -1 : 1;
+  const [hh = "0", mm = "0"] = tz.replace(/[+-]/, "").split(":");
+  const offsetMs = sign * (parseInt(hh, 10) * 60 + parseInt(mm, 10)) * 60_000;
+  const local = new Date(d.getTime() + offsetMs);
+  return {
+    date: local.toISOString().slice(0, 10),
+    time: `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}`,
+  };
+}
+
 /** Map known event-ticketing domains to their local timezone offset string. */
 function detectTimezoneFromUrl(url: string): string | null {
   try {
@@ -343,7 +359,10 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   let schemaTime: string | null = null;
   let schemaVenue: string | null = null;
   let schemaLocation: string | null = null;
-  let sourceTz: string | null = null;
+  // Initialise sourceTz early from URL domain so Strategy A + B can use it even
+  // when the concert JSON-LD block has no embedded tz offset. JSON-LD processing
+  // below may override this with a more precise value.
+  let sourceTz: string | null = detectTimezoneFromUrl(pageUrl);
   // Strategy A sale-window events (non-location Event blocks from JSON-LD)
   const stratASaleWindows: Array<{ date: string; time: string | null; label: string }> = [];
   // All concert-night events (with location) — hoisted so groupIntoSlots can use them
@@ -473,13 +492,21 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 
       // Strategy A: non-location blocks are sale windows
       if (saleWindowEvents.length > 0) {
+        // Pre-compute concert dates in local timezone so overlap check is tz-consistent
+        const concertLocalDates = new Set(
+          concertEvents.map((c) => sourceTz ? utcToLocalStrings(c.dateObj, sourceTz).date : c.startDate.slice(0, 10))
+        );
         const saleOnly = [...saleWindowEvents].sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
         for (let i = 0; i < saleOnly.length; i++) {
           const ev = saleOnly[i]!;
-          const dStr = ev.startDate.slice(0, 10);
+          // Convert UTC timestamp to local timezone so "2026-05-13T20:00:00Z" (=12:00 noon HKT)
+          // shows as date=2026-05-14 time=04:00 HKT, not date=2026-05-13 time=20:00 UTC
+          const { date: dStr, time: localTime } = sourceTz
+            ? utcToLocalStrings(ev.dateObj, sourceTz)
+            : { date: ev.startDate.slice(0, 10), time: ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : "" };
           // Skip dates that overlap with concert nights
-          if (concertEvents.some((c) => c.startDate.slice(0, 10) === dStr)) continue;
-          const tStr = ev.startDate.includes("T") ? ev.startDate.slice(11, 16) : null;
+          if (concertLocalDates.has(dStr)) continue;
+          const tStr = ev.startDate.includes("T") ? (localTime || null) : null;
           // Prefer the JSON-LD event name (e.g. "DBS 信用卡預訂") as the human label; fall back to positional
           const evName = typeof ev.raw.name === "string" && ev.raw.name.trim() ? ev.raw.name.trim() : null;
           const label = evName ?? (i === saleOnly.length - 1 ? "Public Sale" : "Priority Sale");
@@ -525,9 +552,19 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
         const d = new Date(String(offer.validFrom));
         if (!isNaN(d.getTime())) {
           const iso = String(offer.validFrom);
-          const parts = iso.split("T");
-          const dateStr = parts[0] ?? "";
-          const timeStr = parts[1] ? parts[1].slice(0, 5) : null;
+          // Convert to source timezone so sale times show in local time (not UTC)
+          // e.g. "2026-05-14T04:00:00Z" → date="2026-05-14" time="12:00" for HKT (+08:00)
+          let dateStr: string;
+          let timeStr: string | null;
+          if (sourceTz) {
+            const local = utcToLocalStrings(d, sourceTz);
+            dateStr = local.date;
+            timeStr = iso.includes("T") ? local.time : null;
+          } else {
+            const parts = iso.split("T");
+            dateStr = parts[0] ?? "";
+            timeStr = parts[1] ? parts[1].slice(0, 5) : null;
+          }
           // Derive label from availability or name field on the offer
           let label = "Sale";
           const avail = String((offer.availability ?? offer.name ?? "")).toLowerCase();
@@ -607,7 +644,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     }
   }
 
-  // URL-based timezone fallback — kicks in when JSON-LD has no offset info
+  // URL-based timezone was already set at the start; this keeps the override from JSON-LD if set
   if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl);
 
   // ---------------------------------------------------------------------------
