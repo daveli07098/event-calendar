@@ -1,4 +1,9 @@
-## [2026-05-12] — Session: DB migration infra for Supabase
+## [2026-05-14] — Session: scraper fixes
+### Fixed
+- fix(scrape): Timable (and similar) pages embed `location` on ALL JSON-LD event blocks — sale windows were misclassified as concert nights. Now also checks event `name` for sale keywords (優先/訂票/presale/priority/member/visa/etc.) before treating a block as a concert night. This fixes The Weeknd HK 2026 showing May 18 (presale) as the concert date instead of Oct 30-31 (b48164d)
+- feat(scrape): added `ticket` category to AI extraction prompt — matches `ticket` type added to `EVENT_CATEGORIES` (b48164d)
+
+
 ### Fixed
 - fix(modal): category select trigger now shows emoji + label (e.g. "🎵 Concert") instead of raw value "concert" (28157fc)
 - feat(types): added `ticket` category ("🎟️ Ticket Sale") to `EVENT_CATEGORIES` and `CATEGORY_LABELS` (5201ac4)

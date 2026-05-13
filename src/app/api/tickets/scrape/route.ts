@@ -381,12 +381,21 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     }
   }
 
+  // Returns true when a JSON-LD event represents a ticket-sale window rather than a
+  // performance. Timable (and similar sites) attach `location` to EVERY event block,
+  // including presale/priority/public-sale slots, so we can't rely solely on location
+  // presence. Instead we also inspect the event `name` for sale-related keywords.
+  const isSaleWindow = (e: { startDate: string; dateObj: Date; raw: Record<string, unknown> }) => {
+    if (!e.raw.location) return true; // no location → definitely a sale window
+    const name = typeof e.raw.name === "string" ? e.raw.name : "";
+    // Matches presale / priority / member / ticket-sale terms in Chinese and English
+    return /presale|pre-sale|priority|優先|訂票|pre.?order|on.?sale|public.?sale|公開發售|fan.?club|會員|member.?sale|vip(?!\s*area)|visa|mastercard|credit.?card|信用卡/i.test(name);
+  };
+
   if (allJsonLdEvents.length > 0) {
-    // Split by location presence:
-    // Events WITH location = concert nights (have a venue)
-    // Events WITHOUT location = sale windows (no venue)
-    concertEvents = allJsonLdEvents.filter((e) => e.raw.location);
-    const saleWindowEvents = allJsonLdEvents.filter((e) => !e.raw.location);
+    // Split: concert nights (actual performance) vs sale windows (ticketing availability)
+    concertEvents = allJsonLdEvents.filter((e) => !isSaleWindow(e));
+    const saleWindowEvents = allJsonLdEvents.filter(isSaleWindow);
 
     if (concertEvents.length > 0) {
       // Reclassify any location-less event that falls inside the concert's date range.
@@ -707,7 +716,7 @@ CRITICAL — extract ALL sale windows into saleDates (one entry per distinct dat
 CRITICAL — multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "Aug 6–16"), set date=FIRST night and endDate=LAST night.
 CRITICAL — endTime: extract from patterns like "7:30 PM – 10:10 PM" (→ 22:10) or JSON-LD endDate.
 
-CRITICAL — category: choose the single best fit from: concert (live music/bands), exhibition (art/gallery/museum), theatre (play/musical/opera/dance), sports (matches/tournaments), festival (cultural fair/parade), anime (anime/manga/IP/character merch), popup (pop-up store/limited retail), comedy (stand-up), film (screening/premiere), food (food fair/dining event), other.
+CRITICAL — category: choose the single best fit from: concert (live music/bands), exhibition (art/gallery/museum), theatre (play/musical/opera/dance), sports (matches/tournaments), festival (cultural fair/parade), anime (anime/manga/IP/character merch), popup (pop-up store/limited retail), comedy (stand-up), film (screening/premiere), food (food fair/dining event), ticket (ticket sale / presale reminder with no physical performance on that date), other.
 
 URL: ${url}
 ${text}`.trim();
