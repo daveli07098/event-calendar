@@ -57,10 +57,11 @@ function parseLocalToUTC(date: string | null, time: string | null, tzOffsetMinut
   }
   const [, y, m, d] = isoMatch;
   const [h = "12", min = "00"] = (time ?? "12:00").split(":");
-  // Create as if server-local (UTC), then shift by tzOffset to get true UTC:
-  // user-local 20:00 HKT (offset=-480) → UTC = 20:00 + (-480/60) = 20:00 - 8 = 12:00 UTC
-  const localDate = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min));
-  return new Date(localDate.getTime() + tzOffsetMinutes * 60_000);
+  // Use Date.UTC() so the result is server-timezone-agnostic (avoids Vercel UTC vs localhost HKT drift).
+  // offsetMinutes = getTimezoneOffset() — negative for UTC+ zones (e.g. -480 for HKT).
+  // UTC = localNumbers_as_UTC + offsetMinutes  →  12:00 HKT: Date.UTC(…,12,0) + (-480min) = 04:00 UTC
+  const utcMs = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(h), Number(min));
+  return new Date(utcMs + tzOffsetMinutes * 60_000);
 }
 
 // ---------------------------------------------------------------------------

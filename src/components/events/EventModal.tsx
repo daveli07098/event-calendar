@@ -255,7 +255,7 @@ export function EventModal({
           presaleEventId: syncPreview.diffResult.presaleEventId,
           appliedFields: syncPreview.changes.map((c) => c.field),
           ticket: syncPreview.ticket,
-          tzOffsetMinutes: -new Date().getTimezoneOffset(),
+          tzOffsetMinutes: new Date().getTimezoneOffset(),
         }),
       });
       if (!applyRes.ok) throw new Error(await applyRes.text());

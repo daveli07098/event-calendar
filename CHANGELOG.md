@@ -1,6 +1,7 @@
 ## [2026-05-15] — Session: timezone bug fix
 ### Fixed
-- fix(calendar): mini calendar today highlight now uses client-side `useEffect` date instead of SSR UTC date — Vercel runs UTC so HK users (UTC+8) saw yesterday's date highlighted before 08:00 local time (d40bc40)
+- fix(calendar): mini calendar today highlight now uses client-side `useEffect` date instead of SSR UTC date — Vercel runs UTC so HK users (UTC+8) saw yesterday's date highlighted before 08:00 local time (ae68df3)
+- fix(tickets): sync apply saved sale events at wrong time due to double timezone bug: `EventModal` sent `-getTimezoneOffset()` but `update` route expected raw `getTimezoneOffset()`; also `parseLocalToUTC` used `new Date()` which picks up the server's local timezone — replaced with `Date.UTC()` so conversion is server-timezone-agnostic. Result: noon HKT sale events now correctly stored as 04:00 UTC and display as 12:00 HKT (dfb9361)
 
 ## [2026-05-14] — Session: classify UI + sidebar enhancements
 ### Added
