@@ -123,10 +123,14 @@ export async function POST(req: NextRequest) {
   for (const ev of events) {
     const country = detectCountry(ev.title, ev.location);
     if (!country) continue;
-    // If onlyUntagged: skip events whose existing location already contains a known country tag
+    // If onlyUntagged: skip events that already have a country tag OR whose location
+    // already contains enough country context (matched by the detection regex itself).
+    // This prevents double-tagging e.g. "Japan, 東京アニメセンター" on a second run,
+    // and also skips events like "東京アニメセンター, 渋谷モディ" that were already tagged
+    // with "Japan, " prefix (location already starts with a LOCATION_RULES tag value).
     if (onlyUntagged) {
-      const existing = LOCATION_RULES.find(([, tag]) => ev.location?.includes(tag));
-      if (existing) continue; // already has a country tag
+      const alreadyTagged = LOCATION_RULES.some(([, tag]) => ev.location?.startsWith(tag));
+      if (alreadyTagged) continue; // already has a country prefix
     }
     // Build new location: prepend country tag if not already in location
     const hasTag = LOCATION_RULES.some(([, tag]) => ev.location?.includes(tag));

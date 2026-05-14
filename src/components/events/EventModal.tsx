@@ -471,10 +471,22 @@ export function EventModal({
               <Label htmlFor="location">Location</Label>
               {(() => {
                 if (!location) return null;
-                if (location.includes("香港") || location.toLowerCase().includes("hong kong")) {
-                  return <span className="text-[10px] bg-secondary text-secondary-foreground rounded px-1.5 py-0.5 leading-none">Hong Kong</span>;
-                }
-                return null;
+                // Show country badge if the location starts with a known country tag
+                // (added by Tag Location) or contains common HK identifiers
+                const knownCountries = [
+                  "Hong Kong", "Japan", "South Korea", "Taiwan", "Singapore",
+                  "Thailand", "Macau", "China", "United Kingdom", "United States",
+                  "Australia", "Canada", "Malaysia", "Philippines", "Indonesia",
+                  "France", "Germany",
+                ];
+                const matched = knownCountries.find((c) => location.startsWith(c + ",") || location.startsWith(c + " "));
+                // Fallback: detect HK/Japan from raw text for untagged events
+                const rawHk = !matched && (location.includes("香港") || location.toLowerCase().includes("hong kong"));
+                const rawJp = !matched && !rawHk && /東京|大阪|Japan/i.test(location);
+                const rawKr = !matched && !rawHk && !rawJp && /首爾|Seoul|Korea/i.test(location);
+                const label = matched ?? (rawHk ? "Hong Kong" : rawJp ? "Japan" : rawKr ? "South Korea" : null);
+                if (!label) return null;
+                return <span className="text-[10px] bg-secondary text-secondary-foreground rounded px-1.5 py-0.5 leading-none">{label}</span>;
               })()}
             </div>
             <Input

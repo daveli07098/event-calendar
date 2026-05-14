@@ -4,7 +4,8 @@
 - feat(classify): Category Detection section now has 3 buttons: **Classify Category** (AI), **Tag Location** (rule-based, no quota), **Classify All** (both in parallel); separate result banners for each (c8a018a)
 - feat(sidebar): **Location filter** chips — country tags derived from events, sorted by frequency; clicking filters the calendar view (c8a018a)
 - feat(sidebar): **Mini calendar click** — clicking any date navigates the main calendar to that month/date (c8a018a)
-- feat(sidebar): Calendar list is now **scrollable** when there are more than ~7 calendars, keeping the sidebar from growing too tall (c8a018a)
+- fix(modal): location badge now shows all known countries (Japan, South Korea, Taiwan, Singapore, etc.) by checking if location starts with a known country prefix — previously only "Hong Kong" was detected (f94cc06)
+- fix(tag-location): `onlyUntagged` now uses `startsWith(tag)` instead of `includes(tag)` to skip already-tagged events — prevents double-tagging on repeated runs (f94cc06)
 
 
 ### Fixed
