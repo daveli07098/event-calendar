@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { classifySingleEvent } from "@/lib/classify-event";
 
 // ---------------------------------------------------------------------------
 // AI usage rate limiter — DB-backed, persists across hot reloads and restarts
@@ -1275,7 +1276,7 @@ export async function POST(req: NextRequest) {
     // sourceTimezone comes only from meta (JSON-LD / URL domain) — AI doesn't return it
     sourceTimezone: meta.sourceTimezone,
     slots: meta.slots,
-    // category: detected by AI from title + description + venue cues
+    // category: AI-detected from main prompt; fall back to the shared classify logic if missing
     category: (aiResult as Partial<TicketData>).category ?? null,
   };
 
@@ -1289,6 +1290,12 @@ export async function POST(req: NextRequest) {
       ticket.saleDates = ticket.saleDates.filter((w) => w.date !== perfDate);
       if (ticket.saleDates.length === 0) ticket.saleDates = null;
     }
+  }
+
+  // If the main AI prompt didn't return a category, run the shared classify logic
+  // (same prompt and model cascade used by the Classify Category tab).
+  if (!ticket.category) {
+    ticket.category = await classifySingleEvent(ticket.title, ticket.venue ?? ticket.location, ticket.description);
   }
 
   if (!ticket.title || ticket.title === "Untitled Event") {
