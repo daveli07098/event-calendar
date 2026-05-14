@@ -22,7 +22,7 @@ export const CATEGORY_LABELS: Record<EventCategory, string> = {
   sports:     "⚽ Sports",
   festival:   "🎉 Festival",
   anime:      "🌸 Anime / IP",
-  popup:      "🏪 Pop-up Store",
+  popup:      "🏪 Pop-up / Café",
   comedy:     "😂 Comedy",
   film:       "🎬 Film",
   food:       "🍜 Food",

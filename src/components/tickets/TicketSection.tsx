@@ -1309,7 +1309,9 @@ export function TicketSection() {
                     disabled={status === "adding"}
                   >
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select category…" />
+                      <SelectValue placeholder="Select category…">
+                        {editCategory ? CATEGORY_LABELS[editCategory as EventCategory] : "Select category…"}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="_none">— No category —</SelectItem>
