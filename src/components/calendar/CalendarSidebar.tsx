@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, ChevronLeft, ChevronRight, Settings, Users, Megaphone, Ticket, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -49,7 +49,10 @@ export function CalendarSidebar({
   const month = miniDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date();
+  // Use client-side date only — avoids SSR/Vercel UTC mismatch where the server's
+  // timezone differs from the user's local timezone, causing the wrong day to be highlighted.
+  const [today, setToday] = useState<Date | null>(null);
+  useEffect(() => { setToday(new Date()); }, []);
 
   const monthName = miniDate.toLocaleString("default", {
     month: "long",
@@ -125,6 +128,7 @@ export function CalendarSidebar({
           {Array.from({ length: daysInMonth }).map((_, i) => {
             const day = i + 1;
             const isToday =
+              today !== null &&
               day === today.getDate() &&
               month === today.getMonth() &&
               year === today.getFullYear();

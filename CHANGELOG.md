@@ -1,3 +1,7 @@
+## [2026-05-15] — Session: timezone bug fix
+### Fixed
+- fix(calendar): mini calendar today highlight now uses client-side `useEffect` date instead of SSR UTC date — Vercel runs UTC so HK users (UTC+8) saw yesterday's date highlighted before 08:00 local time (d40bc40)
+
 ## [2026-05-14] — Session: classify UI + sidebar enhancements
 ### Added
 - feat(api): `GET/POST /api/events/tag-location` — rule-based location tagging: detects country (Hong Kong, Japan, Korea, Singapore, etc.) from event title+location and prepends it (c8a018a)
