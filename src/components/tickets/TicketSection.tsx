@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { EVENT_CATEGORIES, CATEGORY_LABELS, type EventCategory } from "@/types";
 
@@ -44,6 +45,7 @@ interface ScrapedTicket {
   saleDate: string | null;
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  category?: string | null;
   slots?: EventSlot[];
   duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null; similarityScore: number }>;
 }
@@ -159,6 +161,7 @@ export function TicketSection() {
   const [editEndDate, setEditEndDate] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
   const [editVenue, setEditVenue] = useState("");
+  const [editCategory, setEditCategory] = useState<EventCategory | "">("" );
   // Multi-slot picker
   const [slots, setSlots] = useState<EventSlot[]>([]);
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
@@ -255,6 +258,7 @@ export function TicketSection() {
       setEditTime(data.time ?? "");
       setEditEndDate(data.endDate ?? "");
       setEditEndTime(data.endTime ?? "");      setEditVenue(data.venue ?? data.location ?? "");
+      setEditCategory((data.category as EventCategory) ?? "");
       // Multi-slot picker — pre-select all slots
       const dataSlots: EventSlot[] = data.slots ?? [];
       setSlots(dataSlots);
@@ -417,9 +421,10 @@ export function TicketSection() {
           resolvedEndDate = resolvedDate;
         }
       }
+      const resolvedCategory = editCategory || ticket.category || null;
       const ticketPayload = omitSales
-        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue, saleDates: null, saleDate: null, saleFirstDate: null }
-        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue };
+        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue, category: resolvedCategory, saleDates: null, saleDate: null, saleFirstDate: null }
+        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue, category: resolvedCategory };
       return fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -521,6 +526,7 @@ export function TicketSection() {
     setEditEndDate("");
     setEditEndTime("");
     setEditVenue("");
+    setEditCategory("");
     setSlots([]);
     setSelectedSlots(new Set());
     setCalendarOptions(null);
@@ -1294,6 +1300,24 @@ export function TicketSection() {
                     placeholder="Venue name"
                     disabled={status === "adding"}
                   />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Category</label>
+                  <Select
+                    value={editCategory || "_none"}
+                    onValueChange={(v) => setEditCategory(v === "_none" ? "" : v as EventCategory)}
+                    disabled={status === "adding"}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select category…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="_none">— No category —</SelectItem>
+                      {EVENT_CATEGORIES.map((cat) => (
+                        <SelectItem key={cat} value={cat}>{CATEGORY_LABELS[cat]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
