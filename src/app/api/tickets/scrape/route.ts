@@ -118,6 +118,7 @@ interface TicketData {
   slots: EventSlot[];               // grouped performance timeslots (empty when ≤1)
   category: string | null;          // AI-detected category: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other
   country: string | null;           // detected country: domain-based primary, AI fallback
+  venueRuns: VenueRun[] | null;     // multi-venue tour runs (null when single venue)
 }
 
 /** A single ticket-sale window with a date, optional time, and a human label. */
@@ -175,6 +176,15 @@ export interface EventSlot {
   label: string;          // human-readable e.g. "Jun 13–14 · 19:30"
 }
 
+/** A single venue run for a multi-venue tour (e.g. exhibition touring Tokyo then Osaka). */
+export interface VenueRun {
+  venue: string;       // venue name e.g. "有楽町マルイ"
+  location: string | null; // city/prefecture for this specific venue, if different
+  date: string;        // YYYY-MM-DD start date for this venue
+  endDate: string;     // YYYY-MM-DD end date for this venue
+  label: string;       // human-readable e.g. "有楽町マルイ: Mar 14–Mar 29"
+}
+
 interface MetaFallback {
   title: string | null;
   description: string | null;
@@ -208,6 +218,18 @@ function buildSlotLabel(date: string, endDate: string | null, time: string | nul
   const datePart = endDate ? `${fmt(date)}–${fmt(endDate)}` : fmt(date);
   if (!time) return datePart;
   return endTime ? `${datePart} · ${time}–${endTime}` : `${datePart} · ${time}`;
+}
+
+/** Build a short human-readable label for a venue run, e.g. "有楽町マルイ: Mar 14–Mar 29" */
+function buildVenueRunLabel(venue: string, date: string, endDate: string): string {
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const fmt = (d: string) => {
+    const parts = d.split("-");
+    const m = parseInt(parts[1] ?? "1", 10);
+    const day = parseInt(parts[2] ?? "1", 10);
+    return `${months[m - 1]} ${day}`;
+  };
+  return `${venue}: ${fmt(date)}–${fmt(endDate)}`;
 }
 
 function groupIntoSlots(concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>): EventSlot[] {
@@ -750,7 +772,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other"}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"venueRuns":[{"venue":"venue name","location":"city or null","date":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|kuji|crane|comedy|film|food|other"}
 
 CRITICAL — performance date vs sale dates:
   • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
@@ -766,6 +788,8 @@ CRITICAL — extract ALL sale windows into saleDates (one entry per distinct dat
     • General public on-sale     (公開發售, General Sale, Public Sale)
   Each type is a separate saleDates entry with its own date and label.
   Order saleDates chronologically (earliest first). Also set saleFirstDate = saleDates[0].date and saleDate = saleDates[last].date.
+
+CRITICAL — venueRuns: when the SAME event tours MULTIPLE venues with DIFFERENT date ranges (exhibition, collab café tour, etc.), list each venue separately. Example: Tokyo venue Mar 14–29, Osaka venue Apr 25–May 10 → two entries. "date"/"endDate" at top level = overall first/last date. Set venueRuns=null for single-venue events or when venues share the same dates.
 
 CRITICAL — multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "Aug 6–16"), set date=FIRST night and endDate=LAST night.
 CRITICAL — endTime: extract from patterns like "7:30 PM – 10:10 PM" (→ 22:10) or JSON-LD endDate.
@@ -1282,7 +1306,37 @@ export async function POST(req: NextRequest) {
     category: (aiResult as Partial<TicketData>).category ?? null,
     // country: domain/TLD detection first; AI-extracted country used as fallback
     country: detectCountry(url) ?? ((aiResult as Partial<TicketData> & { country?: string | null }).country ?? null),
+    // venueRuns: populated below after validation
+    venueRuns: null,
   };
+
+  // --- Venue runs: multi-venue tour detection ---
+  // Validate and label AI-extracted venue runs; append tour schedule to description.
+  type RawVenueRun = { venue?: string; location?: string | null; date?: string; endDate?: string };
+  const aiVenueRuns = ((aiResult as Partial<TicketData> & { venueRuns?: RawVenueRun[] | null }).venueRuns ?? null);
+  if (Array.isArray(aiVenueRuns) && aiVenueRuns.length >= 2) {
+    const valid: VenueRun[] = aiVenueRuns
+      .filter((r) =>
+        !!(r.venue && r.date && r.endDate && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate)))
+      .map(r => ({
+        venue: r.venue,
+        location: r.location ?? null,
+        date: r.date,
+        endDate: r.endDate,
+        label: buildVenueRunLabel(r.venue, r.date, r.endDate),
+      }));
+    // Only keep if we have 2+ runs with genuinely different start dates
+    const uniqueStarts = new Set(valid.map(r => r.date));
+    if (valid.length >= 2 && uniqueStarts.size >= 2) {
+      ticket.venueRuns = valid.sort((a, b) => a.date.localeCompare(b.date));
+      // Append a tour schedule summary to the description so every created event has full context
+      const scheduleLines = ticket.venueRuns.map(r => `  【${r.venue}】${r.date}〜${r.endDate}`).join("\n");
+      const scheduleNote = `📍 Tour Schedule:\n${scheduleLines}`;
+      ticket.description = ticket.description
+        ? `${ticket.description}\n\n${scheduleNote}`
+        : scheduleNote;
+    }
+  }
 
   // Post-build sanitization: remove any sale-window dates that equal the concert date.
   // The AI occasionally outputs the performance date as saleFirstDate — this is always wrong.

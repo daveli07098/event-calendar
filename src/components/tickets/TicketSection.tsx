@@ -25,6 +25,14 @@ interface EventSlot {
   label: string;
 }
 
+interface VenueRun {
+  venue: string;
+  location: string | null;
+  date: string;
+  endDate: string;
+  label: string;
+}
+
 interface ScrapedTicket {
   title: string;
   date: string | null;       // ISO string or natural language
@@ -48,6 +56,7 @@ interface ScrapedTicket {
   category?: string | null;
   country?: string | null;
   slots?: EventSlot[];
+  venueRuns?: VenueRun[] | null;
   duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null; similarityScore: number }>;
 }
 
@@ -166,6 +175,9 @@ export function TicketSection() {
   // Multi-slot picker
   const [slots, setSlots] = useState<EventSlot[]>([]);
   const [selectedSlots, setSelectedSlots] = useState<Set<number>>(new Set());
+  // Multi-venue tour picker
+  const [venueRuns, setVenueRuns] = useState<VenueRun[]>([]);
+  const [selectedVenueRuns, setSelectedVenueRuns] = useState<Set<number>>(new Set());
   const [calendarOptions, setCalendarOptions] = useState<{ eventReminders: import('@/app/api/tickets/calendars/route').TicketCalendarOption[]; saleTicket: import('@/app/api/tickets/calendars/route').TicketCalendarOption[] } | null>(null);
   const [selectedEventCalId, setSelectedEventCalId] = useState<string | null>(null);
   const [selectedSaleCalId, setSelectedSaleCalId] = useState<string | null>(null);
@@ -264,6 +276,10 @@ export function TicketSection() {
       const dataSlots: EventSlot[] = data.slots ?? [];
       setSlots(dataSlots);
       setSelectedSlots(new Set(dataSlots.map((_, i) => i)));
+      // Venue run picker — pre-select all runs
+      const dataRuns: VenueRun[] = data.venueRuns ?? [];
+      setVenueRuns(dataRuns);
+      setSelectedVenueRuns(new Set(dataRuns.map((_, i) => i)));
 
       // Fetch available calendars to offer picker if multiple options exist
       fetch("/api/tickets/calendars")
@@ -398,15 +414,17 @@ export function TicketSection() {
     setStatus("adding");
 
     const baseTitle = editTitle.trim() || ticket.title;
-    const baseVenue = editVenue.trim() || ticket.venue;
 
     // Helper: build end date/time (defaults to start + 3 h) and call add API.
     // omitSales=true strips sale-window fields so only the first slot creates sale-ticket events.
-    const addOneSlot = async (date: string | null, time: string | null, endDate: string | null, endTime: string | null, omitSales = false) => {
-      const resolvedDate = (date ?? editDate.trim()) || ticket.date;
+    // venueRunOverride: when adding multi-venue tour runs, supplies per-run venue + dates.
+    const addOneSlot = async (date: string | null, time: string | null, endDate: string | null, endTime: string | null, omitSales = false, venueRunOverride?: VenueRun) => {
+      const resolvedDate = (venueRunOverride?.date ?? date ?? editDate.trim()) || ticket.date;
       const resolvedTime = (time ?? editTime.trim()) || ticket.time;
-      let resolvedEndDate = (endDate ?? editEndDate.trim()) || null;
+      let resolvedEndDate = (venueRunOverride?.endDate ?? endDate ?? editEndDate.trim()) || null;
       let resolvedEndTime = (endTime ?? editEndTime.trim()) || null;
+      const resolvedVenue = venueRunOverride?.venue ?? (editVenue.trim() || ticket.venue);
+      const resolvedLocation = venueRunOverride?.location ?? ticket.location;
       if (!resolvedEndDate && !resolvedEndTime && resolvedDate && resolvedTime) {
         const [h, m] = resolvedTime.split(":").map(Number);
         const totalMins = h * 60 + m + 3 * 60;
@@ -424,8 +442,8 @@ export function TicketSection() {
       }
       const resolvedCategory = editCategory || ticket.category || null;
       const ticketPayload = omitSales
-        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue, category: resolvedCategory, saleDates: null, saleDate: null, saleFirstDate: null }
-        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: baseVenue, category: resolvedCategory };
+        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: resolvedVenue, location: resolvedLocation, category: resolvedCategory, saleDates: null, saleDate: null, saleFirstDate: null }
+        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: resolvedVenue, location: resolvedLocation, category: resolvedCategory };
       return fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -440,8 +458,26 @@ export function TicketSection() {
 
     try {
       const slotsToAdd = slots.length > 1 ? slots.filter((_, i) => selectedSlots.has(i)) : null;
+      const runsToAdd = venueRuns.length > 1 ? venueRuns.filter((_, i) => selectedVenueRuns.has(i)) : null;
 
-      if (slotsToAdd && slotsToAdd.length > 0) {
+      if (runsToAdd && runsToAdd.length > 0) {
+        // Multi-venue tour: one event per selected venue run.
+        // Sale-ticket events are created only on the FIRST run to avoid duplication.
+        let calName = "event-reminders";
+        for (const [i, run] of runsToAdd.entries()) {
+          const res = await addOneSlot(run.date, ticket.time, run.endDate, ticket.endTime, i > 0, run);
+          const data = await res.json();
+          if (!res.ok) {
+            toast.error(data.error ?? "Failed to add event");
+            setStatus("scraped");
+            return;
+          }
+          calName = data.calendarName ?? calName;
+        }
+        setAddedCalendarName(calName);
+        setStatus("done");
+        toast.success(`${runsToAdd.length} venue run${runsToAdd.length > 1 ? "s" : ""} added to "${calName}"!`);
+      } else if (slotsToAdd && slotsToAdd.length > 0) {
         // Multi-slot: one performance event per slot.
         // Sale-ticket events (presale, public sale, etc.) are created only on the FIRST slot
         // — they apply to all performance dates equally and should not be duplicated.
@@ -530,6 +566,8 @@ export function TicketSection() {
     setEditCategory("");
     setSlots([]);
     setSelectedSlots(new Set());
+    setVenueRuns([]);
+    setSelectedVenueRuns(new Set());
     setCalendarOptions(null);
     setSelectedEventCalId(null);
     setSelectedSaleCalId(null);
@@ -1244,6 +1282,37 @@ export function TicketSection() {
                 </div>
               )}
 
+              {/* Venue run picker — shown when scraper detected a multi-venue touring event */}
+              {venueRuns.length > 1 && (
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1.5">
+                    Venue Runs ({selectedVenueRuns.size}/{venueRuns.length} selected)
+                  </label>
+                  <div className="space-y-1.5">
+                    {venueRuns.map((run, i) => (
+                      <label
+                        key={i}
+                        className={`flex items-center gap-2.5 cursor-pointer rounded-md border px-3 py-2 text-sm transition-colors ${
+                          selectedVenueRuns.has(i) ? "border-primary/50 bg-primary/5" : "border-border hover:bg-muted/40"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={selectedVenueRuns.has(i)}
+                          onCheckedChange={(checked) =>
+                            setSelectedVenueRuns((prev) => {
+                              const next = new Set(prev);
+                              checked ? next.add(i) : next.delete(i);
+                              return next;
+                            })
+                          }
+                        />
+                        <span>{run.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Editable fields */}
               <div className="space-y-2.5">
                 <div>
@@ -1255,7 +1324,7 @@ export function TicketSection() {
                     disabled={status === "adding"}
                   />
                 </div>
-                <div className={`grid grid-cols-2 gap-2 ${slots.length > 1 ? "hidden" : ""}`}>
+                <div className={`grid grid-cols-2 gap-2 ${slots.length > 1 || venueRuns.length > 1 ? "hidden" : ""}`}>
                   <div>
                     <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Start Date</label>
                     <Input
@@ -1293,7 +1362,7 @@ export function TicketSection() {
                     />
                   </div>
                 </div>
-                <div>
+                <div className={venueRuns.length > 1 ? "hidden" : ""}>
                   <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Venue</label>
                   <Input
                     value={editVenue}
@@ -1449,10 +1518,12 @@ export function TicketSection() {
                     <Button
                       onClick={handleAddToCalendar}
                       className="flex-1"
-                      disabled={slots.length > 1 && selectedSlots.size === 0}
+                      disabled={(slots.length > 1 && selectedSlots.size === 0) || (venueRuns.length > 1 && selectedVenueRuns.size === 0)}
                     >
                       <CalendarPlus className="size-4 mr-2" />
-                      {slots.length > 1
+                      {venueRuns.length > 1
+                        ? `Add ${selectedVenueRuns.size} venue run${selectedVenueRuns.size !== 1 ? "s" : ""}`
+                        : slots.length > 1
                         ? `Add ${selectedSlots.size} slot${selectedSlots.size !== 1 ? "s" : ""}`
                         : "Add to event-reminders"}
                     </Button>

@@ -1,5 +1,6 @@
 ## [2026-05-17] — Session: Country detection + category sync
 ### Added
+- feat(tickets): multi-venue tour detection (`venueRuns`) — AI extracts per-venue date ranges for touring events; TicketSection shows venue run picker (analogous to slot picker); each selected run added as a separate event; tour schedule note appended to description (31453fe)
 - feat(category): add `crane` (🕹️ Crane Game) category — arcade UFO catcher / prize merchandise collaborations (5730356)
 - feat(category): add `kuji` (🎲 Ichiban Kuji / 一番くじ) category — lottery-style merchandise raffle events; added to types, classify prompt, scrape AI prompt, and diff label map (34e075f)
 - feat(tickets): `src/lib/detect-country.ts` — domain map + TLD → country, AI fallback for unknown domains (3f4fb8d)
