@@ -6,6 +6,7 @@ export const EVENT_CATEGORIES = [
   "festival",   // cultural festivals, fairs, parades
   "anime",      // anime/manga/IP events, character pop-up stores
   "popup",      // pop-up stores, limited retail, brand activations
+  "kuji",       // ichiban kuji / one kuji lottery merchandise events
   "comedy",     // stand-up comedy
   "film",       // screenings, premieres
   "food",       // food festivals, wine tasting
@@ -23,6 +24,7 @@ export const CATEGORY_LABELS: Record<EventCategory, string> = {
   festival:   "🎉 Festival",
   anime:      "🌸 Anime / IP",
   popup:      "🏪 Pop-up / Café",
+  kuji:       "🎲 Ichiban Kuji",
   comedy:     "😂 Comedy",
   film:       "🎬 Film",
   food:       "🍜 Food",

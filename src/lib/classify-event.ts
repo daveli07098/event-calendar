@@ -9,6 +9,7 @@ const CATEGORY_PROMPT_LINES = `  concert    — live music, band show, K-pop con
   festival   — cultural festival, fair, carnival, parade, lantern festival
   anime      — anime/manga/IP event, character pop-up, cosplay event, doujin market
   popup      — brand pop-up store, limited-edition retail activation, product launch
+  kuji       — ichiban kuji (一番くじ), one kuji, lottery-style merchandise raffle event
   comedy     — stand-up comedy show, improv night
   film       — film screening, movie premiere, film festival
   food       — food festival, wine tasting, dining event, craft beer event

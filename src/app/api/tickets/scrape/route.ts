@@ -770,7 +770,7 @@ CRITICAL — extract ALL sale windows into saleDates (one entry per distinct dat
 CRITICAL — multi-night concerts: if multiple performance dates are listed (e.g. "5月16日及17日", "May 16 & 17", "Aug 6–16"), set date=FIRST night and endDate=LAST night.
 CRITICAL — endTime: extract from patterns like "7:30 PM – 10:10 PM" (→ 22:10) or JSON-LD endDate.
 
-CRITICAL — category: choose the single best fit from: concert (live music/bands), exhibition (art/gallery/museum), theatre (play/musical/opera/dance), sports (matches/tournaments), festival (cultural fair/parade), anime (anime/manga/IP/character merch), popup (pop-up store/limited retail), comedy (stand-up), film (screening/premiere), food (food fair/dining event), ticket (ticket sale / presale reminder with no physical performance on that date), other.
+CRITICAL — category: choose the single best fit from: concert (live music/bands), exhibition (art/gallery/museum), theatre (play/musical/opera/dance), sports (matches/tournaments), festival (cultural fair/parade), anime (anime/manga/IP/character merch), popup (pop-up store/limited retail), kuji (ichiban kuji/一番くじ/one-kuji lottery merchandise raffle), comedy (stand-up), film (screening/premiere), food (food fair/dining event), ticket (ticket sale / presale reminder with no physical performance on that date), other.
 
 URL: ${url}
 ${text}`.trim();

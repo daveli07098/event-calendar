@@ -264,7 +264,7 @@ export async function POST(req: NextRequest) {
     const CATEGORY_LABELS: Record<string, string> = {
       concert: "🎵 Concert", exhibition: "🗻 Exhibition", theatre: "🎭 Theatre / Musical",
       sports: "⚽ Sports", festival: "🎉 Festival", anime: "🌸 Anime / IP",
-      popup: "🏪 Pop-up / Café", comedy: "🎭 Comedy", film: "🎥 Film",
+      popup: "🏪 Pop-up / Café", kuji: "🎲 Ichiban Kuji", comedy: "😂 Comedy", film: "🎬 Film",
       food: "🍽 Food", ticket: "🎫 Ticket Sale", other: "📌 Other",
     };
     const oldLabel = mainEvent.category ? (CATEGORY_LABELS[mainEvent.category] ?? mainEvent.category) : null;

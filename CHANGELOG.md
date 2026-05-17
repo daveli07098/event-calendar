@@ -1,6 +1,5 @@
 ## [2026-05-17] — Session: Country detection + category sync
-### Added
-- feat(tickets): `src/lib/detect-country.ts` — domain map + TLD → country, AI fallback for unknown domains (3f4fb8d)
+### Added- feat(category): add `kuji` (🎲 Ichiban Kuji / 一番くじ) category — lottery-style merchandise raffle events; added to types, classify prompt, scrape AI prompt, and diff label map (34e075f)- feat(tickets): `src/lib/detect-country.ts` — domain map + TLD → country, AI fallback for unknown domains (3f4fb8d)
 - feat(tickets): country appended to `location` field on scan & sync (e.g. `東武動物公園, 埼玉県, Japan`) (3f4fb8d)
 - feat(tickets): category change now surfaces in Sync diff preview and is applied on confirm (3f4fb8d)
 - feat(tickets): AI prompt extended with `country` field as fallback when domain detection misses (3f4fb8d)
