@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { enrichLocationWithCountry } from "@/lib/detect-country";
 
 const TICKET_CALENDAR_NAME = "event-reminders";
 const TICKET_CALENDAR_COLOR = "#f97316"; // warm orange — distinct from default calendars
@@ -8,34 +9,7 @@ const TICKET_CALENDAR_COLOR = "#f97316"; // warm orange — distinct from defaul
 const SALE_CALENDAR_NAME = "sale-ticket";
 const SALE_CALENDAR_COLOR = "#8b5cf6"; // purple — alerts for when sales open
 
-// HK ticketing domains — same list as the scraper
-const HK_DOMAINS = [
-  "timable.com",
-  "cityline.com",
-  "hkticketing.com",
-  "ticketmaster.com.hk",
-  "urbtix.hk",
-  "ticketflap.com",
-  "klook.com",
-  "kktix.com",
-];
-
-function isHkSourceUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return HK_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`));
-  } catch {
-    return false;
-  }
-}
-
-function enrichLocationWithHK(rawLocation: string | null, sourceUrl: string): string | null {
-  if (!isHkSourceUrl(sourceUrl)) return rawLocation || null;
-  if (!rawLocation) return "Hong Kong";
-  const lower = rawLocation.toLowerCase();
-  if (lower.includes("hong kong") || rawLocation.includes("香港")) return rawLocation;
-  return `${rawLocation}, Hong Kong`;
-}
+// HK ticketing domains and country enrichment are handled by src/lib/detect-country.ts
 
 interface TicketData {
   title: string;
@@ -56,6 +30,7 @@ interface TicketData {
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceTimezone?: string | null;  // ±HH:MM offset from scrape route (e.g. "+08:00" for HKT)
   category?: string | null;        // AI-detected event category
+  country?: string | null;         // detected country (domain-based + AI fallback)
 }
 
 /** Parse a single date+time into a UTC Date.
@@ -227,7 +202,7 @@ export async function POST(req: NextRequest) {
     description,
     startTime: start,
     endTime: end,
-    location: enrichLocationWithHK(rawLocation, ticket.sourceUrl),
+    location: enrichLocationWithCountry(rawLocation, ticket.sourceUrl, ticket.country),
   };
 
   const event = await prisma.event.create({

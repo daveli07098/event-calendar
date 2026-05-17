@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { enrichLocationWithCountry } from "@/lib/detect-country";
 
 interface ScrapedTicket {
   title: string;
@@ -15,6 +16,8 @@ interface ScrapedTicket {
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceUrl: string;
+  category?: string | null;
+  country?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +138,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (apply.has("venue") || apply.has("location") || apply.has("ticketPrices") || apply.has("ticketPlatforms")) {
-    mainUpdate.location = [ticket.venue, ticket.location].filter(Boolean).join(", ") || existingEvent.location;
+    const rawLocation = [ticket.venue, ticket.location].filter(Boolean).join(", ") || null;
+    mainUpdate.location = enrichLocationWithCountry(rawLocation, ticket.sourceUrl, ticket.country) ?? existingEvent.location;
+  }
+
+  if (apply.has("category") && ticket.category) {
+    mainUpdate.category = ticket.category;
   }
 
   const updatedEvent = await prisma.event.update({

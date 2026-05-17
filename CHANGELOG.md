@@ -1,3 +1,13 @@
+## [2026-05-17] — Session: Country detection + category sync
+### Added
+- feat(tickets): `src/lib/detect-country.ts` — domain map + TLD → country, AI fallback for unknown domains (3f4fb8d)
+- feat(tickets): country appended to `location` field on scan & sync (e.g. `東武動物公園, 埼玉県, Japan`) (3f4fb8d)
+- feat(tickets): category change now surfaces in Sync diff preview and is applied on confirm (3f4fb8d)
+- feat(tickets): AI prompt extended with `country` field as fallback when domain detection misses (3f4fb8d)
+- docs: `docs/country-category-detection.md` explaining detection priority, flow, and how to extend (3f4fb8d)
+### Changed
+- fix(tickets): `add/route.ts` — replaced HK-only `enrichLocationWithHK` with shared `enrichLocationWithCountry` covering JP, TW, KR, SG, UK, AU and more (3f4fb8d)
+
 ## [2026-05-15] — Session: timezone bug fix + category in scan preview
 ### Added
 - feat(tickets): show and edit AI-detected category in scan preview — AI-detected category is pre-filled from the scrape result and user can change it before adding; the chosen value is passed through to the add route so events are saved with the correct category (cc9f7da)

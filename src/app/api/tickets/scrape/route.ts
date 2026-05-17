@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { classifySingleEvent } from "@/lib/classify-event";
+import { detectCountry } from "@/lib/detect-country";
 
 // ---------------------------------------------------------------------------
 // AI usage rate limiter — DB-backed, persists across hot reloads and restarts
@@ -116,6 +117,7 @@ interface TicketData {
   sourceTimezone: string | null;    // IANA or ±HH:MM offset extracted from source (e.g. "+08:00" for HKT)
   slots: EventSlot[];               // grouped performance timeslots (empty when ≤1)
   category: string | null;          // AI-detected category: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other
+  country: string | null;           // detected country: domain-based primary, AI fallback
 }
 
 /** A single ticket-sale window with a date, optional time, and a human label. */
@@ -748,7 +750,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other"}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other"}
 
 CRITICAL — performance date vs sale dates:
   • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
@@ -1278,6 +1280,8 @@ export async function POST(req: NextRequest) {
     slots: meta.slots,
     // category: AI-detected from main prompt; fall back to the shared classify logic if missing
     category: (aiResult as Partial<TicketData>).category ?? null,
+    // country: domain/TLD detection first; AI-extracted country used as fallback
+    country: detectCountry(url) ?? ((aiResult as Partial<TicketData> & { country?: string | null }).country ?? null),
   };
 
   // Post-build sanitization: remove any sale-window dates that equal the concert date.

@@ -46,6 +46,7 @@ interface ScrapedTicket {
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   category?: string | null;
+  country?: string | null;
   slots?: EventSlot[];
   duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null; similarityScore: number }>;
 }

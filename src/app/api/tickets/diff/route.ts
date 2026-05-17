@@ -18,6 +18,7 @@ interface ScrapedTicket {
   saleFirstDate: string | null;
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceUrl: string;
+  category?: string | null;
 }
 
 export interface FieldChange {
@@ -256,6 +257,19 @@ export async function POST(req: NextRequest) {
   // --- Venue ---
   if (ticket.venue && stored.venue && stored.venue !== ticket.venue.trim()) {
     changes.push({ field: "venue", label: "Venue 場地", oldValue: stored.venue, newValue: ticket.venue });
+  }
+
+  // --- Category ---
+  if (ticket.category && ticket.category !== mainEvent.category) {
+    const CATEGORY_LABELS: Record<string, string> = {
+      concert: "🎵 Concert", exhibition: "🗻 Exhibition", theatre: "🎭 Theatre / Musical",
+      sports: "⚽ Sports", festival: "🎉 Festival", anime: "🌸 Anime / IP",
+      popup: "🏪 Pop-up / Café", comedy: "🎭 Comedy", film: "🎥 Film",
+      food: "🍽 Food", ticket: "🎫 Ticket Sale", other: "📌 Other",
+    };
+    const oldLabel = mainEvent.category ? (CATEGORY_LABELS[mainEvent.category] ?? mainEvent.category) : null;
+    const newLabel = CATEGORY_LABELS[ticket.category] ?? ticket.category;
+    changes.push({ field: "category", label: "Category 分類", oldValue: oldLabel, newValue: newLabel });
   }
 
   const storedSaleWindows = allSaleEvents
