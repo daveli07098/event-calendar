@@ -152,7 +152,7 @@ function extractTextFromHtml(html: string): string {
   // Prioritise the most event-relevant content by surfacing sentences that
   // contain keywords (prices, sale dates, venue) right at the start of the
   // truncated text so they're never cut off by the 8000-char limit.
-  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座/i;
+  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座|開催場所|開催期間|会場|開催日|開催地/i;
   const sentences = text.split(/(?<=[.!?。！？\n])\s*/);
   const relevant = sentences.filter(s => keywords.test(s));
   const rest = sentences.filter(s => !keywords.test(s));
@@ -230,6 +230,80 @@ function buildVenueRunLabel(venue: string, date: string, endDate: string): strin
     return `${months[m - 1]} ${day}`;
   };
   return `${venue}: ${fmt(date)}–${fmt(endDate)}`;
+}
+
+/**
+ * Extracts multi-venue tour runs directly from raw HTML using the Japanese
+ * 【city/region label】 bracket pattern common on event info pages:
+ *   開催場所: 【東京】アニメイト池袋本店 / 【大阪】アニメイト大阪日本橋別館
+ *   開催期間: 【東京】2026年6月26日〜7月27日 / 【大阪】2026年8月28日〜9月28日
+ *
+ * Returns null if the pattern is absent or only a single venue is found.
+ * This is the primary (non-AI) source for venueRuns; AI result is the fallback.
+ */
+function extractVenueRunsFromHtml(html: string): VenueRun[] | null {
+  // Strip HTML tags from a cell, replacing <br> with newline
+  const plainCell = (s: string) =>
+    s.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, " ")
+     .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/&lt;/g, "<")
+     .replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+
+  // Parse 【label】content pairs from plain text (may be separated by newline or space)
+  const parseBracketed = (text: string): Map<string, string> => {
+    const map = new Map<string, string>();
+    for (const m of text.matchAll(/【([^】]+)】\s*([^【\n]+)/g)) {
+      map.set(m[1].trim(), m[2].trim());
+    }
+    return map;
+  };
+
+  // Parse Japanese date range like "2026年6月26日〜7月27日" or "2026年6月26日〜2026年7月27日"
+  const parseJpRange = (text: string): { date: string; endDate: string } | null => {
+    const pad = (n: string) => n.padStart(2, "0");
+    // YYYY年M月D日〜YYYY年M月D日
+    let m = /(\d{4})年(\d{1,2})月(\d{1,2})日[〜～~](\d{4})年(\d{1,2})月(\d{1,2})日/.exec(text);
+    if (m) return { date: `${m[1]}-${pad(m[2])}-${pad(m[3])}`, endDate: `${m[4]}-${pad(m[5])}-${pad(m[6])}` };
+    // YYYY年M月D日〜M月D日 (endDate inherits year from start)
+    m = /(\d{4})年(\d{1,2})月(\d{1,2})日[〜～~](\d{1,2})月(\d{1,2})日/.exec(text);
+    if (m) return { date: `${m[1]}-${pad(m[2])}-${pad(m[3])}`, endDate: `${m[1]}-${pad(m[4])}-${pad(m[5])}` };
+    return null;
+  };
+
+  // Extract all table rows as {label, value} pairs
+  const rows: Array<{ label: string; value: string }> = [];
+  for (const rowM of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const cells = [...rowM[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(c => plainCell(c[1]));
+    if (cells.length >= 2) rows.push({ label: cells[0], value: cells[1] });
+  }
+
+  // Find 開催場所 (venue) and 開催期間 (period) rows
+  const venueRow = rows.find(r => /開催場所|会場|開催会場/.test(r.label));
+  const periodRow = rows.find(r => /開催期間|期間|開催日/.test(r.label));
+  if (!venueRow || !periodRow) return null;
+
+  // Both must have ≥2 【label】content pairs (single-venue events only have one)
+  const venues = parseBracketed(venueRow.value);
+  const periods = parseBracketed(periodRow.value);
+  if (venues.size < 2 || periods.size < 2) return null;
+
+  // Correlate by matching label key (e.g. "東京", "大阪")
+  const runs: VenueRun[] = [];
+  for (const [label, venue] of venues) {
+    // Try exact match first, then partial match
+    const periodText = periods.get(label) ?? [...periods.entries()].find(([k]) => k.includes(label) || label.includes(k))?.[1];
+    if (!periodText) continue;
+    const range = parseJpRange(periodText);
+    if (!range) continue;
+    runs.push({
+      venue,
+      location: null,
+      date: range.date,
+      endDate: range.endDate,
+      label: buildVenueRunLabel(venue, range.date, range.endDate),
+    });
+  }
+
+  return runs.length >= 2 ? runs.sort((a, b) => a.date.localeCompare(b.date)) : null;
 }
 
 function groupIntoSlots(concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>): EventSlot[] {
@@ -1100,6 +1174,9 @@ export async function POST(req: NextRequest) {
   // Extract meta fallback (always run — used if AI not available / as supplement)
   const meta = extractMeta(html, url);
 
+  // HTML-based venue run extraction (non-AI, reliable for 【city】 bracket pattern)
+  const htmlVenueRuns = extractVenueRunsFromHtml(html);
+
   // Determine which AI to use
   const geminiKey = process.env.GEMINI_API_KEY;
   const githubToken = process.env.GITHUB_TOKEN;
@@ -1311,10 +1388,14 @@ export async function POST(req: NextRequest) {
   };
 
   // --- Venue runs: multi-venue tour detection ---
-  // Validate and label AI-extracted venue runs; append tour schedule to description.
+  // Priority: HTML-extracted (reliable, regex-based) > AI-extracted (may miss or hallucinate)
+  // Append tour schedule note to description so each separate event has the full context.
   type RawVenueRun = { venue?: string; location?: string | null; date?: string; endDate?: string };
   const aiVenueRuns = ((aiResult as Partial<TicketData> & { venueRuns?: RawVenueRun[] | null }).venueRuns ?? null);
-  if (Array.isArray(aiVenueRuns) && aiVenueRuns.length >= 2) {
+
+  // Use HTML-extracted runs if available; otherwise validate and use AI-extracted runs
+  let resolvedRuns: VenueRun[] | null = htmlVenueRuns;
+  if (!resolvedRuns && Array.isArray(aiVenueRuns) && aiVenueRuns.length >= 2) {
     const valid: VenueRun[] = aiVenueRuns
       .filter((r) =>
         !!(r.venue && r.date && r.endDate && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && /^\d{4}-\d{2}-\d{2}$/.test(r.endDate)))
@@ -1328,14 +1409,18 @@ export async function POST(req: NextRequest) {
     // Only keep if we have 2+ runs with genuinely different start dates
     const uniqueStarts = new Set(valid.map(r => r.date));
     if (valid.length >= 2 && uniqueStarts.size >= 2) {
-      ticket.venueRuns = valid.sort((a, b) => a.date.localeCompare(b.date));
-      // Append a tour schedule summary to the description so every created event has full context
-      const scheduleLines = ticket.venueRuns.map(r => `  【${r.venue}】${r.date}〜${r.endDate}`).join("\n");
-      const scheduleNote = `📍 Tour Schedule:\n${scheduleLines}`;
-      ticket.description = ticket.description
-        ? `${ticket.description}\n\n${scheduleNote}`
-        : scheduleNote;
+      resolvedRuns = valid.sort((a, b) => a.date.localeCompare(b.date));
     }
+  }
+
+  if (resolvedRuns) {
+    ticket.venueRuns = resolvedRuns;
+    // Append a tour schedule summary to the description so every created event has the full context
+    const scheduleLines = resolvedRuns.map(r => `  【${r.venue}】${r.date}〜${r.endDate}`).join("\n");
+    const scheduleNote = `📍 Tour Schedule:\n${scheduleLines}`;
+    ticket.description = ticket.description
+      ? `${ticket.description}\n\n${scheduleNote}`
+      : scheduleNote;
   }
 
   // Post-build sanitization: remove any sale-window dates that equal the concert date.

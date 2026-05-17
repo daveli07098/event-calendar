@@ -1,5 +1,6 @@
 ## [2026-05-17] — Session: Country detection + category sync
 ### Added
+- feat(tickets): HTML-based venue run extractor for Japanese 【bracket】 pattern (HTML primary, AI fallback) (1bd4fd7)
 - feat(tickets): multi-venue tour detection (`venueRuns`) — AI extracts per-venue date ranges for touring events; TicketSection shows venue run picker (analogous to slot picker); each selected run added as a separate event; tour schedule note appended to description (31453fe)
 - feat(category): add `crane` (🕹️ Crane Game) category — arcade UFO catcher / prize merchandise collaborations (5730356)
 - feat(category): add `kuji` (🎲 Ichiban Kuji / 一番くじ) category — lottery-style merchandise raffle events; added to types, classify prompt, scrape AI prompt, and diff label map (34e075f)
