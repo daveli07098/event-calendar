@@ -3,6 +3,8 @@
 - fix(tickets): `extractDateFromText` now detects Japanese date ranges (`2026年7月17日〜9月6日`) and returns `endDate`; single-venue exhibitions no longer show empty end date (9c77793)
 - fix(tickets): `extractDateFromText` returns `{ date, endDate, time }` — `textDate.endDate` added as 3rd fallback in ticket build (after AI + JSON-LD meta) (9c77793)
 - fix(tickets): `parseJpDateRange` promoted to module level; shared between `extractDateFromText` and `extractVenueRunsFromHtml` (9c77793)
+### Maintenance
+- chore(agents): Obsidian vault routing added to `.github/copilot-instructions.md`, `AGENTS.md`, `CLAUDE.md` — vault: `/Users/daveli/git/obsidian-ai-collab-vault` (8e0dec3)
 
 ## [2026-05-17] — Session: Country detection + category sync
 ### Added
