@@ -1,3 +1,9 @@
+## [2026-05-18] — Session: venueRuns reliability + endDate detection
+### Fixed
+- fix(tickets): `extractDateFromText` now detects Japanese date ranges (`2026年7月17日〜9月6日`) and returns `endDate`; single-venue exhibitions no longer show empty end date (9c77793)
+- fix(tickets): `extractDateFromText` returns `{ date, endDate, time }` — `textDate.endDate` added as 3rd fallback in ticket build (after AI + JSON-LD meta) (9c77793)
+- fix(tickets): `parseJpDateRange` promoted to module level; shared between `extractDateFromText` and `extractVenueRunsFromHtml` (9c77793)
+
 ## [2026-05-17] — Session: Country detection + category sync
 ### Added
 - feat(tickets): HTML-based venue run extractor for Japanese 【bracket】 pattern (HTML primary, AI fallback) (1bd4fd7)

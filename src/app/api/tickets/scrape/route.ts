@@ -233,6 +233,22 @@ function buildVenueRunLabel(venue: string, date: string, endDate: string): strin
 }
 
 /**
+ * Parses a Japanese date range string like "2026年7月17日〜9月6日" or
+ * "2026年6月26日〜2026年7月27日" into a { date, endDate } object.
+ * Returns null if no range pattern is found.
+ */
+function parseJpDateRange(text: string): { date: string; endDate: string } | null {
+  const pad = (n: string) => n.padStart(2, "0");
+  // YYYY年M月D日〜YYYY年M月D日 (both years explicit)
+  let m = /(\d{4})年(\d{1,2})月(\d{1,2})日[〜～~](\d{4})年(\d{1,2})月(\d{1,2})日/.exec(text);
+  if (m) return { date: `${m[1]}-${pad(m[2])}-${pad(m[3])}`, endDate: `${m[4]}-${pad(m[5])}-${pad(m[6])}` };
+  // YYYY年M月D日〜M月D日 (endDate inherits year from start)
+  m = /(\d{4})年(\d{1,2})月(\d{1,2})日[〜～~](\d{1,2})月(\d{1,2})日/.exec(text);
+  if (m) return { date: `${m[1]}-${pad(m[2])}-${pad(m[3])}`, endDate: `${m[1]}-${pad(m[4])}-${pad(m[5])}` };
+  return null;
+}
+
+/**
  * Extracts multi-venue tour runs directly from raw HTML using the Japanese
  * 【city/region label】 bracket pattern common on event info pages:
  *   開催場所: 【東京】アニメイト池袋本店 / 【大阪】アニメイト大阪日本橋別館
@@ -257,17 +273,8 @@ function extractVenueRunsFromHtml(html: string): VenueRun[] | null {
     return map;
   };
 
-  // Parse Japanese date range like "2026年6月26日〜7月27日" or "2026年6月26日〜2026年7月27日"
-  const parseJpRange = (text: string): { date: string; endDate: string } | null => {
-    const pad = (n: string) => n.padStart(2, "0");
-    // YYYY年M月D日〜YYYY年M月D日
-    let m = /(\d{4})年(\d{1,2})月(\d{1,2})日[〜～~](\d{4})年(\d{1,2})月(\d{1,2})日/.exec(text);
-    if (m) return { date: `${m[1]}-${pad(m[2])}-${pad(m[3])}`, endDate: `${m[4]}-${pad(m[5])}-${pad(m[6])}` };
-    // YYYY年M月D日〜M月D日 (endDate inherits year from start)
-    m = /(\d{4})年(\d{1,2})月(\d{1,2})日[〜～~](\d{1,2})月(\d{1,2})日/.exec(text);
-    if (m) return { date: `${m[1]}-${pad(m[2])}-${pad(m[3])}`, endDate: `${m[1]}-${pad(m[4])}-${pad(m[5])}` };
-    return null;
-  };
+  // Parse Japanese date range like "2026年6月26日〜7月27日" — delegates to shared helper
+  const parseJpRange = parseJpDateRange;
 
   // Extract all table rows as {label, value} pairs
   const rows: Array<{ label: string; value: string }> = [];
@@ -987,8 +994,23 @@ async function callCopilot(text: string, url: string, githubToken: string): Prom
 // ---------------------------------------------------------------------------
 // Text-based date/time fallback — for sites with poor OG/Schema markup
 // ---------------------------------------------------------------------------
-function extractDateFromText(text: string): { date: string | null; time: string | null } {
-  // Chinese date patterns: 2026年5月9日, 2026年3月, etc.
+function extractDateFromText(text: string): { date: string | null; endDate: string | null; time: string | null } {
+  // Japanese date range first: 2026年7月17日〜9月6日 → start + end
+  const jpRange = parseJpDateRange(text);
+  if (jpRange) {
+    // Try to find a time nearby
+    const timeMatch = text.match(/(\d{1,2})[:：](\d{2})\s*(?:PM|AM|pm|am|下午|晚上)?/);
+    let time: string | null = null;
+    if (timeMatch) {
+      let h = Number(timeMatch[1]);
+      const min = timeMatch[2];
+      if (/PM|pm|下午|晚上/.test(text.slice(text.indexOf(timeMatch[0]) - 10, text.indexOf(timeMatch[0]) + 20)) && h < 12) h += 12;
+      time = `${String(h).padStart(2, "0")}:${min}`;
+    }
+    return { date: jpRange.date, endDate: jpRange.endDate, time };
+  }
+
+  // Chinese/Japanese single date: 2026年5月9日
   const cnDate = text.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
   if (cnDate) {
     const [, y, m, d] = cnDate;
@@ -1003,7 +1025,7 @@ function extractDateFromText(text: string): { date: string | null; time: string 
       if (/PM|pm|下午|晚上/.test(text.slice(text.indexOf(timeMatch[0]) - 10, text.indexOf(timeMatch[0]) + 20)) && h < 12) h += 12;
       time = `${String(h).padStart(2, "0")}:${min}`;
     }
-    return { date, time };
+    return { date, endDate: null, time };
   }
 
   // ISO / Western: May 9, 2026 / 9 May 2026 / 2026-05-09
@@ -1013,13 +1035,13 @@ function extractDateFromText(text: string): { date: string | null; time: string 
     const monthStr = full.replace(/\s.*/, "").toLowerCase().slice(0, 3);
     const monthMap: Record<string,string> = {jan:"01",feb:"02",mar:"03",apr:"04",may:"05",jun:"06",jul:"07",aug:"08",sep:"09",oct:"10",nov:"11",dec:"12"};
     const month = monthMap[monthStr] ?? "01";
-    return { date: `${year}-${month}-${day.padStart(2, "0")}`, time: null };
+    return { date: `${year}-${month}-${day.padStart(2, "0")}`, endDate: null, time: null };
   }
 
   const isoDate = text.match(/(202\d)-(\d{2})-(\d{2})/);
-  if (isoDate) return { date: isoDate[0], time: null };
+  if (isoDate) return { date: isoDate[0], endDate: null, time: null };
 
-  return { date: null, time: null };
+  return { date: null, endDate: null, time: null };
 }
 
 /**
@@ -1358,7 +1380,7 @@ export async function POST(req: NextRequest) {
       }
       return mt ?? ai ?? null;
     })(),
-    endDate: (aiResult as Partial<TicketData>).endDate ?? meta.endDate ?? null,
+    endDate: (aiResult as Partial<TicketData>).endDate ?? meta.endDate ?? textDate.endDate ?? null,
     endTime: (aiResult as Partial<TicketData>).endTime ?? meta.endTime ?? null,
     saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
     saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
