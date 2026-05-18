@@ -99,6 +99,7 @@ below — do not ask the user where to save, and do not require explicit vault p
 | WIP thinking, scratch, exploratory | `ai-workspace/drafts/<slug>.md` |
 | Bug fix — root cause, solution, prevention | `ai-workspace/fix/YYYY-MM-DD-<slug>.md` |
 | Feature implementation notes & decisions | `ai-workspace/implement/YYYY-MM-DD-<slug>.md` |
+| User-requested documentation | `ai-workspace/docs/YYYY-MM-DD-<slug>.md` |
 | Persistent facts about this project | `ai-workspace/memory/projects/event-calendar.md` |
 | Finished deliverables for human review | `review/inbox/YYYY-MM-DD-<slug>.md` |
 
