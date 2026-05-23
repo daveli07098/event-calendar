@@ -152,7 +152,7 @@ function extractTextFromHtml(html: string): string {
   // Prioritise the most event-relevant content by surfacing sentences that
   // contain keywords (prices, sale dates, venue) right at the start of the
   // truncated text so they're never cut off by the 8000-char limit.
-  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座|開催場所|開催期間|会場|開催日|開催地/i;
+  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座|klook|accupass|開催場所|開催期間|会場|開催日|開催地/i;
   const sentences = text.split(/(?<=[.!?。！？\n])\s*/);
   const relevant = sentences.filter(s => keywords.test(s));
   const rest = sentences.filter(s => !keywords.test(s));
@@ -761,6 +761,61 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       const concertDate = schemaDate ?? (eventDate ? eventDate.split("T")[0] : null);
       // Exclude the concert date and the public sale date — neither is a presale
       if (candidate !== schemaSaleDate && candidate !== concertDate) schemaSaleFirstDate = candidate;
+    }
+  }
+
+  // Strategy D: Timable-style "{platform} YYYY年MM月DD日 HH:MM AM/PM ... 開始" pattern.
+  // Timable HK generates one vendor section per ticketing platform, each showing the sale-open
+  // date for that vendor. There is no JSON-LD for these, so we extract them directly from the
+  // stripped HTML text. This runs unconditionally and merges into schemaSaleDates.
+  {
+    const STRAT_D_PLATFORMS: Array<[RegExp, string]> = [
+      [/klook/i,                     "Klook"],
+      [/膠紙座/,                      "膠紙座"],
+      [/cityline/i,                  "Cityline"],
+      [/快達票|hk\s*ticketing/i,      "快達票 HK Ticketing"],
+      [/\bkktix\b/i,                 "KKTIX"],
+      [/\burbtix\b/i,                "URBTIX"],
+      [/ticketmaster/i,              "Ticketmaster"],
+      [/\bbookyay\b/i,               "BOOKYAY"],
+      [/\baccupass\b/i,              "Accupass"],
+    ];
+    const platformAlt = STRAT_D_PLATFORMS.map(([re]) => re.source).join("|");
+    // Strip tags once for this strategy
+    const strippedD = html
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&amp;/g, "&").replace(/&nbsp;/g, " ").replace(/\s{2,}/g, " ");
+    // Pattern: platform name … YYYY年MM月DD日 … (optional HH:MM AM/PM) … 開始
+    const stratDRe = new RegExp(
+      `(${platformAlt})[\\s\\S]{0,120}?(\\d{4})年(\\d{1,2})月(\\d{1,2})日[\\s\\S]{0,80}?開始`,
+      "gi"
+    );
+    for (const m of strippedD.matchAll(stratDRe)) {
+      const [fullMatch, platformRaw, y, mo, d] = m;
+      const dateStr = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      // Skip if this date is the concert date (already confirmed by JSON-LD or textSlots)
+      if (schemaDate && dateStr === schemaDate) continue;
+      if (schemaSaleDates.some((w) => w.date === dateStr)) continue;
+      // Extract time from the matched window
+      const timePart = fullMatch.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+      let timeStr: string | null = null;
+      if (timePart) {
+        let h = Number(timePart[1]);
+        if (/pm/i.test(timePart[3]!) && h < 12) h += 12;
+        if (/am/i.test(timePart[3]!) && h === 12) h = 0;
+        timeStr = `${String(h).padStart(2, "0")}:${timePart[2]}`;
+      }
+      // Resolve canonical platform name
+      let canonicalPlatform = (platformRaw ?? "").trim();
+      for (const [re, name] of STRAT_D_PLATFORMS) {
+        if (re.test(canonicalPlatform)) { canonicalPlatform = name; break; }
+      }
+      schemaSaleDates.push({ date: dateStr, time: timeStr, label: canonicalPlatform });
+    }
+    if (schemaSaleDates.length > 0) {
+      schemaSaleDates.sort((a, b) => a.date.localeCompare(b.date));
+      schemaSaleFirstDate ??= schemaSaleDates[0]!.date;
+      schemaSaleDate ??= schemaSaleDates[schemaSaleDates.length - 1]!.date;
     }
   }
 

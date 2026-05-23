@@ -1,8 +1,7 @@
 ## [2026-05-24] — Session: Timable HK date detection fix
 ### Fixed
 - fix(scrape): `extractTextSlots` now returns a single date-range slot (previously required ≥2), allowing the text-extracted concert date to take precedence over a wrong AI date on Timable HK pages; also improved AI prompt to clarify that vendor sections (Klook, 膠紙座 + "開始") are sale-open dates, not show dates ([2ace0cc])
-- fix(scrape): when text-slot extraction overrides the AI's event date, the AI's discarded date is rescued back as a `saleDates` entry (labelled with the first detected platform, e.g. "Klook") if it is earlier than the confirmed concert date ([d7896ef])
-
+- fix(scrape): when text-slot extraction overrides the AI's event date, the AI's discarded date is rescued back as a `saleDates` entry (labelled with the first detected platform, e.g. "Klook") if it is earlier than the confirmed concert date ([d7896ef])- fix(scrape): Strategy D — non-AI regex extraction of `{platform} YYYY年MM月DD日 … 開始` patterns from stripped HTML, capturing per-platform sale-open dates (with time) as `schemaSaleDates`; also adds `klook`/`accupass` to `extractTextFromHtml` keyword priority so those sections always reach the AI ([0c26b5e])
 ## [2026-05-18] — Session: venueRuns reliability + endDate detection
 ### Fixed
 - fix(tickets): `extractDateFromText` now detects Japanese date ranges (`2026年7月17日〜9月6日`) and returns `endDate`; single-venue exhibitions no longer show empty end date (9c77793)
