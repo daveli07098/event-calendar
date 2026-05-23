@@ -1332,6 +1332,7 @@ export async function POST(req: NextRequest) {
     const geminiModels = [
       "gemini-3.5-flash",             // Gemini 3.5 Flash      — 5 RPM  free
       "gemini-3.1-flash-lite",        // Gemini 3.1 Flash Lite — 15 RPM free
+      "gemini-3-flash",               // Gemini 3 Flash        — 5 RPM  free
       "gemini-2.5-flash",              // Gemini 2.5 Flash      — 5 RPM  free (stable)
       "gemini-2.5-flash-lite",         // Gemini 2.5 Flash Lite — 10 RPM free (stable)
       "gemma-4-31b-it",                // Gemma 4 31B           — 15 RPM free
