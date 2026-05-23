@@ -1461,6 +1461,28 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Rescue: when text-slot extraction overrode the AI's event date (meta.dateConfident),
+  // the AI's date field may actually be the ticket sale-open date that it mistook for the
+  // event date (e.g. Timable HK showing "Klook 2026-05-21 開始" before the concert listing).
+  // If aiResult.date is earlier than the confirmed concert date and not already recorded as
+  // a sale window, add it back so the sale information isn't silently discarded.
+  if (meta.dateConfident && aiResult.date && ticket.date && (aiResult.date as string) < ticket.date) {
+    const rescuedDate = aiResult.date as string;
+    const alreadyHasDate = ticket.saleDates?.some((w) => w.date === rescuedDate);
+    if (!alreadyHasDate) {
+      // Label: prefer the first detected platform name (e.g. "Klook"), else generic
+      const fallbackLabel = ticket.ticketPlatforms?.[0] ?? "Sale Opens";
+      // Do not carry over aiResult.time — it likely reflects the concert time, not the sale time
+      const rescued: SaleWindow = { date: rescuedDate, time: null, label: fallbackLabel };
+      const merged = ticket.saleDates ? [...ticket.saleDates, rescued] : [rescued];
+      merged.sort((a, b) => a.date.localeCompare(b.date));
+      ticket.saleDates = merged;
+      // Update saleFirstDate / saleDate only if not already set
+      ticket.saleFirstDate ??= merged[0]!.date;
+      ticket.saleDate ??= merged[merged.length - 1]!.date;
+    }
+  }
+
   // If the main AI prompt didn't return a category, run the shared classify logic
   // (same prompt and model cascade used by the Classify Category tab).
   if (!ticket.category) {
