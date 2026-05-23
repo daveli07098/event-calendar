@@ -859,6 +859,7 @@ CRITICAL — performance date vs sale dates:
   • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
   • Sale dates are weeks or months BEFORE the show. If the page shows e.g. show on Sep 30 and sales starting Mar 20, then date=Sep 30, saleDates start Mar 20.
   • saleFirstDate MUST be earlier than "date". If your saleFirstDate equals "date", you have confused the concert date with a sale date — set saleFirstDate to null instead.
+  • On Timable and similar HK ticketing pages, each ticket vendor (Klook, 膠紙座, Cityline, etc.) has its own section showing when THAT VENDOR'S sale opens. "YYYY年MM月DD日 HH:MM 開始" under a vendor name means the SALE opens on that date — NOT when the show happens. Add those as saleDates entries, not as the event date.
 
 CRITICAL — extract ALL sale windows into saleDates (one entry per distinct date/type):
   Common sale types to look for (use the EXACT label shown on the page, Chinese or English):
@@ -1109,7 +1110,10 @@ function extractTextSlots(text: string, excludeDates: string[]): EventSlot[] {
     upsert(startDate, endDate, time, endTime);
   }
 
-  // Filter out known sale-window dates, sort chronologically, require ≥2 distinct slots
+  // Filter out known sale-window dates and sort chronologically.
+  // Return even a single slot — the date-range pattern ("至") is specific to
+  // concert/exhibition runs and is reliable enough to set meta.dateConfident=true,
+  // which overrides a potentially-wrong AI date (e.g. Timable platform sale dates).
   const slots = Array.from(rawMap.values())
     .filter((s) => !excludeSet.has(s.date))
     .sort((a, b) => a.date.localeCompare(b.date))
@@ -1121,7 +1125,7 @@ function extractTextSlots(text: string, excludeDates: string[]): EventSlot[] {
       label: buildSlotLabel(s.date, s.endDate, s.time, s.endTime),
     }));
 
-  return slots.length > 1 ? slots : [];
+  return slots;
 }
 
 // ---------------------------------------------------------------------------
