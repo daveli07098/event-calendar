@@ -1379,9 +1379,11 @@ export async function POST(req: NextRequest) {
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        // Transient errors: HTTP 429/503 (quota/unavailable), 404 (model not found),
+        // Transient errors: HTTP 400 (bad request / model not available),
+        // 429/503 (quota/unavailable), 404 (model not found),
         // and any network-level failure (socket closed, connection refused, fetch failed).
         const isTransient =
+          msg.includes("400") ||
           msg.includes("429") ||
           msg.includes("503") ||
           msg.includes("404") ||
@@ -1391,7 +1393,8 @@ export async function POST(req: NextRequest) {
           msg.toLowerCase().includes("etimedout") ||
           msg.toLowerCase().includes("network");
         if (isTransient) {
-          const reason = msg.includes("429") ? "quota exceeded (429)"
+          const reason = msg.includes("400") ? "bad request / model unavailable (400)"
+            : msg.includes("429") ? "quota exceeded (429)"
             : msg.includes("404") ? "not found (404)"
             : msg.includes("503") ? "unavailable (503)"
             : "network error";
