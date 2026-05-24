@@ -817,6 +817,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       schemaSaleFirstDate ??= schemaSaleDates[0]!.date;
       schemaSaleDate ??= schemaSaleDates[schemaSaleDates.length - 1]!.date;
     }
+    console.log(`[tickets/scrape][stratD] matches found: ${schemaSaleDates.length}`, JSON.stringify(schemaSaleDates));
   }
 
   // URL-based timezone was already set at the start; this keeps the override from JSON-LD if set
@@ -1376,6 +1377,7 @@ export async function POST(req: NextRequest) {
         aiError = null;
         aiTokensUsed = (result as Record<string, unknown>)._tokensUsed as number | null ?? null;
         if (aiTokensUsed) console.log(`[tickets/scrape] ${name} tokens used: ${aiTokensUsed}`);
+        console.log(`[tickets/scrape][ai-result] ${name}:`, JSON.stringify(aiResult, null, 2));
         await incrementAiLimit(uid);
         break; // success — stop trying
       } catch (e) {
@@ -1541,6 +1543,14 @@ export async function POST(req: NextRequest) {
       ticket.saleDate ??= merged[merged.length - 1]!.date;
     }
   }
+
+  // Debug: log the fully merged ticket before returning
+  console.log(`[tickets/scrape][final-ticket] url=${url}`, JSON.stringify({
+    date: ticket.date, time: ticket.time, endDate: ticket.endDate, endTime: ticket.endTime,
+    venue: ticket.venue, saleDate: ticket.saleDate, saleFirstDate: ticket.saleFirstDate,
+    saleDates: ticket.saleDates, ticketPlatforms: ticket.ticketPlatforms,
+    meta_saleDates: (ticket as unknown as Record<string,unknown>)._metaSaleDates,
+  }, null, 2));
 
   // If the main AI prompt didn't return a category, run the shared classify logic
   // (same prompt and model cascade used by the Classify Category tab).
