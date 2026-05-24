@@ -152,7 +152,7 @@ function extractTextFromHtml(html: string): string {
   // Prioritise the most event-relevant content by surfacing sentences that
   // contain keywords (prices, sale dates, venue) right at the start of the
   // truncated text so they're never cut off by the 8000-char limit.
-  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座|klook|accupass|開催場所|開催期間|会場|開催日|開催地/i;
+  const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|livehouse|live.?house|顯示位置|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座|TickCats|klook|accupass|開催場所|開催期間|会場|開催日|開催地/i;
   const sentences = text.split(/(?<=[.!?。！？\n])\s*/);
   const relevant = sentences.filter(s => keywords.test(s));
   const rest = sentences.filter(s => !keywords.test(s));
@@ -772,6 +772,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     const STRAT_D_PLATFORMS: Array<[RegExp, string]> = [
       [/klook/i,                     "Klook"],
       [/膠紙座/,                      "膠紙座"],
+      [/tickcats/i,                  "TickCats"],
       [/cityline/i,                  "Cityline"],
       [/快達票|hk\s*ticketing/i,      "快達票 HK Ticketing"],
       [/\bkktix\b/i,                 "KKTIX"],
@@ -820,6 +821,25 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     console.log(`[tickets/scrape][stratD] matches found: ${schemaSaleDates.length}`, JSON.stringify(schemaSaleDates));
   }
 
+  // Strategy E: Timable 顯示位置 venue extraction.
+  // Timable pages show the venue name in a 顯示位置 section that has no JSON-LD equivalent.
+  // After stripping tags, the pattern is: "顯示位置 <VenueName> <HK address>".
+  // We extract the text between the label and the first HK address indicator.
+  if (!schemaVenue) {
+    const strippedE = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    const locIdx = strippedE.indexOf("顯示位置");
+    if (locIdx !== -1) {
+      const after = strippedE.slice(locIdx + 4, locIdx + 250).trim();
+      // HK addresses start with a district name or a building number
+      const HK_ADDR_START = /北角|銅鑼灣|灣仔|荃灣|九龍|旺角|觀塘|沙田|屯門|元朗|將軍澳|天水圍|大埔|粉嶺|上水|西環|中環|上環|啟德|紅磡|長沙灣|\d{1,4}[號A-Z]/;
+      const addrMatch = after.search(HK_ADDR_START);
+      if (addrMatch > 0) {
+        const candidate = after.slice(0, addrMatch).trim();
+        if (candidate.length > 0 && candidate.length < 60) schemaVenue = candidate;
+      }
+    }
+  }
+
   // URL-based timezone was already set at the start; this keeps the override from JSON-LD if set
   if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl);
 
@@ -846,6 +866,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     [/ticketmaster/i, "Ticketmaster"],
     [/\bKKTIX\b/i, "KKTIX"],
     [/\bklook\b/i, "Klook"],
+    [/\btickcats\b/i, "TickCats"],
     [/eventbrite/i, "Eventbrite"],
     [/大麥網?|\bdamai\b/i, "大麥網"],
     [/\bBOOKYAY\b/i, "BOOKYAY"],
