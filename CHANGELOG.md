@@ -1,3 +1,7 @@
+## [2026-05-25] — Session: World Cup 2026 calendar seed
+### Added
+- chore(seed): `scripts/seed-worldcup.ts` — creates "world cup" calendar for dave22dave22@gmail.com and bulk-inserts all 72 FIFA World Cup 2026 group stage matches (Groups A–L, Chinese team names, UTC start times, 2h duration, category: sports) ([bfce272])
+
 ## [2026-05-24] — Session: Timable HK date detection fix
 ### Fixed
 - fix(scrape): `extractTextSlots` now returns a single date-range slot (previously required ≥2), allowing the text-extracted concert date to take precedence over a wrong AI date on Timable HK pages; also improved AI prompt to clarify that vendor sections (Klook, 膠紙座 + "開始") are sale-open dates, not show dates ([2ace0cc])
