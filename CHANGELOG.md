@@ -1,3 +1,8 @@
+## [2026-05-31] — Session: World Cup calendar timezone display fix
+### Fixed
+- fix(calendar): DayDetailPanel, CalendarView — use `toLocaleDateString('en-CA')` instead of `slice(0,10)` (UTC) for day filtering; events like `2026-06-12T19:00Z` (= HKT June 13 03:00) now appear on the correct local day ([38f08fb])
+- fix(calendar): `isMultiDayTimed` check now uses local dates so 2-hour matches crossing UTC midnight (same HKT day) render as timed dots instead of multi-day all-day banners ([38f08fb])
+
 ## [2026-05-25] — Session: World Cup 2026 calendar seed
 ### Added
 - chore(seed): `scripts/seed-worldcup.ts` — creates "world cup" calendar for dave22dave22@gmail.com and bulk-inserts all 72 FIFA World Cup 2026 group stage matches (Groups A–L, Chinese team names, UTC start times, 2h duration, category: sports) ([bfce272])

@@ -49,8 +49,10 @@ export function DayDetailPanel({
 }: DayDetailPanelProps) {
   const dayEvents = events
     .filter((e) => {
-      const start = e.startTime.slice(0, 10);
-      const end = e.endTime ? e.endTime.slice(0, 10) : start;
+      // Use local date (browser timezone) so HKT midnight boundaries are respected.
+      // e.g. 2026-06-12T19:00:00Z = June 13 03:00 HKT → must appear on June 13, not June 12.
+      const start = new Date(e.startTime).toLocaleDateString("en-CA"); // YYYY-MM-DD local
+      const end = e.endTime ? new Date(e.endTime).toLocaleDateString("en-CA") : start;
       return date >= start && date <= end;
     })
     .sort((a, b) => {

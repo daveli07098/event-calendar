@@ -143,19 +143,24 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   const fcEvents = filteredEvents.map((event) => {
     // Multi-day timed events (e.g. popup stores, multi-week runs) are displayed as
     // all-day spanning banners so they visually cover the full date range.
-    // Only apply when endDate (UTC) is strictly after startDate (UTC).
-    const startDate = event.startTime.slice(0, 10);
-    const endDate = event.endTime.slice(0, 10);
-    const isMultiDayTimed = !event.allDay && endDate > startDate;
-    // FullCalendar all-day end is exclusive → add 1 calendar day to endDate
+    // Use local (browser) dates so events crossing UTC midnight on the same local
+    // day (e.g. a 2-hour sports match at 22:00 UTC = 06:00 HKT) are NOT misdetected
+    // as multi-day.
+    const startDateLocal = new Date(event.startTime).toLocaleDateString("en-CA");
+    const endDateLocal = event.endTime
+      ? new Date(event.endTime).toLocaleDateString("en-CA")
+      : startDateLocal;
+    const isMultiDayTimed = !event.allDay && endDateLocal > startDateLocal;
+    // FullCalendar all-day end is exclusive → add 1 calendar day to local endDate
     const fcEnd = isMultiDayTimed
-      ? new Date(new Date(endDate + "T00:00:00Z").getTime() + 86400000).toISOString().slice(0, 10)
+      ? new Date(new Date(endDateLocal + "T00:00:00").getTime() + 86400000)
+          .toLocaleDateString("en-CA")
       : event.endTime;
 
     return {
       id: event.id,
       title: event.title,
-      start: isMultiDayTimed ? startDate : event.startTime,
+      start: isMultiDayTimed ? startDateLocal : event.startTime,
       end: fcEnd,
       allDay: event.allDay || isMultiDayTimed,
       backgroundColor: event.calendar?.color || "#4285f4",
@@ -199,7 +204,8 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     // Clicking an event in the calendar grid shows the day panel first
     // so the user sees all events for that day before choosing to edit.
     const ev = clickInfo.event.extendedProps.event as EventType;
-    const date = ev.startTime.slice(0, 10);
+    // Use local date (browser timezone) so the panel opens on the correct local day.
+    const date = new Date(ev.startTime).toLocaleDateString("en-CA"); // YYYY-MM-DD local
     setDayPanelDate(date);
     onEventOpen?.(ev.id, ev.startTime);
   };
