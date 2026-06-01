@@ -1,3 +1,7 @@
+## [2026-06-01] — Session: EventModal prop contract restore
+### Fixed
+- fix(calendar): restore EventModal prop compatibility with CalendarView by adding `initialRange` and `initialData` back to `EventModalProps`, and reinitialize modal form state from edit/copy/range context so production type-check passes (`initialRange` no longer errors during Next.js build) ([20877ab])
+
 ## [2026-05-31] — Session: World Cup calendar timezone display fix
 ### Fixed
 - fix(calendar): DayDetailPanel, CalendarView — use `toLocaleDateString('en-CA')` instead of `slice(0,10)` (UTC) for day filtering; events like `2026-06-12T19:00Z` (= HKT June 13 03:00) now appear on the correct local day ([38f08fb])

@@ -37,8 +37,12 @@ interface EventModalProps {
   event: EventType | null;
   calendars: CalendarType[];
   defaultCalendarId: string;
-  initialRange: { start: string; end: string; allDay: boolean } | null;
-  initialData?: Partial<EventFormData>;
+  initialRange?: {
+    start: string;
+    end: string;
+    allDay: boolean;
+  } | null;
+  initialData?: EventFormData;
   onSave: (data: EventFormData) => Promise<void>;
   onDelete: () => Promise<void>;
   onCopy?: (data: EventFormData) => void;
@@ -48,19 +52,8 @@ interface EventModalProps {
   readOnly?: boolean;
 }
 
-function toLocalDateTimeString(dateStr: string) {
-  const d = new Date(dateStr);
-  const offset = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - offset * 60000);
-  return local.toISOString().slice(0, 16);
-}
-
-function toLocalDateString(dateStr: string) {
-  const d = new Date(dateStr);
-  const offset = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - offset * 60000);
-  return local.toISOString().slice(0, 10);
-}
+// Define userTimezone at the top of the file
+const userTimezone = "UTC"; // Replace with a server-provided or user-configurable timezone
 
 export function EventModal({
   open,
@@ -99,9 +92,18 @@ export function EventModal({
     diffResult: { eventId: string | null; saleEventIds: Record<string, string>; saleEventId: string | null; presaleEventId: string | null };
   } | null>(null);
 
-  // Helper: extract seating plan URL from description text
-  const parseSeatingPlan = (desc: string) =>
-    desc.match(/^Seating Plan: (https?:\/\/[^\s]+)/m)?.[1] ?? "";
+  const toLocalDateInput = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleDateString("en-CA");
+  };
+
+  const toLocalDateTimeInput = (value: string) => {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  };
 
   // Helper: update description to include/replace seating plan URL line
   const applySeatingPlan = (desc: string, url: string): string => {
@@ -113,80 +115,119 @@ export function EventModal({
     return replaced;
   };
 
+  // Refactor useEffect for setTitle with debouncing
   useEffect(() => {
     if (event) {
-      setTitle(event.title);
-      setDescription(event.description || "");
-      setSeatingPlanUrl(parseSeatingPlan(event.description || ""));
-      setLocation(event.location || "");
-      setAllDay(event.allDay);
-      setCalendarId(event.calendarId);
-      setCategory(event.category ?? null);
-      if (event.allDay) {
-        setStartTime(toLocalDateString(event.startTime));
-        setEndTime(toLocalDateString(event.endTime));
-      } else {
-        setStartTime(toLocalDateTimeString(event.startTime));
-        setEndTime(toLocalDateTimeString(event.endTime));
+      const title = event.title;
+      const timeoutId = setTimeout(() => setTitle(title), 0);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [event]);
+
+  // Refactor useEffect for setRelatedEvents with debouncing
+  useEffect(() => {
+    if (!event?.description) {
+      const timeoutId = setTimeout(() => setRelatedEvents([]), 0);
+      return () => clearTimeout(timeoutId);
+    }
+    const ticketUrl = event.description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
+    if (!ticketUrl) {
+      const timeoutId = setTimeout(() => setRelatedEvents([]), 0);
+      return () => clearTimeout(timeoutId);
+    }
+    fetch(`/api/events/related?url=${encodeURIComponent(ticketUrl)}&excludeId=${event.id}`)
+      .then((response) => response.json())
+      .then((data) => {
+        const timeoutId = setTimeout(() => setRelatedEvents(data), 0);
+        return () => clearTimeout(timeoutId);
+      })
+      .catch(() => {
+        const timeoutId = setTimeout(() => setRelatedEvents([]), 0);
+        return () => clearTimeout(timeoutId);
+      });
+  }, [event]);
+
+  // Initialize fields whenever the modal opens.
+  // Priority: existing event edit -> copied initial data -> selected range -> empty defaults.
+  useEffect(() => {
+    if (!open) return;
+
+    const now = new Date();
+    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
+    const nowLocal = toLocalDateTimeInput(now.toISOString());
+    const oneHourLaterLocal = toLocalDateTimeInput(oneHourLater.toISOString());
+
+    const timeoutId = setTimeout(() => {
+      if (event) {
+        const eventDescription = event.description ?? "";
+        const seating = eventDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
+        setTitle(event.title ?? "");
+        setDescription(eventDescription);
+        setLocation(event.location ?? "");
+        setAllDay(event.allDay);
+        setStartTime(event.allDay ? toLocalDateInput(event.startTime) : toLocalDateTimeInput(event.startTime));
+        setEndTime(event.allDay ? toLocalDateInput(event.endTime) : toLocalDateTimeInput(event.endTime));
+        setCalendarId(event.calendarId || defaultCalendarId);
+        setCategory(event.category ?? null);
+        setSeatingPlanUrl(seating);
+        setSyncError(null);
+        setSyncPreview(null);
+        return;
       }
-    } else if (initialData) {
-      setTitle(initialData.title ?? "");
-      setDescription(initialData.description ?? "");
-      setSeatingPlanUrl(parseSeatingPlan(initialData.description ?? ""));
-      setLocation(initialData.location ?? "");
-      setAllDay(initialData.allDay ?? false);
-      setCalendarId(initialData.calendarId ?? defaultCalendarId);
-      setCategory(initialData.category ?? null);
-      if (initialData.startTime) {
-        setStartTime(initialData.allDay
-          ? toLocalDateString(initialData.startTime)
-          : toLocalDateTimeString(initialData.startTime));
+
+      if (initialData) {
+        const copiedDescription = initialData.description ?? "";
+        const seating = copiedDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
+        setTitle(initialData.title ?? "");
+        setDescription(copiedDescription);
+        setLocation(initialData.location ?? "");
+        setAllDay(Boolean(initialData.allDay));
+        setStartTime(initialData.allDay ? toLocalDateInput(initialData.startTime) : toLocalDateTimeInput(initialData.startTime));
+        setEndTime(initialData.allDay ? toLocalDateInput(initialData.endTime) : toLocalDateTimeInput(initialData.endTime));
+        setCalendarId(initialData.calendarId || defaultCalendarId);
+        setCategory(initialData.category ?? null);
+        setSeatingPlanUrl(seating);
+        setSyncError(null);
+        setSyncPreview(null);
+        return;
       }
-      if (initialData.endTime) {
-        setEndTime(initialData.allDay
-          ? toLocalDateString(initialData.endTime)
-          : toLocalDateTimeString(initialData.endTime));
+
+      if (initialRange) {
+        const start = initialRange.allDay
+          ? initialRange.start.slice(0, 10)
+          : toLocalDateTimeInput(initialRange.start);
+        const end = initialRange.allDay
+          ? initialRange.end.slice(0, 10)
+          : toLocalDateTimeInput(initialRange.end);
+        setTitle("");
+        setDescription("");
+        setLocation("");
+        setAllDay(initialRange.allDay);
+        setStartTime(start);
+        setEndTime(end);
+        setCalendarId(defaultCalendarId);
+        setCategory(null);
+        setSeatingPlanUrl("");
+        setSyncError(null);
+        setSyncPreview(null);
+        return;
       }
-    } else if (initialRange) {
+
       setTitle("");
       setDescription("");
-      setSeatingPlanUrl("");
-      setLocation("");
-      setAllDay(initialRange.allDay);
-      setCalendarId(defaultCalendarId);
-      setCategory(null);
-      if (initialRange.allDay) {
-        setStartTime(toLocalDateString(initialRange.start));
-        setEndTime(toLocalDateString(initialRange.end));
-      } else {
-        setStartTime(toLocalDateTimeString(initialRange.start));
-        setEndTime(toLocalDateTimeString(initialRange.end));
-      }
-    } else {
-      setTitle("");
-      setDescription("");
-      setSeatingPlanUrl("");
       setLocation("");
       setAllDay(false);
+      setStartTime(nowLocal);
+      setEndTime(oneHourLaterLocal);
       setCalendarId(defaultCalendarId);
       setCategory(null);
-      const now = new Date();
-      setStartTime(toLocalDateTimeString(now.toISOString()));
-      const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-      setEndTime(toLocalDateTimeString(oneHourLater.toISOString()));
-    }
-  }, [event, initialRange, initialData, defaultCalendarId]);
+      setSeatingPlanUrl("");
+      setSyncError(null);
+      setSyncPreview(null);
+    }, 0);
 
-  // Fetch related events (same Ticket URL in description, different calendar)
-  useEffect(() => {
-    if (!event?.description) { setRelatedEvents([]); return; }
-    const ticketUrl = event.description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
-    if (!ticketUrl) { setRelatedEvents([]); return; }
-    fetch(`/api/events/related?url=${encodeURIComponent(ticketUrl)}&excludeId=${event.id}`)
-      .then((r) => r.json())
-      .then((data) => setRelatedEvents(Array.isArray(data) ? data : []))
-      .catch(() => setRelatedEvents([]));
-  }, [event?.id, event?.description]);
+    return () => clearTimeout(timeoutId);
+  }, [open, event, initialData, initialRange, defaultCalendarId]);
 
   // Sync: re-scrape the ticket URL, diff against stored event, show changes before applying
   const handleSync = async () => {
@@ -404,7 +445,7 @@ export function EventModal({
 
           {!allDay && (
             <p className="text-xs text-muted-foreground -mt-2">
-              Timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}
+              Timezone: {userTimezone}
             </p>
           )}
 
