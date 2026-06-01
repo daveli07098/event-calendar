@@ -519,11 +519,12 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             onClose={() => setDayPanelDate(null)}
             onCreateEvent={(date) => {
               setSelectedEvent(null);
-              setSelectedRange({
-                start: `${date}T09:00:00`,
-                end: `${date}T10:00:00`,
-                allDay: false,
-              });
+              // Default to 10:00 AM on the focused date in the local timezone.
+              const localDate = new Date(`${date}T10:00:00`);
+              const start = localDate.toISOString();
+              localDate.setHours(localDate.getHours() + 1);
+              const end = localDate.toISOString();
+              setSelectedRange({ start, end, allDay: false });
               setModalOpen(true);
             }}
             onEditEvent={(event) => {
