@@ -538,11 +538,21 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       {/* Floating action button — always-visible shortcut to create an event */}
       <button
         onClick={() => {
-          const now = new Date();
-          const start = now.toISOString();
-          now.setHours(now.getHours() + 1);
           setSelectedEvent(null);
-          setSelectedRange({ start, end: now.toISOString(), allDay: false });
+          if (dayPanelDate) {
+            // Default to 10:00 AM on the focused date in the local timezone.
+            // Using a local ISO-like string and converting it to UTC so EventModal can parse it.
+            const localDate = new Date(`${dayPanelDate}T10:00:00`);
+            const start = localDate.toISOString();
+            localDate.setHours(localDate.getHours() + 1);
+            const end = localDate.toISOString();
+            setSelectedRange({ start, end, allDay: false });
+          } else {
+            const now = new Date();
+            const start = now.toISOString();
+            now.setHours(now.getHours() + 1);
+            setSelectedRange({ start, end: now.toISOString(), allDay: false });
+          }
           setModalOpen(true);
         }}
         className="fixed bottom-6 right-6 size-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 active:scale-95 flex items-center justify-center z-20 transition-all"

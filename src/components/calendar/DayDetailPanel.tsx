@@ -49,11 +49,34 @@ export function DayDetailPanel({
 }: DayDetailPanelProps) {
   const dayEvents = events
     .filter((e) => {
-      // Use local date (browser timezone) so HKT midnight boundaries are respected.
-      // e.g. 2026-06-12T19:00:00Z = June 13 03:00 HKT → must appear on June 13, not June 12.
-      const start = new Date(e.startTime).toLocaleDateString("en-CA"); // YYYY-MM-DD local
-      const end = e.endTime ? new Date(e.endTime).toLocaleDateString("en-CA") : start;
-      return date >= start && date <= end;
+      // Use logical date boundaries rather than just string comparison to handle
+      // midnight edges correctly.
+      if (e.allDay) {
+        // All-day logic: compare the date strings directly (ignoring time).
+        // Standardize end date for comparison.
+        const start = e.startTime.slice(0, 10);
+        const end = e.endTime ? e.endTime.slice(0, 10) : start;
+        // FullCalendar all-day ends are often exclusive (e.g. 2026-06-13 for an event on 06-12).
+        // If end > start and it's allDay, the logical last day is usually end - 1.
+        let displayEnd = end;
+        if (e.endTime && end > start) {
+          const endDateObj = new Date(e.endTime);
+          // If it's exactly T00:00:00 on the next day, subtract 1ms to get the previous day's string.
+          if (e.endTime.includes("T00:00:00")) {
+            displayEnd = new Date(endDateObj.getTime() - 1).toLocaleDateString("en-CA");
+          }
+        }
+        return date >= start && date <= displayEnd;
+      }
+
+      // Timed events: check if the event spans any part of the 24h local window.
+      const dayStart = new Date(`${date}T00:00:00`).getTime();
+      const dayEnd = new Date(`${date}T23:59:59.999`).getTime();
+      const eventStart = new Date(e.startTime).getTime();
+      const eventEnd = e.endTime ? new Date(e.endTime).getTime() : eventStart;
+
+      // Overlap: Starts before day ends AND ends after day starts.
+      return eventStart <= dayEnd && eventEnd >= dayStart;
     })
     .sort((a, b) => {
       if (a.allDay && !b.allDay) return -1;

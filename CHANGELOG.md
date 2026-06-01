@@ -1,3 +1,8 @@
+## [2026-06-02] — Session: DayDetailPanel filtering and default date sync
+### Fixed
+- fix(calendar): DayDetailPanel — refined filtering logic to use interval overlap (timed) and exclusive end-date handling (all-day), ensuring events precisely at day boundaries (like 1 AM) appear correctly in the side panel ([9bd7f3b])
+- fix(calendar): default creation date — update floating action button to prioritize the "focused" date from DayDetailPanel as the default for new events, defaulting to 10 AM local time on that day ([9bd7f3b])
+
 ## [2026-06-01] — Session: World Cup knockout stage
 ### Added
 - feat(worldcup): `scripts/seed-worldcup-knockout.ts` — seeds all 32 FIFA World Cup 2026 knockout stage matches (Round of 32 through Final, matches 73–104) into the existing "world cup" calendar with Chinese placeholder team names; idempotent (skips already-seeded match IDs) ([8a07a26])
