@@ -75,6 +75,10 @@ export function DayDetailPanel({
       const eventStart = new Date(e.startTime).getTime();
       const eventEnd = e.endTime ? new Date(e.endTime).getTime() : eventStart;
 
+      if (e.title.toLowerCase().includes("suggest")) {
+        console.log(`[DEBUG] Day: ${date} | Event: ${e.title} | Start: ${e.startTime} | LocalStart: ${new Date(eventStart).toString()} | dayStart: ${new Date(dayStart).toString()} | dayEnd: ${new Date(dayEnd).toString()} | Match: ${eventStart <= dayEnd && eventEnd >= dayStart}`);
+      }
+
       // Overlap: Starts before day ends AND ends after day starts.
       return eventStart <= dayEnd && eventEnd >= dayStart;
     })
