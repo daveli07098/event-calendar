@@ -1,3 +1,9 @@
+## [2026-06-01] — Session: World Cup knockout stage
+### Added
+- feat(worldcup): `scripts/seed-worldcup-knockout.ts` — seeds all 32 FIFA World Cup 2026 knockout stage matches (Round of 32 through Final, matches 73–104) into the existing "world cup" calendar with Chinese placeholder team names; idempotent (skips already-seeded match IDs) ([8a07a26])
+- feat(worldcup): `src/app/api/events/worldcup-sync/route.ts` — POST endpoint that fetches Wikipedia knockout stage page, queries Gemini 2.5 Flash to resolve real team names for a given match ID, then updates the event title + description in DB ([8a07a26])
+- feat(worldcup): "更新球隊" button in EventModal — appears on events with `World Cup Match ID:` in description; calls `/api/events/worldcup-sync` and refreshes the event inline; error/success message shown in footer ([8a07a26])
+
 ## [2026-06-01] — Session: EventModal prop contract restore
 ### Fixed
 - fix(calendar): restore EventModal prop compatibility with CalendarView by adding `initialRange` and `initialData` back to `EventModalProps`, and reinitialize modal form state from edit/copy/range context so production type-check passes (`initialRange` no longer errors during Next.js build) ([20877ab])

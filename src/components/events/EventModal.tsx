@@ -81,6 +81,8 @@ export function EventModal({
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncingTeams, setSyncingTeams] = useState(false);
+  const [syncTeamsError, setSyncTeamsError] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
   const [seatingPlanUrl, setSeatingPlanUrl] = useState("");
   const [seatingDragOver, setSeatingDragOver] = useState(false);
@@ -228,6 +230,35 @@ export function EventModal({
 
     return () => clearTimeout(timeoutId);
   }, [open, event, initialData, initialRange, defaultCalendarId]);
+
+  // Update Teams: fetch current team names from Wikipedia via AI and update the event
+  const handleSyncTeams = async () => {
+    if (!event) return;
+    setSyncingTeams(true);
+    setSyncTeamsError(null);
+    try {
+      const res = await fetch("/api/events/worldcup-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId: event.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Update failed");
+      if (!data.success) {
+        setSyncTeamsError(data.message ?? "Teams not yet determined.");
+        return;
+      }
+      // Update local form fields and notify parent
+      setTitle(data.updatedTitle);
+      if (data.updatedEvent?.description) setDescription(data.updatedEvent.description);
+      onSynced?.(data.updatedEvent);
+      setSyncTeamsError(`✓ Updated: ${data.team1} vs ${data.team2}`);
+    } catch (e) {
+      setSyncTeamsError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setSyncingTeams(false);
+    }
+  };
 
   // Sync: re-scrape the ticket URL, diff against stored event, show changes before applying
   const handleSync = async () => {
@@ -669,6 +700,9 @@ export function EventModal({
 
         {/* Sticky footer — always visible regardless of scroll position */}
         <div className="flex flex-col gap-2 pt-3 border-t shrink-0">
+          {syncTeamsError && (
+            <p className={`text-xs rounded px-2 py-1 ${syncTeamsError.startsWith("✓") ? "text-green-600 bg-green-500/10" : "text-destructive bg-destructive/10"}`}>{syncTeamsError}</p>
+          )}
           {syncError && (
             <p className={`text-xs rounded px-2 py-1 ${syncError.startsWith("✓") ? "text-green-600 bg-green-500/10" : "text-destructive bg-destructive/10"}`}>{syncError}</p>
           )}
@@ -738,6 +772,20 @@ export function EventModal({
                 Copy
               </Button>
             )}
+            {/* Update Teams button — only shown for World Cup knockout events */}
+            {event && !readOnly && event.description?.includes("World Cup Match ID:") && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSyncTeams}
+                disabled={saving || syncing || syncingTeams}
+                title="Fetch current team names from Wikipedia and update event"
+              >
+                <RefreshCw className={`size-4 mr-1 ${syncingTeams ? "animate-spin" : ""}`} />
+                {syncingTeams ? "更新中…" : "更新球隊"}
+              </Button>
+            )}
             {/* Sync button — only shown when event has a Ticket URL and user can edit */}
             {event && !readOnly && event.description?.includes("Ticket URL:") && (
               <Button
@@ -745,7 +793,7 @@ export function EventModal({
                 variant="outline"
                 size="sm"
                 onClick={handleSync}
-                disabled={saving || syncing}
+                disabled={saving || syncing || syncingTeams}
                 title="Re-scrape ticket URL and update event data"
               >
                 <RefreshCw className={`size-4 mr-1 ${syncing ? "animate-spin" : ""}`} />
