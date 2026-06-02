@@ -70,8 +70,9 @@ export function DayDetailPanel({
       }
 
       // Timed events: check if the event spans any part of the 24h local window.
-      const dayStart = new Date(`${date}T00:00:00`).getTime();
-      const dayEnd = new Date(`${date}T23:59:59.999`).getTime();
+      // Parse with spaces to force local timezone in most browsers.
+      const dayStart = new Date(`${date.replace(/-/g, "/")} 00:00:00`).getTime();
+      const dayEnd = new Date(`${date.replace(/-/g, "/")} 23:59:59`).getTime();
       const eventStart = new Date(e.startTime).getTime();
       const eventEnd = e.endTime ? new Date(e.endTime).getTime() : eventStart;
 
