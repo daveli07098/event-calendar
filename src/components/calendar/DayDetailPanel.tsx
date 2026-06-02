@@ -32,6 +32,17 @@ function formatPanelDate(dateStr: string): string {
   });
 }
 
+function getTimedEventEnd(event: EventType): Date {
+  const start = new Date(event.startTime);
+  const parsedEnd = event.endTime ? new Date(event.endTime) : null;
+
+  if (!parsedEnd || Number.isNaN(parsedEnd.getTime()) || parsedEnd.getTime() <= start.getTime()) {
+    return new Date(start.getTime() + 60 * 60 * 1000);
+  }
+
+  return parsedEnd;
+}
+
 /** Derive a short location region tag from a venue location string. */
 function locationTag(location: string | null | undefined): string | null {
   if (!location) return null;
@@ -74,7 +85,7 @@ export function DayDetailPanel({
       const dayStart = new Date(`${date.replace(/-/g, "/")} 00:00:00`).getTime();
       const dayEnd = new Date(`${date.replace(/-/g, "/")} 23:59:59`).getTime();
       const eventStart = new Date(e.startTime).getTime();
-      const eventEnd = e.endTime ? new Date(e.endTime).getTime() : eventStart;
+      const eventEnd = getTimedEventEnd(e).getTime();
 
       // Overlap: Starts before day ends AND ends after day starts.
       return eventStart <= dayEnd && eventEnd >= dayStart;
@@ -140,7 +151,7 @@ export function DayDetailPanel({
                   <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                     <Clock className="size-3 shrink-0" />
                     {formatTime(event.startTime)}
-                    {event.endTime && ` – ${formatTime(event.endTime)}`}
+                    {` – ${formatTime(getTimedEventEnd(event).toISOString())}`}
                   </p>
                 )}
                 {event.location && (

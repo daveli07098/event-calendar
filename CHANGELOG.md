@@ -1,3 +1,7 @@
+## [2026-06-02] — Session: My Calendar day-panel fallback
+### Fixed
+- fix(calendar): DayDetailPanel — ignore malformed or reversed event end times and fall back to the effective one-hour duration used by FullCalendar, so My Calendar events with bad stored `endTime` values still appear in the right-hand day schedule ([4252cb6])
+
 ## [2026-06-02] — Session: DayDetailPanel filtering and default date sync
 ### Fixed
 - fix(calendar): DayDetailPanel — refined filtering logic to use interval overlap (timed) and exclusive end-date handling (all-day), ensuring events precisely at day boundaries (like 1 AM) appear correctly in the side panel ([9bd7f3b])
