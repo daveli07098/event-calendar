@@ -1,3 +1,7 @@
+## [2026-06-02] — Session: EventModal date-range blocking
+### Fixed
+- fix(calendar): EventModal — block saves when the end date/time is before the start date/time, and surface an inline validation message so invalid ranges cannot be submitted ([ca5c01c])
+
 ## [2026-06-02] — Session: My Calendar day-panel fallback
 ### Fixed
 - fix(calendar): DayDetailPanel — ignore malformed or reversed event end times and fall back to the effective one-hour duration used by FullCalendar, so My Calendar events with bad stored `endTime` values still appear in the right-hand day schedule ([4252cb6])

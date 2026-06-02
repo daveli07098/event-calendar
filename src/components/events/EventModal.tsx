@@ -94,6 +94,8 @@ export function EventModal({
     diffResult: { eventId: string | null; saleEventIds: Record<string, string>; saleEventId: string | null; presaleEventId: string | null };
   } | null>(null);
 
+  const hasInvalidDateRange = Boolean(startTime && endTime) && new Date(endTime).getTime() < new Date(startTime).getTime();
+
   const toLocalDateInput = (value: string) => {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return "";
@@ -361,6 +363,7 @@ export function EventModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    if (hasInvalidDateRange) return;
     setSaving(true);
     try {
       // Merge seatingPlanUrl back into description before saving
@@ -473,6 +476,12 @@ export function EventModal({
               />
             </div>
           </div>
+
+          {hasInvalidDateRange && (
+            <p className="text-xs text-destructive -mt-2">
+              End date and time must be the same as or after the start date and time.
+            </p>
+          )}
 
           {!allDay && (
             <p className="text-xs text-muted-foreground -mt-2">
@@ -813,7 +822,7 @@ export function EventModal({
               <Button
                 type="submit"
                 form="event-modal-form"
-                disabled={saving || syncing || !title.trim()}
+                disabled={saving || syncing || !title.trim() || hasInvalidDateRange}
               >
                 {saving ? "Saving..." : event ? "Update" : "Create"}
               </Button>
