@@ -2,6 +2,7 @@
 ### Added
 - feat(sidebar): collapsible My Calendars / Location / Category sections with persisted state; active filter shown as a clearable chip when collapsed ([6f565d0])
 ### Changed
+- feat(sidebar): anchor Location/Category filter sections to the sidebar bottom above the nav links ([0a14dbf])
 - feat(sidebar): unified scroll container — long filter chip lists no longer squeeze the calendar list off-screen on short viewports; larger touch targets for chips and mini-calendar days on mobile ([6f565d0])
 ### Added
 - feat(calendar): empty-state hint banner with create/import guidance; "no events match filters" variant ([0189a61])
