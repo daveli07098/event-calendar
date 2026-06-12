@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
-  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag, BadgePercent,
 } from "lucide-react";
 import { VenueSection } from "@/components/tickets/VenueSection";
+import { DiscountSection } from "@/components/tickets/DiscountSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -155,7 +156,7 @@ function DiffTable({
 }
 
 export function TicketSection() {
-  const [section, setSection] = useState<"import" | "venues" | "classify">("import");
+  const [section, setSection] = useState<"import" | "venues" | "classify" | "discounts">("import");
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
@@ -686,6 +687,17 @@ export function TicketSection() {
             Category Detection
           </button>
           <button
+            onClick={() => setSection("discounts")}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+              section === "discounts"
+                ? "bg-primary/10 text-primary font-medium"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <BadgePercent className="size-4 shrink-0" />
+            Discount Sale
+          </button>
+          <button
             onClick={() => setSection("venues")}
             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "venues"
@@ -702,6 +714,8 @@ export function TicketSection() {
         <div className="flex-1 overflow-auto">
           {section === "venues" ? (
             <VenueSection />
+          ) : section === "discounts" ? (
+            <DiscountSection onQuotaUpdate={(q) => setQuota(q)} />
           ) : section === "classify" ? (
             <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
               <div className="space-y-1">
