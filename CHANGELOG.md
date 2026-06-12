@@ -1,3 +1,11 @@
+## [2026-06-13] — Session: Discount Sale section + shared AI module
+### Added
+- feat(discounts): Discount Sale tab in Event Section — scans Nike, adidas, Puma and Marathon Sports HK (plus custom sources) for active sales via AI; discount preview cards with add-to-calendar and calendar picker ([07b7be6])
+- feat(ai): shared `src/lib/ai` module — provider cascade (Gemini → Groq → Copilot), per-user daily quota, HTML→text extraction ([07b7be6])
+### Changed
+- refactor(tickets): scrape route now uses the shared AI quota module — one daily budget across all AI features ([07b7be6])
+- fix(ai): cascade failures surface the root-cause error (e.g. "User location is not supported") instead of the last fallback provider's ([07b7be6])
+
 ## [2026-06-13] — Session: UI/UX enhancement pass + agent bootstrap
 ### Added
 - feat(sidebar): collapsible My Calendars / Location / Category sections with persisted state; active filter shown as a clearable chip when collapsed ([6f565d0])
