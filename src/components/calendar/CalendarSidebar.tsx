@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Plus, ChevronLeft, ChevronRight, Settings, Users, Megaphone, Ticket, X } from "lucide-react";
+import { useState, useEffect, type ReactNode } from "react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, Settings, Users, Megaphone, Ticket, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
@@ -28,6 +28,49 @@ interface CalendarSidebarProps {
   onMiniDateClick?: (date: Date) => void;
 }
 
+/** Collapsible sidebar section with a chevron header, optional header action,
+ *  and an optional summary row shown while collapsed (e.g. the active filter). */
+function SidebarSection({
+  id,
+  label,
+  open,
+  onToggle,
+  action,
+  collapsedSummary,
+  children,
+}: {
+  id: string;
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  action?: ReactNode;
+  collapsedSummary?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between mb-1.5">
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={open}
+          aria-controls={`sidebar-section-${id}`}
+          className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+        >
+          <ChevronDown
+            className={`size-3 transition-transform ${open ? "" : "-rotate-90"}`}
+          />
+          {label}
+        </button>
+        {action}
+      </div>
+      <div id={`sidebar-section-${id}`}>
+        {open ? children : collapsedSummary ?? null}
+      </div>
+    </div>
+  );
+}
+
 export function CalendarSidebar({
   calendars,
   onCalendarToggle,
@@ -42,6 +85,31 @@ export function CalendarSidebar({
   onMiniDateClick,
 }: CalendarSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
+
+  // Per-section expand/collapse — persisted so the layout survives reloads.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    calendars: true,
+    location: true,
+    category: true,
+  });
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("sidebar-sections");
+      if (saved) setOpenSections((prev) => ({ ...prev, ...JSON.parse(saved) }));
+    } catch {
+      // Ignore corrupt localStorage — defaults stay in place
+    }
+  }, []);
+  const toggleSection = (key: string) =>
+    setOpenSections((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try {
+        localStorage.setItem("sidebar-sections", JSON.stringify(next));
+      } catch {
+        // Storage may be unavailable (private mode) — collapse still works for the session
+      }
+      return next;
+    });
 
   // Mini calendar state
   const [miniDate, setMiniDate] = useState(new Date());
@@ -147,7 +215,7 @@ export function CalendarSidebar({
                 onClick={() => onMiniDateClick?.(clickDate)}
                 aria-label={clickDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                 aria-current={isToday ? "date" : undefined}
-                className={`text-[11px] py-0.5 rounded-full cursor-pointer select-none ${
+                className={`text-xs py-1 md:text-[11px] md:py-0.5 rounded-full cursor-pointer select-none ${
                   isToday
                     ? "bg-primary text-primary-foreground font-bold"
                     : "hover:bg-accent"
@@ -160,26 +228,28 @@ export function CalendarSidebar({
         </div>
       </div>
 
-      {/* Calendar list — scrollable when there are many calendars */}
+      {/* All sections share one scroll container so long filter lists never
+          squeeze the calendar list off-screen — everything scrolls together. */}
       <div className="flex-1 overflow-y-auto p-3 min-h-0">
-        {/* My Calendars */}
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            My Calendars
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onAddCalendar}
-            className="size-6"
-            aria-label="Add calendar"
-            title="Add calendar"
-          >
-            <Plus className="size-3" />
-          </Button>
-        </div>
-        {/* Constrain to ~7 rows before scrolling */}
-        <div className="flex flex-col gap-1 mb-3 overflow-y-auto" style={{ maxHeight: "calc(7 * 2.5rem)" }}>
+        <SidebarSection
+          id="calendars"
+          label="My Calendars"
+          open={openSections.calendars}
+          onToggle={() => toggleSection("calendars")}
+          action={
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onAddCalendar}
+              className="size-6"
+              aria-label="Add calendar"
+              title="Add calendar"
+            >
+              <Plus className="size-3" />
+            </Button>
+          }
+        >
+        <div className="flex flex-col gap-1">
           {(() => {
             const TICKET_NAMES = ["event-reminders", "sale-ticket"];
             const myCalendars = calendars.filter((c) => !c.memberRole);
@@ -228,7 +298,7 @@ export function CalendarSidebar({
         {/* Shared with me */}
         {calendars.some((c) => c.memberRole) && (
           <>
-            <div className="flex items-center gap-1 mb-2">
+            <div className="flex items-center gap-1 mt-3 mb-2">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Shared with me
               </span>
@@ -257,73 +327,104 @@ export function CalendarSidebar({
             </div>
           </>
         )}
-      </div>
+        </SidebarSection>
 
-      {/* Location filter chips */}
-      {onLocationFilter && locationCounts && Object.keys(locationCounts).length > 0 && (
-        <div className="px-3 pb-2 border-b border-border">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Location</span>
-            {locationFilter && (
-              <button
-                onClick={() => onLocationFilter(null)}
-                className="text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {Object.entries(locationCounts)
-              .sort((a, b) => b[1] - a[1])
-              .map(([loc, count]) => (
+        {/* Location filter chips */}
+        {onLocationFilter && locationCounts && Object.keys(locationCounts).length > 0 && (
+          <SidebarSection
+            id="location"
+            label="Location"
+            open={openSections.location}
+            onToggle={() => toggleSection("location")}
+            action={
+              locationFilter ? (
                 <button
-                  key={loc}
-                  onClick={() => onLocationFilter(locationFilter === loc ? null : loc)}
-                  className={`text-[11px] px-1.5 py-0.5 rounded-full border transition-colors ${
-                    locationFilter === loc
+                  onClick={() => onLocationFilter(null)}
+                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              ) : undefined
+            }
+            collapsedSummary={
+              locationFilter ? (
+                <button
+                  onClick={() => onLocationFilter(null)}
+                  title="Clear location filter"
+                  className="text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border bg-primary text-primary-foreground border-primary"
+                >
+                  {locationFilter} ×
+                </button>
+              ) : undefined
+            }
+          >
+            <div className="flex flex-wrap gap-1">
+              {Object.entries(locationCounts)
+                .sort((a, b) => b[1] - a[1])
+                .map(([loc, count]) => (
+                  <button
+                    key={loc}
+                    onClick={() => onLocationFilter(locationFilter === loc ? null : loc)}
+                    className={`text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border transition-colors ${
+                      locationFilter === loc
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border hover:bg-accent"
+                    }`}
+                  >
+                    {loc} <span className="opacity-60">{count}</span>
+                  </button>
+                ))}
+            </div>
+          </SidebarSection>
+        )}
+
+        {/* Category filter chips */}
+        {onCategoryFilter && (
+          <SidebarSection
+            id="category"
+            label="Category"
+            open={openSections.category}
+            onToggle={() => toggleSection("category")}
+            action={
+              categoryFilter ? (
+                <button
+                  onClick={() => onCategoryFilter(null)}
+                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  Clear
+                </button>
+              ) : undefined
+            }
+            collapsedSummary={
+              categoryFilter ? (
+                <button
+                  onClick={() => onCategoryFilter(null)}
+                  title="Clear category filter"
+                  className="text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border bg-primary text-primary-foreground border-primary"
+                >
+                  {CATEGORY_LABELS[categoryFilter]} ×
+                </button>
+              ) : undefined
+            }
+          >
+            <div className="flex flex-wrap gap-1">
+              {EVENT_CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  onClick={() => onCategoryFilter(categoryFilter === cat ? null : cat)}
+                  className={`text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border transition-colors ${
+                    categoryFilter === cat
                       ? "bg-primary text-primary-foreground border-primary"
                       : "border-border hover:bg-accent"
                   }`}
                 >
-                  {loc} <span className="opacity-60">{count}</span>
+                  {CATEGORY_LABELS[cat]}
                 </button>
               ))}
-          </div>
-        </div>
-      )}
-
-      {/* Category filter chips */}
-      {onCategoryFilter && (
-        <div className="px-3 pb-2 border-b border-border">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Category</span>
-            {categoryFilter && (
-              <button
-                onClick={() => onCategoryFilter(null)}
-                className="text-[10px] text-muted-foreground hover:text-foreground"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {EVENT_CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => onCategoryFilter(categoryFilter === cat ? null : cat)}
-                className={`text-[11px] px-1.5 py-0.5 rounded-full border transition-colors ${
-                  categoryFilter === cat
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "border-border hover:bg-accent"
-                }`}
-              >
-                {CATEGORY_LABELS[cat]}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          </SidebarSection>
+        )}
+      </div>
 
       {/* Bottom nav links */}
       <div className="p-3 border-t border-border space-y-1">
