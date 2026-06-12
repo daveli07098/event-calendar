@@ -1,5 +1,9 @@
 ## [2026-06-13] — Session: UI/UX enhancement pass + agent bootstrap
 ### Added
+- feat(sidebar): collapsible My Calendars / Location / Category sections with persisted state; active filter shown as a clearable chip when collapsed ([6f565d0])
+### Changed
+- feat(sidebar): unified scroll container — long filter chip lists no longer squeeze the calendar list off-screen on short viewports; larger touch targets for chips and mini-calendar days on mobile ([6f565d0])
+### Added
 - feat(calendar): empty-state hint banner with create/import guidance; "no events match filters" variant ([0189a61])
 - chore(prisma): seed config wiring (ts-node), `prisma/seed.ts` scaffold and `prisma/testConnection.ts` helper ([c850c29])
 ### Fixed
