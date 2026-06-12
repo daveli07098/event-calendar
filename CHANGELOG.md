@@ -1,3 +1,15 @@
+## [2026-06-13] — Session: UI/UX enhancement pass + agent bootstrap
+### Added
+- feat(calendar): empty-state hint banner with create/import guidance; "no events match filters" variant ([0189a61])
+- chore(prisma): seed config wiring (ts-node), `prisma/seed.ts` scaffold and `prisma/testConnection.ts` helper ([c850c29])
+### Fixed
+- fix(calendar): pin date/time formatting to en-US across mini calendar, reminders, day panel and related-events list — UI no longer mixes OS locale (zh) with English ([0189a61])
+- fix(calendar): surface toast feedback for all event mutations (create/update/delete/duplicate/drag/resize/load failures); failed saves keep the modal open so input isn't lost ([0189a61])
+### Changed
+- feat(a11y): aria-labels + tooltips on icon-only buttons; mini-calendar days are real buttons with full-date labels; capitalized toolbar buttons ([0189a61])
+### Maintenance
+- chore: session-wrap changelog workflow added to CLAUDE.md / AGENTS.md ([94bd5a0])
+
 ## [2026-06-02] — Session: EventModal date-range blocking
 ### Fixed
 - fix(calendar): EventModal — block saves when the end date/time is before the start date/time, and surface an inline validation message so invalid ranges cannot be submitted ([ca5c01c])
