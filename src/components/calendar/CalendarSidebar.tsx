@@ -54,7 +54,9 @@ export function CalendarSidebar({
   const [today, setToday] = useState<Date | null>(null);
   useEffect(() => { setToday(new Date()); }, []);
 
-  const monthName = miniDate.toLocaleString("default", {
+  // Explicit locale — keeps the mini calendar consistent with the main
+  // calendar header ("June 2026") regardless of the OS/browser locale.
+  const monthName = miniDate.toLocaleString("en-US", {
     month: "long",
     year: "numeric",
   });
@@ -71,6 +73,8 @@ export function CalendarSidebar({
           size="icon"
           onClick={() => setCollapsed(false)}
           className="size-8"
+          aria-label="Expand sidebar"
+          title="Expand sidebar"
         >
           <ChevronRight className="size-4" />
         </Button>
@@ -89,6 +93,8 @@ export function CalendarSidebar({
           size="icon"
           onClick={() => setCollapsed(true)}
           className="size-6 hidden md:flex"
+          aria-label="Collapse sidebar"
+          title="Collapse sidebar"
         >
           <ChevronLeft className="size-4" />
         </Button>
@@ -99,6 +105,7 @@ export function CalendarSidebar({
             size="icon"
             onClick={onMobileClose}
             className="size-6 md:hidden"
+            aria-label="Close sidebar"
           >
             <X className="size-4" />
           </Button>
@@ -108,11 +115,11 @@ export function CalendarSidebar({
       {/* Mini Calendar */}
       <div className="p-3 border-b border-border">
         <div className="flex items-center justify-between mb-2">
-          <Button variant="ghost" size="icon" onClick={prevMonth} className="size-6">
+          <Button variant="ghost" size="icon" onClick={prevMonth} className="size-6" aria-label="Previous month" title="Previous month">
             <ChevronLeft className="size-3" />
           </Button>
-          <span className="text-xs font-medium">{monthName}</span>
-          <Button variant="ghost" size="icon" onClick={nextMonth} className="size-6">
+          <span className="text-xs font-medium" aria-live="polite">{monthName}</span>
+          <Button variant="ghost" size="icon" onClick={nextMonth} className="size-6" aria-label="Next month" title="Next month">
             <ChevronRight className="size-3" />
           </Button>
         </div>
@@ -134,9 +141,12 @@ export function CalendarSidebar({
               year === today.getFullYear();
             const clickDate = new Date(year, month, day);
             return (
-              <div
+              <button
                 key={day}
+                type="button"
                 onClick={() => onMiniDateClick?.(clickDate)}
+                aria-label={clickDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+                aria-current={isToday ? "date" : undefined}
                 className={`text-[11px] py-0.5 rounded-full cursor-pointer select-none ${
                   isToday
                     ? "bg-primary text-primary-foreground font-bold"
@@ -144,7 +154,7 @@ export function CalendarSidebar({
                 }`}
               >
                 {day}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -162,6 +172,8 @@ export function CalendarSidebar({
             size="icon"
             onClick={onAddCalendar}
             className="size-6"
+            aria-label="Add calendar"
+            title="Add calendar"
           >
             <Plus className="size-3" />
           </Button>

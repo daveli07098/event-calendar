@@ -38,7 +38,9 @@ function addFired(key: string) {
 }
 
 function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // Explicit locale — keeps times consistent with the rest of the (English) UI
+  // regardless of the OS/browser locale.
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 }
 
 export function EventReminder({ events, calendars }: EventReminderProps) {

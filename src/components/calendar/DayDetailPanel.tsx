@@ -16,8 +16,10 @@ interface DayDetailPanelProps {
   modal?: boolean;
 }
 
+// Explicit locale — keeps dates/times consistent with the rest of the
+// (English) UI regardless of the OS/browser locale.
 function formatTime(isoString: string): string {
-  return new Date(isoString).toLocaleTimeString([], {
+  return new Date(isoString).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
   });
@@ -25,7 +27,7 @@ function formatTime(isoString: string): string {
 
 function formatPanelDate(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString([], {
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",

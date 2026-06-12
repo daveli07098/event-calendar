@@ -208,7 +208,7 @@ export function SettingsClient({ user }: SettingsClientProps) {
       <div className="mx-auto max-w-2xl p-6">
         <div className="flex items-center gap-4 mb-6">
           <Link href="/">
-            <Button variant="ghost" size="icon">
+            <Button variant="ghost" size="icon" aria-label="Back to calendar" title="Back to calendar">
               <ArrowLeft className="size-4" />
             </Button>
           </Link>
@@ -359,6 +359,8 @@ export function SettingsClient({ user }: SettingsClientProps) {
                       size="icon"
                       onClick={() => deleteCalendar(cal.id)}
                       className="size-8 text-destructive hover:text-destructive"
+                      aria-label="Delete calendar"
+                      title="Delete calendar"
                     >
                       <Trash2 className="size-4" />
                     </Button>

@@ -20,6 +20,7 @@ import type {
   EventResizeDoneArg,
 } from "@fullcalendar/interaction";
 import { Plus, Search } from "lucide-react";
+import { toast } from "sonner";
 import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
 import { CATEGORY_LABELS } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
@@ -214,6 +215,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     const event = dropInfo.event.extendedProps.event as EventType;
     if (!calendarIsWritable(event.calendarId)) {
       dropInfo.revert();
+      toast.info("This calendar is read-only");
       return;
     }
     try {
@@ -228,12 +230,14 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       });
       if (!res.ok) {
         dropInfo.revert();
+        toast.error("Couldn't move event — change reverted");
         return;
       }
       const updated = await res.json();
       setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
     } catch {
       dropInfo.revert();
+      toast.error("Couldn't move event — change reverted");
     }
   };
 
@@ -241,6 +245,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     const event = resizeInfo.event.extendedProps.event as EventType;
     if (!calendarIsWritable(event.calendarId)) {
       resizeInfo.revert();
+      toast.info("This calendar is read-only");
       return;
     }
     try {
@@ -254,12 +259,14 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       });
       if (!res.ok) {
         resizeInfo.revert();
+        toast.error("Couldn't resize event — change reverted");
         return;
       }
       const updated = await res.json();
       setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
     } catch {
       resizeInfo.revert();
+      toast.error("Couldn't resize event — change reverted");
     }
   };
 
@@ -281,27 +288,58 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
-        // Keep existing events on non-abort errors
+        // Keep existing events, but tell the user the view may be stale.
+        // Fixed id so rapid navigation doesn't stack duplicate toasts.
+        toast.error("Couldn't load events for this period", { id: "events-load" });
       }
     }
   };
 
   const handleSaveEvent = async (data: EventFormData) => {
-    if (selectedEvent) {
-      // Update
-      const res = await fetch(`/api/events/${selectedEvent.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      if (res.ok) {
+    // On failure the modal stays open so the user's input isn't lost.
+    try {
+      if (selectedEvent) {
+        // Update
+        const res = await fetch(`/api/events/${selectedEvent.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          toast.error("Couldn't save changes — please try again");
+          return;
+        }
         const updated = await res.json();
         setEvents((prev) =>
           prev.map((e) => (e.id === updated.id ? updated : e))
         );
+        toast.success("Event updated");
+      } else {
+        // Create
+        const res = await fetch("/api/events", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+          toast.error("Couldn't create event — please try again");
+          return;
+        }
+        const created = await res.json();
+        setEvents((prev) => [...prev, created]);
+        setNewEventId(created.id);
+        setTimeout(() => setNewEventId(null), 2000);
+        toast.success("Event created");
       }
-    } else {
-      // Create
+      setModalOpen(false);
+    } catch {
+      toast.error("Couldn't save event — please try again");
+    }
+  };
+
+  const handleCopyEvent = async (data: EventFormData) => {
+    // Immediately create a duplicate — no need to open the form again
+    try {
       const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -312,23 +350,12 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         setEvents((prev) => [...prev, created]);
         setNewEventId(created.id);
         setTimeout(() => setNewEventId(null), 2000);
+        toast.success("Event duplicated");
+      } else {
+        toast.error("Couldn't duplicate event");
       }
-    }
-    setModalOpen(false);
-  };
-
-  const handleCopyEvent = async (data: EventFormData) => {
-    // Immediately create a duplicate — no need to open the form again
-    const res = await fetch("/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      const created = await res.json();
-      setEvents((prev) => [...prev, created]);
-      setNewEventId(created.id);
-      setTimeout(() => setNewEventId(null), 2000);
+    } catch {
+      toast.error("Couldn't duplicate event");
     }
     setModalOpen(false);
     setCopyData(null);
@@ -336,13 +363,20 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
 
   const handleDeleteEvent = async () => {
     if (!selectedEvent) return;
-    const res = await fetch(`/api/events/${selectedEvent.id}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
+    try {
+      const res = await fetch(`/api/events/${selectedEvent.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        toast.error("Couldn't delete event — please try again");
+        return;
+      }
       setEvents((prev) => prev.filter((e) => e.id !== selectedEvent.id));
+      toast.success("Event deleted");
+      setModalOpen(false);
+    } catch {
+      toast.error("Couldn't delete event — please try again");
     }
-    setModalOpen(false);
   };
 
   const defaultCalendar = calendars.find((c) => c.isDefault) || calendars[0];
@@ -447,6 +481,22 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               <kbd className="hidden sm:inline text-xs border border-border rounded px-1 py-0.5 bg-background font-mono">⌘K</kbd>
             </button>
           )}
+          {/* Empty-state hint — guides new users / explains filtered-out views */}
+          {events.length === 0 ? (
+            <div className="mb-2 flex items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+              <span>
+                No events this period — click any date to create one, or{" "}
+                <a href="/tickets" className="text-primary underline-offset-2 hover:underline">
+                  import from a ticket URL
+                </a>
+                .
+              </span>
+            </div>
+          ) : filteredEvents.length === 0 ? (
+            <div className="mb-2 flex items-center justify-center rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+              No events match the current filters.
+            </div>
+          ) : null}
           <div className="flex-1">
           <FullCalendar
             ref={calendarRef}
@@ -476,6 +526,13 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               left: "prev,next today",
               center: "title",
               right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+            }}
+            buttonText={{
+              today: "Today",
+              month: "Month",
+              week: "Week",
+              day: "Day",
+              list: "List",
             }}
             initialView={isMobile ? "listWeek" : "dayGridMonth"}
             editable={!isMobile}

@@ -596,7 +596,7 @@ export function EventModal({
                     <div className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: re.calendarColor }} />
                     <span className="truncate flex-1">{re.title}</span>
                     <span className="text-muted-foreground text-xs shrink-0 tabular-nums">
-                      {new Date(re.startTime).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      {new Date(re.startTime).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </span>
                     <ArrowRight className="size-3.5 text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>
