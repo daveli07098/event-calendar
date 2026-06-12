@@ -48,7 +48,7 @@ function SidebarSection({
   children: ReactNode;
 }) {
   return (
-    <div className="mb-3">
+    <div className="mb-3 shrink-0">
       <div className="flex items-center justify-between mb-1.5">
         <button
           type="button"
@@ -229,8 +229,9 @@ export function CalendarSidebar({
       </div>
 
       {/* All sections share one scroll container so long filter lists never
-          squeeze the calendar list off-screen — everything scrolls together. */}
-      <div className="flex-1 overflow-y-auto p-3 min-h-0">
+          squeeze the calendar list off-screen — everything scrolls together.
+          Flex column so the filter group can anchor to the bottom (mt-auto). */}
+      <div className="flex-1 overflow-y-auto p-3 min-h-0 flex flex-col">
         <SidebarSection
           id="calendars"
           label="My Calendars"
@@ -329,6 +330,9 @@ export function CalendarSidebar({
         )}
         </SidebarSection>
 
+        {/* Filter group — anchored to the sidebar bottom when content is short,
+            scrolls naturally with the rest when content overflows. */}
+        <div className="mt-auto shrink-0 pt-3">
         {/* Location filter chips */}
         {onLocationFilter && locationCounts && Object.keys(locationCounts).length > 0 && (
           <SidebarSection
@@ -424,6 +428,7 @@ export function CalendarSidebar({
             </div>
           </SidebarSection>
         )}
+        </div>
       </div>
 
       {/* Bottom nav links */}
