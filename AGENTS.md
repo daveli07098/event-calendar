@@ -24,3 +24,52 @@ Rules:
 - Never write to `review/approved/` — human domain only.
 - Never store secrets in the vault except under `ai-workspace/memory/secrets/` (git-ignored).
 - Confirm each save with one line: "Saved to vault: `<relative-path>`"
+
+## Session Wrap — Changelog Workflow
+
+After any non-trivial session, automatically run the session-wrap workflow:
+
+1. Identify what was produced: source changes, configs, discoveries, or procedures.
+2. Stage and commit source changes using conventional commits.
+3. Write `docs/<topic>.md` for reusable findings or procedures.
+4. Append to `CHANGELOG.md` using Keep a Changelog format (create if absent).
+
+**Trigger phrases (run without asking):** "wrap up", "commit findings", "save and commit",
+"update changelog", "log our changes", "write up what we did", "commit the fix", "record this change".
+
+### Changelog format — dated session blocks
+
+```markdown
+## [YYYY-MM-DD] — Session: <topic>
+### Added / Fixed / Changed / Maintenance
+- type(scope): what changed ([short-sha])
+```
+
+Create a new `## [YYYY-MM-DD]` block if today's date isn't already there.
+
+## Conventions
+
+- Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`
+- One commit per logical change
+- Keep a Changelog format for CHANGELOG.md
+- `docs/` for reusable guides; `docs/adr-*.md` for architecture decisions
+
+## Tool Restrictions
+
+Minimal permissions — default deny, explicit allow.
+
+Allowed by default:
+- File read/write/search tools
+- Terminal commands (only when the task requires it)
+- Git operations
+
+Require explicit user request:
+- Browser / web tools
+- MCP server tools
+- Network / external API calls
+
+## Safety Rules
+
+- Never force-push without explicit confirmation
+- Never delete files or destructive DB operations without confirmation
+- Local commits first; push on explicit request only

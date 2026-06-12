@@ -20,3 +20,8 @@ Rules:
 - Never write to `review/approved/` — human domain only.
 - Never store secrets in the vault except under `ai-workspace/memory/secrets/` (git-ignored).
 - Confirm each save with one line: "Saved to vault: `<relative-path>`"
+
+## Session Wrap
+
+Follow the "Session Wrap — Changelog Workflow", Conventions, Tool Restrictions, and Safety
+Rules defined in @AGENTS.md (included above) — they apply to Claude Code sessions verbatim.
