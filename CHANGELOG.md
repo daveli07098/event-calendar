@@ -1,3 +1,13 @@
+## [2026-06-13] — Session: World Cup polish (deep-link, bracket zoom, rally friends)
+### Added
+- feat(worldcup): the "View matches" banner CTA now opens the World Cup section directly (/tickets?section=worldcup) ([64cfbeb])
+- feat(worldcup): Road to Trophy bracket fits the whole tree to the viewport by default, with enlarge/minimise (+/−) and Fit-to-width controls ([64cfbeb])
+- feat(worldcup): finished group matches (past kickoff) are colour-distinguished — a score pill when known, an FT badge otherwise; upcoming matches show kickoff time ([64cfbeb])
+- feat(mascot): the ball juggle pops roughly twice as high; seldom "rally" mode where the mascot waves a team-coloured flag, beats a drum and cycles support chants ([ca617ab])
+- feat(mascot): 1–2 supporting friends pop in to cheer during a rally, then vanish in a Pokémon-style white flash when it ends ([ca617ab])
+### Fixed
+- fix(banner): announcement reappears on every refresh/login (dismissal is in-memory only) ([b0425a9])
+
 ## [2026-06-13] — Session: World Cup hub, mascot kit & timezone
 ### Added
 - feat(worldcup): World Cup tab in the Event Section — group standings (rank/P/W/D/L/GD/Pts) + fixtures and a two-sided "Road to Trophy" knockout bracket converging on the centre Final, all parsed deterministically from existing calendar events ([410f7a1])
