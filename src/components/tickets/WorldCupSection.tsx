@@ -280,16 +280,15 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     };
     const titleFor = (slot: typeof base[string]["home"]): string => {
       const meaning = meaningOf(slot);
-      if (!slot.team) return `${meaning} — not decided yet (depends on the earlier matches).`;
-      if (slot.confirmed) return `${slot.team} — ${meaning}. Confirmed ✓`;
+      if (!slot.team) return `${meaning}\nNot decided yet — depends on the earlier matches`;
+      if (slot.confirmed) return `${slot.team} — ${meaning}\n✓ Confirmed`;
       const st = slot.group ? snapshot?.groups[slot.group]?.standings.find((t) => t.team === slot.team) : undefined;
-      const rec = st
-        ? ` Currently ${st.pts} ${st.pts === 1 ? "point" : "points"} from ${st.p} ${st.p === 1 ? "game" : "games"} played, goal difference ${st.gd >= 0 ? "+" : ""}${st.gd}.`
-        : "";
       const o = slot.group ? odds[slot.group]?.[slot.team] : undefined;
       const pct = o ? Math.round((slot.position === 1 ? o.first : slot.position === 2 ? o.second : o.third) * 100) : null;
-      const chance = pct != null ? ` About ${pct}% chance to finish ${ordinal(slot.position)}.` : "";
-      return `${slot.team} — currently ${meaning} (not yet confirmed).${rec}${chance}`;
+      const lines = [`${slot.team} — currently ${meaning} (not yet confirmed)`];
+      if (st) lines.push(`${st.pts} ${st.pts === 1 ? "point" : "points"} from ${st.p} ${st.p === 1 ? "game" : "games"} played · goal difference ${st.gd >= 0 ? "+" : ""}${st.gd}`);
+      if (pct != null) lines.push(`~${pct}% chance to finish ${ordinal(slot.position)}`);
+      return lines.join("\n");
     };
 
     const out: typeof base = {};
