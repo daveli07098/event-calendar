@@ -121,19 +121,93 @@ const KICK_VY = 270; // px/s vertical launch
 const GRAVITY = 950; // px/s²
 const KICK_RANGE = 30; // how close (center-to-center) before he kicks
 const STEP_INTERVAL = 0.14; // leg-swap cadence while walking (s)
-const JUGGLE_UP = 250; // px/s upward bounce for keepie-uppies
+const JUGGLE_UP = 380; // px/s upward bounce for keepie-uppies (higher pops)
 const DRIBBLE_MS = 8000; // time spent dribbling before switching to juggling
 const JUGGLE_MS = 5000; // time spent juggling the ball up and down
+const RALLY_MS = 5500; // time spent rallying (flag + drum + chant)
+const RALLY_CHANCE = 0.25; // how often a mode switch becomes a rally (seldom)
+
+// Chants shown while rallying. `%s` is replaced with the supported team name.
+const CHANTS = ["加油! 💪", "Let's go %s! ⚽", "We are the champions! 🏆", "%s 必勝! 🔥", "GO GO GO! 📣"];
+
+/**
+ * A small supporting fan that pops in beside the mascot during a rally and
+ * vanishes in a Pokémon-style white flash when it ends. Pure CSS animation —
+ * no physics. Wears the same team kit.
+ */
+function MiniFan({ palette, side, exiting }: { palette: Record<string, string>; side: "left" | "right"; exiting: boolean }) {
+  const body = cellsFrom(BODY, palette, 0);
+  const legs = cellsFrom(LEGS.idle, palette, 14);
+  return (
+    <div
+      aria-hidden="true"
+      className="absolute bottom-0 select-none"
+      style={{
+        left: side === "left" ? -44 : 70,
+        animation: exiting ? "pokemonFlash 0.6s ease-in forwards" : "friendPop 0.35s ease-out both",
+      }}
+    >
+      <svg
+        width={18} height={22} viewBox="0 0 15 17" shapeRendering="crispEdges"
+        className="absolute drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]"
+        style={{ left: side === "left" ? -6 : 32, bottom: 22, transformOrigin: "left center", animation: "flagWave 1.1s ease-in-out infinite" }}
+      >
+        <rect x={1} y={0} width={1} height={17} fill="#6b4f2a" />
+        <rect x={2} y={1} width={11} height={6} fill={palette.j} />
+        <rect x={2} y={3} width={11} height={2} fill={palette.p} />
+      </svg>
+      <svg
+        width={42} height={47} viewBox="0 0 16 18" shapeRendering="crispEdges"
+        className="drop-shadow-[0_2px_2px_rgba(0,0,0,0.3)]"
+        style={{ animation: "mascotBob 1.9s ease-in-out infinite" }}
+      >
+        <g>{body}</g>
+        <g>{legs}</g>
+      </svg>
+    </div>
+  );
+}
 
 export function FootballMascot() {
   const { theme } = useTheme();
   const [cheer, setCheer] = useState(false);
+  // Mirror of the animation loop's mode (set only on transitions, not per frame)
+  // so the flag / drum / chant can render declaratively.
+  const [displayMode, setDisplayMode] = useState<"dribble" | "juggle" | "rally">("dribble");
+  const [chant, setChant] = useState<string | null>(null);
+  // Supporting friends: "in" while rallying, "out" for the flash-fade, then hidden.
+  const [friendsPhase, setFriendsPhase] = useState<"hidden" | "in" | "out">("hidden");
 
   const active = getEventTheme(theme.eventTheme)?.id === "worldcup";
 
   // The mascot wears the kit of the team the user supports (or a default red).
   const kit = getTeamKit(theme.favouriteTeam);
   const palette: Record<string, string> = { ...COLORS, j: kit.jersey, p: kit.shorts, n: kit.trim };
+  const teamName = theme.favouriteTeam ?? "";
+
+  // While rallying, rotate through chants every ~1.6s (and clear when it ends).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing animation mode → chant text
+    if (displayMode !== "rally") { setChant(null); return; }
+    let i = 0;
+    const show = () => setChant(CHANTS[i % CHANTS.length].replace("%s", teamName).replace(/\s+!/g, "!").trim());
+    show();
+    const id = window.setInterval(() => { i++; show(); }, 1600);
+    return () => window.clearInterval(id);
+  }, [displayMode, teamName]);
+
+  // Friends appear during a rally and flash out (Pokémon-style) when it ends.
+  useEffect(() => {
+    if (displayMode === "rally") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- mode → friends visibility
+      setFriendsPhase("in");
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- start the flash-out only if friends were showing
+    setFriendsPhase((p) => (p === "in" ? "out" : p));
+    const t = window.setTimeout(() => setFriendsPhase("hidden"), 650);
+    return () => window.clearTimeout(t);
+  }, [displayMode]);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -168,7 +242,7 @@ export function FootballMascot() {
       stepAccum: 0,
       stepFrame: false,
       dragging: false,
-      mode: "dribble" as "dribble" | "juggle",
+      mode: "dribble" as "dribble" | "juggle" | "rally",
       modeUntil: 0, // timestamp when the current mode ends (0 = uninitialised)
       juggleTouch: 0, // timestamp of the last juggle foot-tap
     };
@@ -207,11 +281,19 @@ export function FootballMascot() {
         return;
       }
 
-      // Alternate between dribbling across the screen and juggling in place.
+      // Cycle modes: dribble ↔ juggle, with the occasional rally (flag + drum).
       if (st.modeUntil === 0) st.modeUntil = now + DRIBBLE_MS;
       if (now >= st.modeUntil) {
-        if (st.mode === "dribble") {
-          st.mode = "juggle";
+        const next =
+          st.mode === "rally"
+            ? "dribble" // always settle back to dribbling after a rally
+            : Math.random() < RALLY_CHANCE
+              ? "rally"
+              : st.mode === "dribble"
+                ? "juggle"
+                : "dribble";
+        st.mode = next;
+        if (next === "juggle") {
           st.modeUntil = now + JUGGLE_MS;
           st.airborne = false;
           st.kicking = false;
@@ -219,13 +301,33 @@ export function FootballMascot() {
           st.ballX = st.mascotX + CHAR_W / 2 - BALL_W / 2; // gather the ball
           st.ballY = 0.1;
           st.ballVY = JUGGLE_UP; // pop it up to start juggling
+        } else if (next === "rally") {
+          st.modeUntil = now + RALLY_MS;
+          st.airborne = false;
+          st.kicking = false;
+          st.ballVX = 0;
+          st.ballVY = 0;
+          st.ballY = 0;
         } else {
-          st.mode = "dribble";
           st.modeUntil = now + DRIBBLE_MS;
           st.ballVY = 0;
           st.ballY = 0;
           st.cooldownUntil = now + 300;
         }
+        setDisplayMode(next); // mirror to React for flag/drum/chant rendering
+      }
+
+      // ── Rally: stand still, wave the flag and beat the drum (chant via React) ──
+      if (st.mode === "rally") {
+        isWalking = false;
+        st.facing = 1;
+        const center = st.mascotX + CHAR_W / 2;
+        st.ballX += ((center - BALL_W / 2) - st.ballX) * Math.min(1, dt * 8); // ball rests at feet
+        st.ballY = 0;
+        showLeg("idle");
+        render(now);
+        raf = requestAnimationFrame(tick);
+        return;
       }
 
       // ── Juggling: keep the ball bouncing up and down off little foot taps ──
@@ -409,6 +511,46 @@ export function FootballMascot() {
           <div className="absolute -top-6 left-10 animate-bounce rounded-md bg-foreground px-2 py-0.5 text-[10px] font-bold text-background shadow">
             GOAL! ⚽
           </div>
+        )}
+
+        {/* Rally: chant bubble, a waving team flag, and a drum to beat */}
+        {chant && (
+          <div className="absolute -top-7 left-1/2 -translate-x-1/2 animate-bounce whitespace-nowrap rounded-md bg-foreground px-2 py-0.5 text-[10px] font-bold text-background shadow">
+            {chant}
+          </div>
+        )}
+        {displayMode === "rally" && (
+          <>
+            {/* Team flag on a pole, waving */}
+            <svg
+              width={30}
+              height={34}
+              viewBox="0 0 15 17"
+              shapeRendering="crispEdges"
+              aria-hidden="true"
+              className="absolute drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)]"
+              style={{ left: 50, bottom: 28, transformOrigin: "left center", animation: "flagWave 1.1s ease-in-out infinite" }}
+            >
+              <rect x={1} y={0} width={1} height={17} fill="#6b4f2a" />
+              <rect x={2} y={1} width={11} height={6} fill={kit.jersey} />
+              <rect x={2} y={3} width={11} height={2} fill={kit.shorts} />
+            </svg>
+            {/* Drum at the mascot's feet, beating */}
+            <span
+              aria-hidden="true"
+              className="absolute text-base leading-none"
+              style={{ left: 36, bottom: -2, transformOrigin: "center bottom", animation: "drumBeat 0.5s ease-in-out infinite" }}
+            >
+              🥁
+            </span>
+          </>
+        )}
+        {/* Supporting friends — cheer together, then vanish in a flash */}
+        {friendsPhase !== "hidden" && (
+          <>
+            <MiniFan palette={palette} side="left" exiting={friendsPhase === "out"} />
+            <MiniFan palette={palette} side="right" exiting={friendsPhase === "out"} />
+          </>
         )}
         <button
           type="button"
