@@ -292,9 +292,47 @@ function headToHead(subset: string[], scores: MatchScore[]): Map<string, { pts: 
 
 /** A resolved knockout slot: the team (if derivable) and whether it's locked. */
 export interface ResolvedSlot {
-  label: string;       // original placeholder, e.g. "A組亞軍" / "最佳第三名(ABCDF)"
-  team: string | null; // resolved team name, or null if not yet derivable
-  confirmed: boolean;  // true = mathematically locked; false = provisional
+  label: string;          // original placeholder, e.g. "A組亞軍" / "最佳第三名(ABCDF)"
+  team: string | null;    // resolved team name, or null if not yet derivable
+  confirmed: boolean;     // true = mathematically locked; false = provisional
+  group: string | null;   // the group this position comes from (for the tooltip)
+  position: 1 | 2 | 3 | null; // 1=winner 2=runner-up 3=third
+  title?: string;         // hover tooltip text, filled in by the UI layer
+}
+
+/**
+ * Monte-Carlo odds that each team finishes 1st/2nd/3rd in its group, given the
+ * played results and the remaining fixtures (random scorelines, FIFA tiebreaks).
+ * Returns fractions 0–1. When the group is finished it's deterministic (1 or 0).
+ */
+export function groupOdds(
+  teams: string[],
+  fixtures: { home: string; away: string }[],
+  known: MatchScore[],
+  sims = 1500,
+): Record<string, { first: number; second: number; third: number }> {
+  const played = known.filter((s) => s.homeScore != null && s.awayScore != null);
+  const playedKey = new Set(played.map((s) => `${s.home}|${s.away}`));
+  const remaining = fixtures.filter((f) => !playedKey.has(`${f.home}|${f.away}`));
+
+  const tally: Record<string, { first: number; second: number; third: number }> = {};
+  for (const t of teams) tally[t] = { first: 0, second: 0, third: 0 };
+
+  const runs = remaining.length === 0 ? 1 : sims;
+  for (let s = 0; s < runs; s++) {
+    const sim = played.slice();
+    for (const f of remaining) {
+      sim.push({ home: f.home, away: f.away, homeScore: Math.floor(Math.random() * 4), awayScore: Math.floor(Math.random() * 4) });
+    }
+    const st = computeStandings(teams, sim);
+    if (st[0]) tally[st[0].team].first++;
+    if (st[1]) tally[st[1].team].second++;
+    if (st[2]) tally[st[2].team].third++;
+  }
+  for (const t of teams) {
+    tally[t] = { first: tally[t].first / runs, second: tally[t].second / runs, third: tally[t].third / runs };
+  }
+  return tally;
 }
 
 /** A group is complete once all four teams have played their three matches. */
@@ -342,21 +380,21 @@ export function resolveKnockout(
     let m = label.match(/^([A-L])組冠軍$/);
     if (m) {
       const st = perGroup[m[1]];
-      return { label, team: st?.[0]?.team ?? null, confirmed: groupComplete(st) };
+      return { label, team: st?.[0]?.team ?? null, confirmed: groupComplete(st), group: m[1], position: 1 };
     }
     m = label.match(/^([A-L])組亞軍$/);
     if (m) {
       const st = perGroup[m[1]];
-      return { label, team: st?.[1]?.team ?? null, confirmed: groupComplete(st) };
+      return { label, team: st?.[1]?.team ?? null, confirmed: groupComplete(st), group: m[1], position: 2 };
     }
     m = label.match(/^最佳第三名\(([A-L]+)\)$/);
     if (m) {
       const allowed = new Set(m[1].split(""));
       const pick = qualified.find((t) => allowed.has(t.group) && !usedThirds.has(t.group));
       if (pick) usedThirds.add(pick.group);
-      return { label, team: pick?.standing.team ?? null, confirmed: allComplete };
+      return { label, team: pick?.standing.team ?? null, confirmed: allComplete, group: pick?.group ?? null, position: 3 };
     }
-    return { label, team: null, confirmed: false };
+    return { label, team: null, confirmed: false, group: null, position: null };
   };
 
   const out: Record<string, { home: ResolvedSlot; away: ResolvedSlot }> = {};

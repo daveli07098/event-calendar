@@ -19,6 +19,7 @@ import {
   buildBracket,
   computeStandings,
   resolveKnockout,
+  groupOdds,
   ROUND_LABELS_EN,
   type MatchScore,
   type TeamStanding,
@@ -53,6 +54,19 @@ function fmtAgo(iso: string | null, tz: string): string {
 
 function scoreFor(matches: MatchScore[], home: string, away: string): MatchScore | undefined {
   return matches.find((m) => m.home === home && m.away === away);
+}
+
+/** Per-match goals-for/against breakdown for a team, for the GD hover tooltip. */
+function goalBreakdown(team: string, matches: MatchScore[]): string {
+  const lines: string[] = [];
+  let gf = 0, ga = 0;
+  for (const m of matches) {
+    if (m.homeScore == null || m.awayScore == null) continue;
+    if (m.home === team) { gf += m.homeScore; ga += m.awayScore; lines.push(`vs ${m.away}: 入${m.homeScore} / 失${m.awayScore}`); }
+    else if (m.away === team) { gf += m.awayScore; ga += m.homeScore; lines.push(`vs ${m.home}: 入${m.awayScore} / 失${m.homeScore}`); }
+  }
+  if (!lines.length) return "未開賽 (no matches played)";
+  return `得球 ${gf} / 失球 ${ga}\n${lines.join("\n")}`;
 }
 
 /** Small popover button that adds a single match to a chosen calendar. */
@@ -191,12 +205,40 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
 
   // Resolve Round-of-32 placeholders (組冠軍/組亞軍/最佳第三名) from the synced
   // standings — provisional until each group/the thirds are mathematically locked.
+  // Each slot gets a hover tooltip: what it stands for, current group record, and
+  // (while provisional) the Monte-Carlo % chance of finishing in that position.
   const resolved = useMemo(() => {
     const r32 = bracket.find((r) => r.round === "R32")?.matches ?? [];
     const perGroup: Record<string, TeamStanding[]> = {};
     if (snapshot) for (const [g, v] of Object.entries(snapshot.groups)) perGroup[g] = v.standings;
-    return resolveKnockout(r32, perGroup);
-  }, [bracket, snapshot]);
+    const base = resolveKnockout(r32, perGroup);
+
+    // Per-group qualification odds from played results + remaining fixtures.
+    const odds: Record<string, ReturnType<typeof groupOdds>> = {};
+    for (const g of groups) {
+      const fixtures = g.matches.map((m) => ({ home: m.home, away: m.away }));
+      odds[g.group] = groupOdds(g.teams, fixtures, snapshot?.groups[g.group]?.matches ?? []);
+    }
+
+    const ordinal = (p: number | null) => (p === 1 ? "1st" : p === 2 ? "2nd" : p === 3 ? "3rd" : "");
+    const titleFor = (slot: typeof base[string]["home"]): string => {
+      if (!slot.team) return slot.label;
+      const meaning = `${slot.team} — ${slot.label}`;
+      if (slot.confirmed) return `${meaning} ✓ confirmed`;
+      const st = slot.group ? snapshot?.groups[slot.group]?.standings.find((t) => t.team === slot.team) : undefined;
+      const rec = st ? ` · ${st.pts}pts, P${st.p}, GD${st.gd >= 0 ? "+" : ""}${st.gd}` : "";
+      const o = slot.group ? odds[slot.group]?.[slot.team] : undefined;
+      const pct = o ? Math.round((slot.position === 1 ? o.first : slot.position === 2 ? o.second : o.third) * 100) : null;
+      const chance = pct != null ? ` · ~${pct}% to finish ${ordinal(slot.position)}` : "";
+      return `${meaning} (provisional)${rec}${chance}`;
+    };
+
+    const out: typeof base = {};
+    for (const [id, m] of Object.entries(base)) {
+      out[id] = { home: { ...m.home, title: titleFor(m.home) }, away: { ...m.away, title: titleFor(m.away) } };
+    }
+    return out;
+  }, [bracket, snapshot, groups]);
 
   async function refreshScores() {
     setRefreshing(true);
@@ -356,7 +398,7 @@ function GroupCard({
               <span className="text-center tabular-nums">{t.w}</span>
               <span className="text-center tabular-nums">{t.d}</span>
               <span className="text-center tabular-nums">{t.l}</span>
-              <span className="text-center tabular-nums">{t.gd > 0 ? `+${t.gd}` : t.gd}</span>
+              <span className="text-center tabular-nums cursor-help" title={goalBreakdown(t.team, matches)}>{t.gd > 0 ? `+${t.gd}` : t.gd}</span>
               <span className="text-center font-bold tabular-nums">{t.pts}</span>
             </div>
           ))}
@@ -417,17 +459,17 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
     return (
       <span
         className={cn(
-          "inline-flex items-center gap-1 truncate",
+          "inline-flex cursor-help items-center gap-1 truncate",
           slot.confirmed ? "font-semibold text-foreground" : "italic text-amber-500",
         )}
-        title={slot.confirmed ? "Confirmed" : `Provisional — ${slot.label}`}
+        title={slot.title ?? `${slot.team} — ${slot.label}`}
       >
         {slot.confirmed && <CheckCircle2 className="size-2.5 shrink-0" />}
         {slot.team}
       </span>
     );
   }
-  return <span className="truncate text-muted-foreground">{fallback}</span>;
+  return <span className="truncate text-muted-foreground" title={slot?.label ?? fallback}>{fallback}</span>;
 }
 
 function BracketMatch({
