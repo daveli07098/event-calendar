@@ -1,3 +1,11 @@
+## [2026-06-13] — Session: PWA install prompt, theme indicator, scan logging
+### Added
+- feat(pwa): installable app — manifest (standalone, theme color, SVG + maskable icons), minimal network-passthrough service worker (prod-only registration), and a mobile "Add to Home Screen" prompt (Android one-tap via beforeinstallprompt; iOS Safari manual steps; dismissible with 14-day cooldown) ([f0b82a9])
+### Changed
+- feat(theme): top-right ThemeSwitcher now mirrors the current selection exactly — event-theme emoji+label when active, else accent swatch+name — matching Settings ([61fbcd2])
+### Fixed
+- fix(discounts): detailed backend logging for scan failures — full AI provider cascade per attempt, fetch blocks (403), and thin content — so failures are diagnosable in the server console ([61fbcd2])
+
 ## [2026-06-13] — Session: Event themes + customizable site banner
 ### Added
 - feat(theme): event themes — seasonal accent skins (extensible registry), ships ⚽ Football/World Cup; top-right ThemeSwitcher with light/dark/system + event picker; defaults everyone to the World Cup skin ([cbd8cd9])
