@@ -95,12 +95,25 @@ export function parseJsonLoose(raw: string): Record<string, unknown> {
   try {
     return JSON.parse(cleaned);
   } catch {
-    const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
+    // Fall through to recovery strategies below.
+  }
+  // Model sometimes adds a preamble ("Here is the JSON: {…}") — extract the
+  // outermost {…} block and parse that.
+  const first = cleaned.indexOf("{");
+  const last = cleaned.lastIndexOf("}");
+  if (first !== -1 && last > first) {
     try {
-      return JSON.parse(salvaged);
+      return JSON.parse(cleaned.slice(first, last + 1));
     } catch {
-      return {};
+      // Fall through to the truncation salvage below.
     }
+  }
+  // Truncated response — close a dangling object.
+  const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
+  try {
+    return JSON.parse(salvaged);
+  } catch {
+    return {};
   }
 }
 
@@ -127,7 +140,10 @@ export async function callGeminiJson(
   const endpoint = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
+    // temperature 0 → deterministic extraction. Without it Gemini defaults to a
+    // high temperature and gives inconsistent results (e.g. a clear sale page
+    // flipping between hasDiscount true/false across identical calls).
+    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0 },
   });
 
   let res: Response | null = null;
