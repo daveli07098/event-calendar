@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check, Plus, Minus, Maximize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -150,6 +150,12 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [now, setNow] = useState(0); // clock read on mount (avoids impure Date.now() in render)
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read the clock once on mount
+    setNow(Date.now());
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,6 +281,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
                   matches={matches}
                   calendars={calendars}
                   tz={tz}
+                  now={now}
                 />
               );
             })}
@@ -295,7 +302,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
 }
 
 function GroupCard({
-  group, standings, fixtures, matches, calendars, tz,
+  group, standings, fixtures, matches, calendars, tz, now,
 }: {
   group: string;
   standings: TeamStanding[];
@@ -303,6 +310,7 @@ function GroupCard({
   matches: MatchScore[];
   calendars: CalendarType[];
   tz: string;
+  now: number;
 }) {
   return (
     <Card size="sm">
@@ -348,18 +356,28 @@ function GroupCard({
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground/70 font-medium">Matches</p>
           {fixtures.map((f, i) => {
             const s = scoreFor(matches, f.home, f.away);
-            const played = s && s.homeScore != null && s.awayScore != null;
+            const played = s != null && s.homeScore != null && s.awayScore != null;
+            // Finished = kicked off in the past (distinct colour even without a score yet).
+            const finished = now > 0 && new Date(f.kickoff).getTime() < now;
             return (
-              <div key={i} className="flex items-center gap-1.5 text-xs">
-                <span className="flex-1 text-right truncate">{f.home}</span>
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center gap-1.5 text-xs rounded px-1 py-0.5",
+                  finished && "bg-primary/5",
+                )}
+              >
+                <span className={cn("flex-1 text-right truncate", finished && "font-medium")}>{f.home}</span>
                 {played ? (
-                  <span className="font-bold tabular-nums px-1.5 py-0.5 rounded bg-muted">
+                  <span className="font-bold tabular-nums px-1.5 py-0.5 rounded bg-primary/15 text-primary">
                     {s!.homeScore} - {s!.awayScore}
                   </span>
+                ) : finished ? (
+                  <span className="px-1 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold">FT</span>
                 ) : (
                   <span className="text-muted-foreground text-[10px] whitespace-nowrap">{fmtKickoff(f.kickoff, tz)}</span>
                 )}
-                <span className="flex-1 truncate">{f.away}</span>
+                <span className={cn("flex-1 truncate", finished && "font-medium")}>{f.away}</span>
                 <AddMatchButton
                   title={`${f.home} vs ${f.away}`}
                   startIso={f.kickoff}
@@ -415,6 +433,33 @@ function Bracket({
   const final = bracket.find((r) => r.round === "Final");
   const third = bracket.find((r) => r.round === "ThirdPlace");
 
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null);
+
+  const clampZoom = (z: number) => Math.max(0.4, Math.min(1.6, Math.round(z * 100) / 100));
+
+  // Measure the natural size and fit-to-width on mount / resize (show all first).
+  useEffect(() => {
+    const fit = () => {
+      const c = contentRef.current, w = wrapRef.current;
+      if (!c || !w) return;
+      const natW = c.scrollWidth, natH = c.scrollHeight; // unaffected by transform
+      setNat({ w: natW, h: natH });
+      setZoom(clampZoom(Math.min(1, w.clientWidth / natW)));
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [bracket]);
+
+  const fitToWidth = () => {
+    const c = contentRef.current, w = wrapRef.current;
+    if (!c || !w) return;
+    setZoom(clampZoom(Math.min(1, w.clientWidth / c.scrollWidth)));
+  };
+
   const column = (label: string, matches: KnockoutMatch[], key: string) => (
     <div key={key} className="flex w-44 shrink-0 flex-col gap-2">
       <p className="text-center text-xs font-semibold text-muted-foreground">{label}</p>
@@ -425,29 +470,52 @@ function Bracket({
   );
 
   return (
-    <div className="overflow-x-auto pb-4">
-      <div className="flex min-w-max items-stretch gap-3">
-        {/* Left half: R32 → SF flowing toward the centre */}
-        {rounds.map((r) => column(ROUND_LABELS_EN[r.round], r.matches.filter((m) => m.side === "left"), `L-${r.round}`))}
+    <div className="space-y-2">
+      {/* Zoom controls — fits the whole bracket by default, enlarge/minimise here */}
+      <div className="flex items-center justify-end gap-1">
+        <Button size="icon-sm" variant="outline" onClick={() => setZoom((z) => clampZoom(z - 0.1))} aria-label="Zoom out" title="Minimise">
+          <Minus className="size-3.5" />
+        </Button>
+        <span className="w-10 text-center text-xs tabular-nums text-muted-foreground">{Math.round(zoom * 100)}%</span>
+        <Button size="icon-sm" variant="outline" onClick={() => setZoom((z) => clampZoom(z + 0.1))} aria-label="Zoom in" title="Enlarge">
+          <Plus className="size-3.5" />
+        </Button>
+        <Button size="icon-sm" variant="outline" onClick={fitToWidth} aria-label="Fit to width" title="Fit all">
+          <Maximize2 className="size-3.5" />
+        </Button>
+      </div>
 
-        {/* Centre: the Final (and third-place play-off below it) */}
-        <div className="flex w-48 shrink-0 flex-col items-center justify-center gap-3 px-1">
-          <p className="text-center text-sm font-semibold">🏆 Final</p>
-          {final?.matches.map((m) => (
-            <div key={m.eventId} className="w-full rounded-lg border-2 border-primary/60 bg-primary/5 p-1">
-              <BracketMatch match={m} calendars={calendars} tz={tz} />
+      <div ref={wrapRef} className="overflow-auto">
+        {/* Outer box collapses to the scaled size so 'fit' shows all with no dead space */}
+        <div style={nat ? { width: nat.w * zoom, height: nat.h * zoom } : undefined}>
+          <div
+            ref={contentRef}
+            className="flex min-w-max items-stretch gap-3"
+            style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
+          >
+            {/* Left half: R32 → SF flowing toward the centre */}
+            {rounds.map((r) => column(ROUND_LABELS_EN[r.round], r.matches.filter((m) => m.side === "left"), `L-${r.round}`))}
+
+            {/* Centre: the Final (and third-place play-off below it) */}
+            <div className="flex w-48 shrink-0 flex-col items-center justify-center gap-3 px-1">
+              <p className="text-center text-sm font-semibold">🏆 Final</p>
+              {final?.matches.map((m) => (
+                <div key={m.eventId} className="w-full rounded-lg border-2 border-primary/60 bg-primary/5 p-1">
+                  <BracketMatch match={m} calendars={calendars} tz={tz} />
+                </div>
+              ))}
+              {third && third.matches.length > 0 && (
+                <div className="w-full space-y-1">
+                  <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground/70">Third place</p>
+                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} />)}
+                </div>
+              )}
             </div>
-          ))}
-          {third && third.matches.length > 0 && (
-            <div className="w-full space-y-1">
-              <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground/70">Third place</p>
-              {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} />)}
-            </div>
-          )}
+
+            {/* Right half: SF → R32 mirrored (rounds reversed so R32 sits on the far right) */}
+            {[...rounds].reverse().map((r) => column(ROUND_LABELS_EN[r.round], r.matches.filter((m) => m.side === "right"), `R-${r.round}`))}
+          </div>
         </div>
-
-        {/* Right half: SF → R32 mirrored (rounds reversed so R32 sits on the far right) */}
-        {[...rounds].reverse().map((r) => column(ROUND_LABELS_EN[r.round], r.matches.filter((m) => m.side === "right"), `R-${r.round}`))}
       </div>
     </div>
   );

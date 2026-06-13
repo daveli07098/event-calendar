@@ -50,9 +50,9 @@ export const BANNER_PRESETS: Record<string, BannerPreset> = {
     imageUrl:
       "https://images.unsplash.com/photo-1459865264687-595d652de67e?auto=format&fit=crop&w=1600&q=70",
     ctaLabel: "View matches",
-    ctaHref: "/?category=sports",
+    ctaHref: "/tickets?section=worldcup",
     gradient: "from-green-600 via-emerald-600 to-green-800",
-    version: 1,
+    version: 2,
   },
 };
 

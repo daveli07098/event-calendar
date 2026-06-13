@@ -158,6 +158,16 @@ function DiffTable({
 
 export function TicketSection() {
   const [section, setSection] = useState<"import" | "venues" | "classify" | "discounts" | "worldcup">("import");
+
+  // Deep-link support: /tickets?section=worldcup opens that section (e.g. from
+  // the World Cup banner's "View matches" CTA).
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get("section");
+    if (s === "worldcup" || s === "venues" || s === "classify" || s === "discounts" || s === "import") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing URL → state on mount
+      setSection(s);
+    }
+  }, []);
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
