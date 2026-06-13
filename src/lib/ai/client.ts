@@ -5,7 +5,16 @@
  *
  * All callers share GEMINI_API_KEY / GROQ_API_KEY / GITHUB_TOKEN env vars and
  * the per-user daily quota in src/lib/ai/quota.ts.
+ *
+ * Routing around regional blocks (e.g. Gemini geo-blocks Hong Kong with
+ * HTTP 400 "User location is not supported"):
+ *   • GEMINI_BASE_URL — point Gemini calls at a reverse proxy you run in a
+ *     supported region (e.g. a Cloudflare Worker that forwards to
+ *     generativelanguage.googleapis.com). Dependency-free, most reliable.
+ *   • AI_PROXY_URL — route ALL provider calls through a forward http(s) proxy
+ *     in a supported region. Falls back to HTTPS_PROXY / ALL_PROXY if set.
  */
+import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
 
 /** Result of a JSON-mode AI call: parsed object plus usage metadata. */
 export interface AiJsonResult {
@@ -14,16 +23,62 @@ export interface AiJsonResult {
   tokensUsed: number | null;
 }
 
-// Gemini models in priority order — all share GEMINI_API_KEY
-// Free-tier RPM from Google AI Studio rate limits (2026-05):
+// Gemini API base — override with GEMINI_BASE_URL to use a reverse proxy.
+const GEMINI_BASE_URL = (
+  process.env.GEMINI_BASE_URL || "https://generativelanguage.googleapis.com"
+).replace(/\/+$/, "");
+
+// Optional forward proxy for outbound AI provider calls. Resolved once.
+let dispatcherResolved = false;
+let aiProxyDispatcher: Dispatcher | undefined;
+function getAiDispatcher(): Dispatcher | undefined {
+  if (!dispatcherResolved) {
+    dispatcherResolved = true;
+    const url = (
+      process.env.AI_PROXY_URL ||
+      process.env.HTTPS_PROXY ||
+      process.env.ALL_PROXY ||
+      ""
+    ).trim();
+    if (url) {
+      try {
+        aiProxyDispatcher = new ProxyAgent(url);
+        // Mask any credentials in the logged URL.
+        console.log(`[ai] routing provider calls via proxy: ${url.replace(/\/\/[^@/]*@/, "//***@")}`);
+      } catch (e) {
+        console.error(`[ai] invalid AI_PROXY_URL: ${(e as Error).message}`);
+      }
+    }
+  }
+  return aiProxyDispatcher;
+}
+
+/**
+ * fetch that routes through the configured AI proxy when one is set.
+ *
+ * When proxying we must use undici's OWN fetch (not Node's global fetch): a
+ * dispatcher created by the standalone `undici` package is incompatible with
+ * Node's built-in undici and throws "invalid onRequestStart method". With no
+ * proxy we use the global fetch as usual.
+ */
+async function aiFetch(url: string, init: RequestInit): Promise<Response> {
+  const dispatcher = getAiDispatcher();
+  if (!dispatcher) return fetch(url, init);
+  return undiciFetch(url, {
+    ...(init as Parameters<typeof undiciFetch>[1]),
+    dispatcher,
+  }) as unknown as Response;
+}
+
+// Gemini models in priority order — all share GEMINI_API_KEY.
+// Models that returned 404 ("not found for API version v1beta") were removed —
+// they don't exist on the generateContent endpoint and only wasted a hop.
 export const GEMINI_MODELS = [
   "gemini-3.5-flash",       // Gemini 3.5 Flash      — 5 RPM  free
   "gemini-3.1-flash-lite",  // Gemini 3.1 Flash Lite — 15 RPM free
-  "gemini-3-flash",         // Gemini 3 Flash        — 5 RPM  free
   "gemini-2.5-flash",       // Gemini 2.5 Flash      — 5 RPM  free (stable)
   "gemini-2.5-flash-lite",  // Gemini 2.5 Flash Lite — 10 RPM free (stable)
   "gemma-4-31b-it",         // Gemma 4 31B           — 15 RPM free
-  "gemma-4-26b-it",         // Gemma 4 26B           — 15 RPM free
 ];
 
 /** True when at least one AI provider is configured via env. */
@@ -69,7 +124,7 @@ export async function callGeminiJson(
   model: string
 ): Promise<AiJsonResult> {
   const apiKey = process.env.GEMINI_API_KEY!;
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const endpoint = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
@@ -78,7 +133,7 @@ export async function callGeminiJson(
   let res: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) await new Promise((r) => setTimeout(r, 2000)); // wait before retry
-    res = await fetch(endpoint, {
+    res = await aiFetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
@@ -116,7 +171,7 @@ export async function callOpenAICompatibleJson(
   providerName: string,
   extraHeaders: Record<string, string> = {}
 ): Promise<AiJsonResult> {
-  const res = await fetch(endpoint, {
+  const res = await aiFetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -147,7 +202,7 @@ export async function callOpenAICompatibleJson(
  * The gho_ token alone is NOT accepted by api.githubcopilot.com.
  */
 export async function getCopilotToken(githubToken: string): Promise<string> {
-  const res = await fetch("https://api.github.com/copilot_internal/v2/token", {
+  const res = await aiFetch("https://api.github.com/copilot_internal/v2/token", {
     headers: {
       Authorization: `token ${githubToken}`,
       "User-Agent": "GitHubCopilotChat/0.22.4",
