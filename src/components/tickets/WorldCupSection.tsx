@@ -188,16 +188,22 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
         if (cancelled) return;
         setEvents(Array.isArray(evJson) ? (evJson as EventType[]).filter(isWorldCupEvent) : []);
         setCalendars(Array.isArray(calJson) ? (calJson as CalendarType[]) : []);
+        const hasWcEvents = Array.isArray(evJson) && (evJson as EventType[]).some(isWorldCupEvent);
         if (scJson?.data) {
           setSnapshot(scJson.data as ScoresSnapshot);
           setProvider(scJson.provider ?? null);
           setFetchedAt(scJson.fetchedAt ?? null);
+        } else if (hasWcEvents) {
+          // No cached scores yet → fetch them once automatically.
+          void refreshScores();
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
+    // refreshScores is a stable hoisted function; intentionally run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const groups = useMemo(() => buildGroups(events), [events]);
@@ -222,7 +228,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
 
     const ordinal = (p: number | null) => (p === 1 ? "1st" : p === 2 ? "2nd" : p === 3 ? "3rd" : "");
     const titleFor = (slot: typeof base[string]["home"]): string => {
-      if (!slot.team) return slot.label;
+      if (!slot.team) return `${slot.label} · 尚未產生，由早輪賽事決定 (unavailable now)`;
       const meaning = `${slot.team} — ${slot.label}`;
       if (slot.confirmed) return `${meaning} ✓ confirmed`;
       const st = slot.group ? snapshot?.groups[slot.group]?.standings.find((t) => t.team === slot.team) : undefined;
@@ -469,7 +475,11 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
       </span>
     );
   }
-  return <span className="truncate text-muted-foreground" title={slot?.label ?? fallback}>{fallback}</span>;
+  return (
+    <span className="cursor-help truncate text-muted-foreground" title={slot?.title ?? `${fallback} · 尚未產生 (unavailable now)`}>
+      {fallback}
+    </span>
+  );
 }
 
 function BracketMatch({
@@ -481,27 +491,37 @@ function BracketMatch({
   resolved?: { home: ResolvedSlot; away: ResolvedSlot };
 }) {
   return (
-    <div className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
-      <div className="flex items-start gap-1">
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <div className="flex items-center justify-between gap-1">
-            <SlotName fallback={match.home} slot={resolved?.home} />
-            {match.matchId != null && (
-              <span className="text-[9px] text-muted-foreground/60 shrink-0">M{match.matchId}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            <Goal className="size-2.5 shrink-0 text-muted-foreground" />
-            <SlotName fallback={match.away} slot={resolved?.away} />
-          </div>
-          <p className="text-[9px] text-muted-foreground/60">{fmtKickoff(match.kickoff, tz)}</p>
-        </div>
+    <div className="relative rounded-md border border-border bg-card text-xs">
+      {/* White connector stub pointing toward the centre (Final) */}
+      {match.side === "left" && (
+        <span className="pointer-events-none absolute top-1/2 -right-4 h-px w-4 -translate-y-1/2 bg-white/40" />
+      )}
+      {match.side === "right" && (
+        <span className="pointer-events-none absolute top-1/2 -left-4 h-px w-4 -translate-y-1/2 bg-white/40" />
+      )}
+
+      <div className="absolute right-1 top-1">
         <AddMatchButton
           title={`${match.roundLabel}: ${resolved?.home?.team ?? match.home} vs ${resolved?.away?.team ?? match.away}`}
           startIso={match.kickoff}
           calendars={calendars}
         />
       </div>
+
+      {/* Two team slots, clearly separated by a white divider */}
+      <div className="divide-y divide-white/15">
+        <div className="px-2.5 py-2 pr-8">
+          <SlotName fallback={match.home} slot={resolved?.home} />
+        </div>
+        <div className="flex items-center gap-1 px-2.5 py-2 pr-8">
+          <Goal className="size-2.5 shrink-0 text-muted-foreground" />
+          <SlotName fallback={match.away} slot={resolved?.away} />
+        </div>
+      </div>
+      <p className="border-t border-white/10 px-2.5 py-1 text-[9px] text-muted-foreground/60">
+        {fmtKickoff(match.kickoff, tz)}
+        {match.matchId != null && ` · M${match.matchId}`}
+      </p>
     </div>
   );
 }
@@ -582,9 +602,9 @@ function Bracket({
   };
 
   const column = (label: string, matches: KnockoutMatch[], key: string) => (
-    <div key={key} className="flex w-44 shrink-0 flex-col gap-2">
+    <div key={key} className="flex w-48 shrink-0 flex-col gap-3">
       <p className="text-center text-xs font-semibold text-muted-foreground">{label}</p>
-      <div className="flex flex-1 flex-col justify-around gap-2">
+      <div className="flex flex-1 flex-col justify-around gap-6">
         {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />)}
       </div>
     </div>
