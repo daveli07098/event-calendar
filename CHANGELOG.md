@@ -1,3 +1,11 @@
+## [2026-06-13] — Session: bypass Gemini geo-block (proxy / base-URL)
+### Added
+- feat(ai): GEMINI_BASE_URL (reverse-proxy override) and AI_PROXY_URL (forward http(s) proxy, falls back to HTTPS_PROXY/ALL_PROXY) to route around Gemini's regional block ("User location is not supported", HTTP 400 in HK); uses undici's version-matched fetch when proxying ([c2e9aa1])
+### Changed
+- chore(ai): drop two Gemini model ids that 404 on the v1beta generateContent endpoint, trimming wasted cascade hops ([c2e9aa1])
+### Fixed
+- fix(theme): ThemeSwitcher dropdown crash — labels wrapped in DropdownMenuGroup ([c3d8828])
+
 ## [2026-06-13] — Session: PWA install prompt, theme indicator, scan logging
 ### Added
 - feat(pwa): installable app — manifest (standalone, theme color, SVG + maskable icons), minimal network-passthrough service worker (prod-only registration), and a mobile "Add to Home Screen" prompt (Android one-tap via beforeinstallprompt; iOS Safari manual steps; dismissible with 14-day cooldown) ([f0b82a9])
