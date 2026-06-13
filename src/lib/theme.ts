@@ -15,7 +15,36 @@ export interface Theme {
    * When set, it overrides the `accent` colors with the event's palette.
    */
   eventTheme?: string | null;
+  /**
+   * The team the user supports under the Football (World Cup) theme — the
+   * mascot wears its kit. `undefined` = never asked (prompt them); `null` =
+   * asked but declined; a string = the chosen team name (matches event titles,
+   * e.g. "阿根廷").
+   */
+  favouriteTeam?: string | null;
+  /**
+   * IANA timezone used to display event times (e.g. "Asia/Hong_Kong").
+   * Defaults to Hong Kong (GMT+8). Falls back to this when unset.
+   */
+  timeZone?: string;
 }
+
+/** Default display timezone (GMT+8) when the user hasn't picked one. */
+export const DEFAULT_TIME_ZONE = "Asia/Hong_Kong";
+
+/** A short, friendly set of timezones for the settings picker. */
+export const TIMEZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "Asia/Hong_Kong", label: "Hong Kong / Taipei (GMT+8)" },
+  { value: "Asia/Tokyo", label: "Tokyo / Seoul (GMT+9)" },
+  { value: "Asia/Singapore", label: "Singapore (GMT+8)" },
+  { value: "Asia/Bangkok", label: "Bangkok / Jakarta (GMT+7)" },
+  { value: "Asia/Kolkata", label: "India (GMT+5:30)" },
+  { value: "Europe/London", label: "London (GMT+0/1)" },
+  { value: "Europe/Paris", label: "Central Europe (GMT+1/2)" },
+  { value: "America/New_York", label: "US Eastern" },
+  { value: "America/Los_Angeles", label: "US Pacific" },
+  { value: "UTC", label: "UTC" },
+];
 
 export const DEFAULT_THEME: Theme = {
   mode: "system",
@@ -26,6 +55,7 @@ export const DEFAULT_THEME: Theme = {
   // Ships in World Cup mode so every visitor lands in the football skin; it can
   // be switched off (→ null) from the top-right theme button or settings.
   eventTheme: "worldcup",
+  timeZone: DEFAULT_TIME_ZONE, // GMT+8 by default
 };
 
 export const FONT_OPTIONS: Record<ThemeFont, { label: string; variable: string; stack: string }> = {
