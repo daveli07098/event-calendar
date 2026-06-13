@@ -129,7 +129,8 @@ const RALLY_MS = 6800; // time spent rallying (fits 2-3 longer chants)
 const RALLY_CHANT_MS = 2300; // each rally chant stays on screen this long
 const RALLY_CHANCE = 0.22; // chance a mode switch becomes a rally (seldom)
 const IDLE_CHANCE = 0.28; // chance a mode switch becomes a quiet idle stand
-const CASUAL_CHEER_CHANCE = 0.45; // chance of a passing cheer while running/idle
+const CASUAL_MIN_MS = 5000; // passing cheers fire at a random gap in this range…
+const CASUAL_MAX_MS = 15000; // …so they sprinkle across every move, unpredictably
 
 // Chants shown while rallying, picked at random. `%s` → the supported team name.
 const CHANTS = [
@@ -226,17 +227,29 @@ export function FootballMascot() {
     return () => window.clearInterval(id);
   }, [displayMode, teamName]);
 
-  // Passing cheers while running or idling (not during a rally — that has its own).
+  // Current mode, mirrored to a ref so the cheer timer below can read it without
+  // resubscribing on every mode change (which would keep resetting the timer).
+  const modeRef = useRef(displayMode);
+  useEffect(() => { modeRef.current = displayMode; }, [displayMode]);
+
+  // Passing cheers sprinkled across every move at a random gap. Independent of
+  // mode changes so the timer actually fires; skips the rally (its own chants).
   useEffect(() => {
-    if (!active || displayMode === "rally") return;
-    const id = window.setInterval(() => {
-      if (Math.random() < CASUAL_CHEER_CHANCE) {
-        setChant(pickChant(teamName));
-        window.setTimeout(() => setChant(null), 2400);
-      }
-    }, 9000);
-    return () => window.clearInterval(id);
-  }, [active, displayMode, teamName]);
+    if (!active) return;
+    let timer = 0;
+    const schedule = () => {
+      const delay = CASUAL_MIN_MS + Math.random() * (CASUAL_MAX_MS - CASUAL_MIN_MS);
+      timer = window.setTimeout(() => {
+        if (modeRef.current !== "rally") {
+          setChant(pickChant(teamName));
+          window.setTimeout(() => setChant(null), 2400);
+        }
+        schedule();
+      }, delay);
+    };
+    schedule();
+    return () => window.clearTimeout(timer);
+  }, [active, teamName]);
 
   // Friends appear during a rally and flash out (Pokémon-style) when it ends.
   useEffect(() => {
