@@ -25,7 +25,8 @@ interface ScoresSnapshot {
 }
 
 // Grounding-capable Gemini models, tried in order until one answers.
-const GROUNDED_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-3.5-flash"];
+// Strongest grounding-capable models first; flash-lite is a weak last resort.
+const GROUNDED_MODELS = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"];
 
 // ── GET: return the cached snapshot (or null if never refreshed / table absent) ──
 export async function GET() {
@@ -143,28 +144,39 @@ export async function POST() {
   const flat = flattenFixtures(groups);
   const prompt = buildPrompt(flat);
 
-  // Try each grounding-capable model until one succeeds.
+  // Try each grounding-capable model. A model that answers but returns an empty
+  // results array is treated as a soft miss — fall through to a stronger model,
+  // keeping the empty answer only as a last resort.
   let aiData: Record<string, unknown> | null = null;
   let provider = "";
+  let fallback: { data: Record<string, unknown>; provider: string } | null = null;
   const failures: string[] = [];
   for (const model of GROUNDED_MODELS) {
     try {
       const res = await callGeminiGrounded(prompt, model);
-      aiData = res.data;
-      provider = res.provider;
-      break;
+      const arr = Array.isArray(res.data.results) ? res.data.results : [];
+      if (arr.length > 0) {
+        aiData = res.data;
+        provider = res.provider;
+        break;
+      }
+      fallback ??= { data: res.data, provider: res.provider };
+      failures.push(`${model}: empty results`);
+      console.warn(`[worldcup/scores] ${model} returned no results — trying next model`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      failures.push(msg);
+      failures.push(`${model}: ${msg}`);
       console.warn(`[worldcup/scores] ${model} failed: ${msg}`);
     }
   }
+  if (!aiData) aiData = fallback?.data ?? null;
   if (!aiData) {
     return NextResponse.json(
       { error: `Score lookup failed: ${[...new Set(failures)].slice(0, 2).join(" | ") || "unknown"}` },
       { status: 502 },
     );
   }
+  provider = provider || fallback?.provider || "";
   await incrementAiLimit(uid);
 
   // Map AI results back onto OUR fixtures by fixture number — robust against the

@@ -209,6 +209,9 @@ export async function callGeminiGrounded(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
+      // Grounded calls can be slow; cap them so a hung request fails fast
+      // instead of blocking the route for minutes.
+      signal: AbortSignal.timeout(45_000),
     });
     if (res.ok || res.status !== 503) break;
   }
@@ -227,6 +230,8 @@ export async function callGeminiGrounded(
   // Grounded answers can span multiple parts — concatenate the text parts.
   const parts: Array<{ text?: string }> = data.candidates?.[0]?.content?.parts ?? [];
   const raw = parts.map((p) => p.text ?? "").join("") || "{}";
+  // Log a snippet so empty/odd grounded responses are diagnosable in server logs.
+  console.log(`[ai] grounded(${model}) raw head: ${raw.slice(0, 400).replace(/\s+/g, " ")}`);
   const usage = data.usageMetadata as { totalTokenCount?: number } | undefined;
   return {
     data: parseJsonLoose(raw),
