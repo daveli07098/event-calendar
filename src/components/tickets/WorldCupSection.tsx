@@ -87,11 +87,11 @@ function goalBreakdown(team: string, matches: MatchScore[]): string {
   let gf = 0, ga = 0;
   for (const m of matches) {
     if (m.homeScore == null || m.awayScore == null) continue;
-    if (m.home === team) { gf += m.homeScore; ga += m.awayScore; lines.push(`vs ${m.away}: 入${m.homeScore} / 失${m.awayScore}`); }
-    else if (m.away === team) { gf += m.awayScore; ga += m.homeScore; lines.push(`vs ${m.home}: 入${m.awayScore} / 失${m.homeScore}`); }
+    if (m.home === team) { gf += m.homeScore; ga += m.awayScore; lines.push(`vs ${m.away}: scored ${m.homeScore} / conceded ${m.awayScore}`); }
+    else if (m.away === team) { gf += m.awayScore; ga += m.homeScore; lines.push(`vs ${m.home}: scored ${m.awayScore} / conceded ${m.homeScore}`); }
   }
-  if (!lines.length) return "未開賽 (no matches played)";
-  return `得球 ${gf} / 失球 ${ga}\n${lines.join("\n")}`;
+  if (!lines.length) return "No matches played yet";
+  return `Goals for ${gf} / against ${ga}\n${lines.join("\n")}`;
 }
 
 /** Win/draw/loss breakdown and points for a team, for the Pts hover tooltip. */
@@ -105,12 +105,12 @@ function pointsBreakdown(team: string, matches: MatchScore[]): string {
     const my = isHome ? m.homeScore : m.awayScore;
     const opp = isHome ? m.awayScore : m.homeScore;
     const oppName = isHome ? m.away : m.home;
-    if (my > opp) { pts += 3; lines.push(`勝 vs ${oppName} (${my}-${opp})  +3`); }
-    else if (my === opp) { pts += 1; lines.push(`和 vs ${oppName} (${my}-${opp})  +1`); }
-    else { lines.push(`負 vs ${oppName} (${my}-${opp})  +0`); }
+    if (my > opp) { pts += 3; lines.push(`Won vs ${oppName} (${my}-${opp})  +3`); }
+    else if (my === opp) { pts += 1; lines.push(`Drew vs ${oppName} (${my}-${opp})  +1`); }
+    else { lines.push(`Lost vs ${oppName} (${my}-${opp})  +0`); }
   }
-  if (!lines.length) return "未開賽 (no matches played)";
-  return `${pts} 分\n${lines.join("\n")}`;
+  if (!lines.length) return "No matches played yet";
+  return `${pts} pts\n${lines.join("\n")}`;
 }
 
 /** Small popover button that adds a single match to a chosen calendar. */
@@ -271,16 +271,23 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     }
 
     const ordinal = (p: number | null) => (p === 1 ? "1st" : p === 2 ? "2nd" : p === 3 ? "3rd" : "");
+    // English description of what a slot stands for (team names stay Chinese).
+    const meaningOf = (slot: typeof base[string]["home"]): string => {
+      if (slot.position === 1 && slot.group) return `Group ${slot.group} winner`;
+      if (slot.position === 2 && slot.group) return `Group ${slot.group} runner-up`;
+      if (slot.position === 3) return "best 3rd place";
+      return slot.label; // e.g. "M74勝者"
+    };
     const titleFor = (slot: typeof base[string]["home"]): string => {
-      if (!slot.team) return `${slot.label} · 尚未產生，由早輪賽事決定 (unavailable now)`;
-      const meaning = `${slot.team} — ${slot.label}`;
-      if (slot.confirmed) return `${meaning} ✓ confirmed`;
+      const meaning = meaningOf(slot);
+      if (!slot.team) return `${meaning} · unavailable now (decided by earlier matches)`;
+      if (slot.confirmed) return `${slot.team} — ${meaning} ✓ confirmed`;
       const st = slot.group ? snapshot?.groups[slot.group]?.standings.find((t) => t.team === slot.team) : undefined;
       const rec = st ? ` · ${st.pts}pts, P${st.p}, GD${st.gd >= 0 ? "+" : ""}${st.gd}` : "";
       const o = slot.group ? odds[slot.group]?.[slot.team] : undefined;
       const pct = o ? Math.round((slot.position === 1 ? o.first : slot.position === 2 ? o.second : o.third) * 100) : null;
       const chance = pct != null ? ` · ~${pct}% to finish ${ordinal(slot.position)}` : "";
-      return `${meaning} (provisional)${rec}${chance}`;
+      return `${slot.team} — currently ${meaning} (provisional)${rec}${chance}`;
     };
 
     const out: typeof base = {};
@@ -541,7 +548,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
     );
   }
   return (
-    <InfoTip className="truncate text-muted-foreground" label={slot?.title ?? `${fallback} · 尚未產生 (unavailable now)`}>
+    <InfoTip className="truncate text-muted-foreground" label={slot?.title ?? `${fallback} · unavailable now (decided by earlier matches)`}>
       {fallback}
     </InfoTip>
   );
