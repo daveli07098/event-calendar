@@ -217,6 +217,9 @@ export async function aiExtractJson(prompt: string): Promise<AiJsonResult> {
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       failures.push(err.message);
+      // Log every provider attempt so the full fallback chain is visible in the
+      // server console (region blocks, expired tokens, missing keys, etc.).
+      console.warn(`[ai] provider failed (${failures.length}/${providers.length}): ${err.message}`);
       if (!isTransientAiError(err.message)) throw err;
       // transient — fall through to the next provider
     }

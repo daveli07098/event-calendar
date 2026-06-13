@@ -127,19 +127,25 @@ export async function POST(req: NextRequest) {
       cache: "no-store",
     });
     if (!fetchRes.ok) {
+      // 403/429 here usually means bot protection (Akamai/Cloudflare) on the
+      // retailer, not a bug — log it so it's visible in the server console.
+      console.warn(`[discounts/scan] fetch blocked: ${url} → HTTP ${fetchRes.status}`);
+      const hint = fetchRes.status === 403 ? " — site blocks automated requests" : "";
       return NextResponse.json(
-        { error: `Could not fetch site (HTTP ${fetchRes.status})` },
+        { error: `Could not fetch site (HTTP ${fetchRes.status})${hint}` },
         { status: 422 }
       );
     }
     html = await fetchRes.text();
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Fetch failed";
+    console.warn(`[discounts/scan] fetch error: ${url} → ${msg}`);
     return NextResponse.json({ error: `Could not fetch site: ${msg}` }, { status: 422 });
   }
 
   const pageText = extractTextFromHtml(html, DISCOUNT_KEYWORDS);
   if (pageText.length < 100) {
+    console.warn(`[discounts/scan] thin content: ${url} → ${pageText.length} chars (likely JS-rendered)`);
     return NextResponse.json(
       { error: "Site returned no readable content (may require JavaScript or block bots)" },
       { status: 422 }
@@ -148,6 +154,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const { data, provider, tokensUsed } = await aiExtractJson(DISCOUNT_PROMPT(pageText, url));
+    console.log(`[discounts/scan] ${url} → provider=${provider} tokens=${tokensUsed ?? "n/a"} hasDiscount=${Boolean(data.hasDiscount)}`);
     await incrementAiLimit(uid);
     const remaining = await remainingAiCalls(uid);
 
@@ -185,6 +192,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "AI extraction failed";
+    // Log the full provider-cascade failure so it's diagnosable in the backend
+    // console (e.g. Gemini regional block, expired Copilot token, no Groq key).
+    console.error(`[discounts/scan] AI cascade failed for ${url}: ${msg}`);
     return NextResponse.json({ error: `AI extraction failed: ${msg}` }, { status: 502 });
   }
 }

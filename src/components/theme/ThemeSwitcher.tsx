@@ -1,6 +1,6 @@
 "use client";
 
-import { Palette, Sun, Moon, Monitor, Check } from "lucide-react";
+import { Sun, Moon, Monitor, Check } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { EVENT_THEME_ORDER, EVENT_THEMES, getEventTheme } from "@/lib/event-themes";
 import { ACCENT_COLORS, type ThemeMode } from "@/lib/theme";
@@ -37,14 +37,21 @@ export function ThemeSwitcher({ className }: { className?: string }) {
           className,
         )}
         aria-label="Change theme"
-        title="Change theme"
+        title={activeEvent ? `Theme: ${activeEvent.label}` : `Theme: ${ACCENT_COLORS[theme.accent].label}`}
       >
+        {/* Always mirror the current selection so the button matches Settings:
+            event theme emoji when one is active, else the accent swatch. */}
         {activeEvent ? (
           <span className="text-base leading-none">{activeEvent.emoji}</span>
         ) : (
-          <Palette className="size-4" />
+          <span
+            className="size-3.5 rounded-full border border-border"
+            style={{ backgroundColor: ACCENT_COLORS[theme.accent].color }}
+          />
         )}
-        <span className="hidden md:inline">{activeEvent ? activeEvent.label : "Theme"}</span>
+        <span className="hidden md:inline">
+          {activeEvent ? activeEvent.label : ACCENT_COLORS[theme.accent].label}
+        </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
         <DropdownMenuLabel>Mode</DropdownMenuLabel>
