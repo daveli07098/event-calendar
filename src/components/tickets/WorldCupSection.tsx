@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check, Plus, Minus, Maximize2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -54,6 +55,30 @@ function fmtAgo(iso: string | null, tz: string): string {
 
 function scoreFor(matches: MatchScore[], home: string, away: string): MatchScore | undefined {
   return matches.find((m) => m.home === home && m.away === away);
+}
+
+/**
+ * Hover tooltip that reliably shows multi-line info. Portals to <body> so it's
+ * never clipped by the card's overflow, and follows the cursor. Replaces the
+ * unreliable native `title` attribute.
+ */
+function InfoTip({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const track = (e: React.MouseEvent) => setPos({ x: e.clientX, y: e.clientY });
+  return (
+    <span className={className} onMouseEnter={track} onMouseMove={track} onMouseLeave={() => setPos(null)}>
+      {children}
+      {pos && typeof document !== "undefined" && createPortal(
+        <div
+          className="pointer-events-none fixed z-[9999] max-w-xs whitespace-pre-line rounded-md bg-popover px-2 py-1.5 text-[11px] leading-relaxed text-popover-foreground shadow-lg ring-1 ring-foreground/15"
+          style={{ left: Math.min(pos.x + 14, window.innerWidth - 220), top: pos.y + 14 }}
+        >
+          {label}
+        </div>,
+        document.body,
+      )}
+    </span>
+  );
 }
 
 /** Per-match goals-for/against breakdown for a team, for the GD hover tooltip. */
@@ -423,8 +448,8 @@ function GroupCard({
               <span className="text-center tabular-nums">{t.w}</span>
               <span className="text-center tabular-nums">{t.d}</span>
               <span className="text-center tabular-nums">{t.l}</span>
-              <span className="text-center tabular-nums" title={goalBreakdown(t.team, matches)}>{t.gd > 0 ? `+${t.gd}` : t.gd}</span>
-              <span className="text-center font-bold tabular-nums" title={pointsBreakdown(t.team, matches)}>{t.pts}</span>
+              <InfoTip className="text-center tabular-nums" label={goalBreakdown(t.team, matches)}>{t.gd > 0 ? `+${t.gd}` : t.gd}</InfoTip>
+              <InfoTip className="text-center font-bold tabular-nums" label={pointsBreakdown(t.team, matches)}>{t.pts}</InfoTip>
             </div>
           ))}
         </div>
@@ -503,22 +528,22 @@ function GroupCard({
 function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot }) {
   if (slot?.team) {
     return (
-      <span
+      <InfoTip
         className={cn(
           "inline-flex items-center gap-1 truncate",
           slot.confirmed ? "font-semibold text-foreground" : "italic text-amber-500",
         )}
-        title={slot.title ?? `${slot.team} — ${slot.label}`}
+        label={slot.title ?? `${slot.team} — ${slot.label}`}
       >
         {slot.confirmed && <CheckCircle2 className="size-2.5 shrink-0" />}
         {slot.team}
-      </span>
+      </InfoTip>
     );
   }
   return (
-    <span className="truncate text-muted-foreground" title={slot?.title ?? `${fallback} · 尚未產生 (unavailable now)`}>
+    <InfoTip className="truncate text-muted-foreground" label={slot?.title ?? `${fallback} · 尚未產生 (unavailable now)`}>
       {fallback}
-    </span>
+    </InfoTip>
   );
 }
 
