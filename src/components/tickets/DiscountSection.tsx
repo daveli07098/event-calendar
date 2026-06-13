@@ -217,7 +217,19 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     const startDate = result.startDate ?? today;
     const endDate = result.endDate ?? startDate;
 
+    // Human-readable sale period for the event description.
+    const fmtD = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    const period =
+      result.startDate && result.endDate
+        ? `🗓️ Valid ${fmtD(result.startDate)} – ${fmtD(result.endDate)}`
+        : result.endDate
+          ? `🗓️ Valid until ${fmtD(result.endDate)}`
+          : result.startDate
+            ? `🗓️ From ${fmtD(result.startDate)}`
+            : "🗓️ Period not stated — added for today";
+
     const descriptionLines = [
+      period,
       result.discountSummary,
       result.promoCode ? `Promo code: ${result.promoCode}` : null,
       result.categories.length ? `On sale: ${result.categories.join(", ")}` : null,
@@ -244,7 +256,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: `🏷️ ${result.title ?? `${domain} discount`}`,
+          title: `🏷️ ${result.title ?? `${domain} discount`}${result.endDate ? ` (until ${fmtD(result.endDate)})` : ""}`,
           description: descriptionLines.join("\n"),
           location: domain,
           startTime: `${startDate}T00:00:00`,
@@ -500,7 +512,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                         }}
                       >
                         <SelectTrigger className="h-8 w-44 text-xs">
-                          <SelectValue placeholder="Choose calendar" />
+                          <SelectValue placeholder="Choose calendar">
+                            {(value) => calendars.find((c) => c.id === value)?.name ?? "Choose calendar"}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {calendars.map((c) => (
