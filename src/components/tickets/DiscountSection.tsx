@@ -112,6 +112,8 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const [selectedCalendar, setSelectedCalendar] = useState<Record<string, string>>({});
   const [addingFor, setAddingFor] = useState<string | null>(null);
   const [preview, setPreview] = useState<DiscountResult | null>(null);
+  const [previewStart, setPreviewStart] = useState(""); // YYYY-MM-DD, editable in the dialog
+  const [previewEnd, setPreviewEnd] = useState("");
   const [addedFor, setAddedFor] = useState<Set<string>>(new Set());
 
   const sources = [...DEFAULT_SOURCES, ...customSources];
@@ -208,21 +210,12 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     setCheckingAll(false);
   };
 
-  // Build the full calendar-event payload + display fields for a discount.
-  const buildEvent = (result: DiscountResult) => {
+  // Build the full calendar-event payload + display fields for a discount,
+  // using the (possibly user-edited) start/end dates from the preview dialog.
+  const buildEvent = (result: DiscountResult, startDate: string, endDate: string) => {
     const domain = domainOf(result.sourceUrl);
-    const today = new Date().toISOString().slice(0, 10);
-    const startDate = result.startDate ?? today;
-    const endDate = result.endDate ?? startDate;
     const fmtD = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    const period =
-      result.startDate && result.endDate
-        ? `🗓️ Valid ${fmtD(result.startDate)} – ${fmtD(result.endDate)}`
-        : result.endDate
-          ? `🗓️ Valid until ${fmtD(result.endDate)}`
-          : result.startDate
-            ? `🗓️ From ${fmtD(result.startDate)}`
-            : "🗓️ Period not stated — added for today";
+    const period = startDate === endDate ? `🗓️ ${fmtD(startDate)} · all-day` : `🗓️ Valid ${fmtD(startDate)} – ${fmtD(endDate)}`;
 
     const descriptionLines = [
       period,
@@ -249,13 +242,22 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     ].filter((l) => l !== null);
 
     return {
-      title: `🏷️ ${result.title ?? `${domain} discount`}${result.endDate ? ` (until ${fmtD(result.endDate)})` : ""}`,
+      title: `🏷️ ${result.title ?? `${domain} discount`}${startDate !== endDate ? ` (until ${fmtD(endDate)})` : ""}`,
       description: descriptionLines.join("\n"),
       location: domain,
       startDate,
       endDate,
       period,
     };
+  };
+
+  // Open the preview, seeding the editable dates from the detected period.
+  const openPreview = (result: DiscountResult) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const start = result.startDate ?? today;
+    setPreviewStart(start);
+    setPreviewEnd(result.endDate ?? start);
+    setPreview(result);
   };
 
   // Confirm from the preview dialog → create the event.
@@ -267,7 +269,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       toast.error("No calendar available");
       return;
     }
-    const ev = buildEvent(result);
+    const ev = buildEvent(result, previewStart, previewEnd);
     setAddingFor(result.sourceUrl);
     try {
       const res = await fetch("/api/events", {
@@ -551,7 +553,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                         <Button
                           size="sm"
                           className="gap-1.5"
-                          onClick={() => setPreview(result)}
+                          onClick={() => openPreview(result)}
                           disabled={addingFor === result.sourceUrl || !defaultCalendarId}
                         >
                           {addingFor === result.sourceUrl ? (
@@ -603,14 +605,39 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
             <DialogDescription>Preview the event, choose a calendar, then add.</DialogDescription>
           </DialogHeader>
           {preview && (() => {
-            const ev = buildEvent(preview);
+            const ev = buildEvent(preview, previewStart, previewEnd);
             const cal = selectedCalendar[preview.sourceUrl] || defaultCalendarId;
             return (
               <div className="space-y-3 text-sm">
                 <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
                   <p className="font-semibold">{ev.title}</p>
-                  <p className="mt-0.5 text-xs font-medium text-primary">{ev.period} · all-day · {ev.location}</p>
+                  <p className="mt-0.5 text-xs font-medium text-primary">{ev.period} · {ev.location}</p>
                 </div>
+
+                {/* Editable time period */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Time period</label>
+                  <div className="flex items-center gap-2">
+                    <Input type="date" value={previewStart} max={previewEnd || undefined} onChange={(e) => setPreviewStart(e.target.value)} className="h-8 text-xs" />
+                    <span className="text-xs text-muted-foreground">→</span>
+                    <Input type="date" value={previewEnd} min={previewStart || undefined} onChange={(e) => setPreviewEnd(e.target.value)} className="h-8 text-xs" />
+                  </div>
+                </div>
+
+                {/* Clickable discount URL */}
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Discount link</label>
+                  <a
+                    href={preview.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 truncate rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-primary hover:underline"
+                  >
+                    <ExternalLink className="size-3.5 shrink-0" />
+                    <span className="truncate">{preview.sourceUrl}</span>
+                  </a>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Calendar</label>
                   <Select value={cal} onValueChange={(v) => { if (typeof v === "string") setSelectedCalendar((prev) => ({ ...prev, [preview.sourceUrl]: v })); }}>
@@ -629,9 +656,10 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     </SelectContent>
                   </Select>
                 </div>
+
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Details</label>
-                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-2 font-sans text-xs leading-relaxed text-foreground/90">{ev.description}</pre>
+                  <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-2 font-sans text-xs leading-relaxed text-foreground/90">{ev.description}</pre>
                 </div>
               </div>
             );
