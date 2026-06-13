@@ -178,7 +178,9 @@ function AddMatchButton({
         <p className="text-xs font-medium truncate">{title}</p>
         <Select value={target} onValueChange={(v) => setCalId(String(v))}>
           <SelectTrigger className="w-full" size="sm">
-            <SelectValue placeholder="Choose calendar…" />
+            <SelectValue placeholder="Choose calendar…">
+              {(value) => calendars.find((c) => c.id === value)?.name ?? "Choose calendar…"}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {calendars.map((c) => (
