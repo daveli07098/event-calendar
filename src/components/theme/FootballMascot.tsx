@@ -122,10 +122,14 @@ const GRAVITY = 950; // px/s²
 const KICK_RANGE = 30; // how close (center-to-center) before he kicks
 const STEP_INTERVAL = 0.14; // leg-swap cadence while walking (s)
 const JUGGLE_UP = 380; // px/s upward bounce for keepie-uppies (higher pops)
-const DRIBBLE_MS = 8000; // time spent dribbling before switching to juggling
-const JUGGLE_MS = 5000; // time spent juggling the ball up and down
-const RALLY_MS = 5500; // time spent rallying (flag + drum + chant)
-const RALLY_CHANCE = 0.25; // how often a mode switch becomes a rally (seldom)
+const DRIBBLE_MS = 7000; // time spent running/dribbling before switching
+const JUGGLE_MS = 4500; // time spent juggling the ball up and down
+const IDLE_MS = 4000; // time spent standing idle
+const RALLY_MS = 6800; // time spent rallying (fits 2-3 longer chants)
+const RALLY_CHANT_MS = 2300; // each rally chant stays on screen this long
+const RALLY_CHANCE = 0.22; // chance a mode switch becomes a rally (seldom)
+const IDLE_CHANCE = 0.28; // chance a mode switch becomes a quiet idle stand
+const CASUAL_CHEER_CHANCE = 0.45; // chance of a passing cheer while running/idle
 
 // Chants shown while rallying, picked at random. `%s` → the supported team name.
 const CHANTS = [
@@ -150,6 +154,12 @@ const CHANTS = [
   "Unstoppable %s! ⚡",
   "一球入魂! ⚽🔥",
 ];
+
+/** Pick a random chant, fill in the team name and tidy spacing. */
+function pickChant(team: string): string {
+  const idx = Math.floor(Math.random() * CHANTS.length);
+  return CHANTS[idx].replace("%s", team).replace(/\s+([!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+}
 
 /**
  * A small supporting fan that pops in beside the mascot during a rally and
@@ -194,7 +204,7 @@ export function FootballMascot() {
   const [cheer, setCheer] = useState(false);
   // Mirror of the animation loop's mode (set only on transitions, not per frame)
   // so the flag / drum / chant can render declaratively.
-  const [displayMode, setDisplayMode] = useState<"dribble" | "juggle" | "rally">("dribble");
+  const [displayMode, setDisplayMode] = useState<"dribble" | "juggle" | "rally" | "idle">("dribble");
   const [chant, setChant] = useState<string | null>(null);
   // Supporting friends: "in" while rallying, "out" for the flash-fade, then hidden.
   const [friendsPhase, setFriendsPhase] = useState<"hidden" | "in" | "out">("hidden");
@@ -210,19 +220,23 @@ export function FootballMascot() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing animation mode → chant text
     if (displayMode !== "rally") { setChant(null); return; }
-    let last = -1;
-    const show = () => {
-      let idx = Math.floor(Math.random() * CHANTS.length);
-      if (CHANTS.length > 1 && idx === last) idx = (idx + 1) % CHANTS.length; // avoid repeats
-      last = idx;
-      // Fill in the team name and tidy spacing when no team is set.
-      const text = CHANTS[idx].replace("%s", teamName).replace(/\s+([!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
-      setChant(text);
-    };
-    show();
-    const id = window.setInterval(show, 1600);
+    // While standing with friends, say just a few sentences, each lingering.
+    setChant(pickChant(teamName));
+    const id = window.setInterval(() => setChant(pickChant(teamName)), RALLY_CHANT_MS);
     return () => window.clearInterval(id);
   }, [displayMode, teamName]);
+
+  // Passing cheers while running or idling (not during a rally — that has its own).
+  useEffect(() => {
+    if (!active || displayMode === "rally") return;
+    const id = window.setInterval(() => {
+      if (Math.random() < CASUAL_CHEER_CHANCE) {
+        setChant(pickChant(teamName));
+        window.setTimeout(() => setChant(null), 2400);
+      }
+    }, 9000);
+    return () => window.clearInterval(id);
+  }, [active, displayMode, teamName]);
 
   // Friends appear during a rally and flash out (Pokémon-style) when it ends.
   useEffect(() => {
@@ -269,7 +283,7 @@ export function FootballMascot() {
       stepAccum: 0,
       stepFrame: false,
       dragging: false,
-      mode: "dribble" as "dribble" | "juggle" | "rally",
+      mode: "dribble" as "dribble" | "juggle" | "rally" | "idle",
       modeUntil: 0, // timestamp when the current mode ends (0 = uninitialised)
       juggleTouch: 0, // timestamp of the last juggle foot-tap
     };
@@ -308,17 +322,18 @@ export function FootballMascot() {
         return;
       }
 
-      // Cycle modes: dribble ↔ juggle, with the occasional rally (flag + drum).
+      // Cycle modes: running (dribble) ↔ juggle, plus occasional idle and rally.
       if (st.modeUntil === 0) st.modeUntil = now + DRIBBLE_MS;
       if (now >= st.modeUntil) {
-        const next =
+        const next: "dribble" | "juggle" | "rally" | "idle" =
           st.mode === "rally"
-            ? "dribble" // always settle back to dribbling after a rally
-            : Math.random() < RALLY_CHANCE
-              ? "rally"
-              : st.mode === "dribble"
-                ? "juggle"
-                : "dribble";
+            ? "dribble" // always settle back to running after a rally
+            : (() => {
+                const r = Math.random();
+                if (r < RALLY_CHANCE) return "rally";
+                if (r < RALLY_CHANCE + IDLE_CHANCE) return "idle";
+                return st.mode === "dribble" ? "juggle" : "dribble";
+              })();
         st.mode = next;
         if (next === "juggle") {
           st.modeUntil = now + JUGGLE_MS;
@@ -335,6 +350,13 @@ export function FootballMascot() {
           st.ballVX = 0;
           st.ballVY = 0;
           st.ballY = 0;
+        } else if (next === "idle") {
+          st.modeUntil = now + IDLE_MS;
+          st.airborne = false;
+          st.kicking = false;
+          st.ballVX = 0;
+          st.ballVY = 0;
+          st.ballY = 0;
         } else {
           st.modeUntil = now + DRIBBLE_MS;
           st.ballVY = 0;
@@ -344,8 +366,8 @@ export function FootballMascot() {
         setDisplayMode(next); // mirror to React for flag/drum/chant rendering
       }
 
-      // ── Rally: stand still, wave the flag and beat the drum (chant via React) ──
-      if (st.mode === "rally") {
+      // ── Rally / idle: stand still, ball resting at the feet ──
+      if (st.mode === "rally" || st.mode === "idle") {
         isWalking = false;
         st.facing = 1;
         const center = st.mascotX + CHAR_W / 2;

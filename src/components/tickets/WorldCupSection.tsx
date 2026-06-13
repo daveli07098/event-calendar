@@ -357,17 +357,20 @@ function GroupCard({
           {fixtures.map((f, i) => {
             const s = scoreFor(matches, f.home, f.away);
             const played = s != null && s.homeScore != null && s.awayScore != null;
-            // Finished = kicked off in the past (distinct colour even without a score yet).
-            const finished = now > 0 && new Date(f.kickoff).getTime() < now;
+            const t = new Date(f.kickoff).getTime();
+            // Finished = kicked off in the past; soon = kicks off within 12 hours.
+            const finished = now > 0 && t < now;
+            const soon = now > 0 && t >= now && t < now + 12 * 3_600_000;
             return (
               <div
                 key={i}
                 className={cn(
                   "flex items-center gap-1.5 text-xs rounded px-1 py-0.5",
                   finished && "bg-primary/5",
+                  soon && "bg-amber-400/10 ring-1 ring-amber-400/50",
                 )}
               >
-                <span className={cn("flex-1 text-right truncate", finished && "font-medium")}>{f.home}</span>
+                <span className={cn("flex-1 text-right truncate", (finished || soon) && "font-medium")}>{f.home}</span>
                 {played ? (
                   <span className="font-bold tabular-nums px-1.5 py-0.5 rounded bg-primary/15 text-primary">
                     {s!.homeScore} - {s!.awayScore}
@@ -375,9 +378,12 @@ function GroupCard({
                 ) : finished ? (
                   <span className="px-1 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold">FT</span>
                 ) : (
-                  <span className="text-muted-foreground text-[10px] whitespace-nowrap">{fmtKickoff(f.kickoff, tz)}</span>
+                  <span className={cn("text-[10px] whitespace-nowrap inline-flex items-center gap-1", soon ? "text-amber-500 font-medium" : "text-muted-foreground")}>
+                    {soon && <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />}
+                    {fmtKickoff(f.kickoff, tz)}
+                  </span>
                 )}
-                <span className={cn("flex-1 truncate", finished && "font-medium")}>{f.away}</span>
+                <span className={cn("flex-1 truncate", (finished || soon) && "font-medium")}>{f.away}</span>
                 <AddMatchButton
                   title={`${f.home} vs ${f.away}`}
                   startIso={f.kickoff}
@@ -460,6 +466,26 @@ function Bracket({
     setZoom(clampZoom(Math.min(1, w.clientWidth / c.scrollWidth)));
   };
 
+  // Click-and-drag to pan the bracket (skips drags that start on a button).
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const onPanDown = (e: React.PointerEvent) => {
+    if ((e.target as HTMLElement).closest("button")) return;
+    const w = wrapRef.current;
+    if (!w) return;
+    pan.current = { x: e.clientX, y: e.clientY, left: w.scrollLeft, top: w.scrollTop };
+    w.setPointerCapture(e.pointerId);
+  };
+  const onPanMove = (e: React.PointerEvent) => {
+    const w = wrapRef.current;
+    if (!w || !pan.current) return;
+    w.scrollLeft = pan.current.left - (e.clientX - pan.current.x);
+    w.scrollTop = pan.current.top - (e.clientY - pan.current.y);
+  };
+  const onPanUp = (e: React.PointerEvent) => {
+    pan.current = null;
+    try { wrapRef.current?.releasePointerCapture(e.pointerId); } catch { /* already released */ }
+  };
+
   const column = (label: string, matches: KnockoutMatch[], key: string) => (
     <div key={key} className="flex w-44 shrink-0 flex-col gap-2">
       <p className="text-center text-xs font-semibold text-muted-foreground">{label}</p>
@@ -485,7 +511,14 @@ function Bracket({
         </Button>
       </div>
 
-      <div ref={wrapRef} className="overflow-auto">
+      <div
+        ref={wrapRef}
+        className="overflow-auto cursor-grab touch-pan-x active:cursor-grabbing"
+        onPointerDown={onPanDown}
+        onPointerMove={onPanMove}
+        onPointerUp={onPanUp}
+        onPointerCancel={onPanUp}
+      >
         {/* Outer box collapses to the scaled size so 'fit' shows all with no dead space */}
         <div style={nat ? { width: nat.w * zoom, height: nat.h * zoom } : undefined}>
           <div
