@@ -10,15 +10,29 @@ import {
 } from "@/lib/ai/quota";
 import { extractTextFromHtml } from "@/lib/ai/html";
 
+/** A single distinct promotion found on the page. */
+export interface DiscountOffer {
+  label: string;                                  // "Storewide sale", "New member offer"
+  detail: string | null;                          // "低至2折", "Extra 10% off apparel"
+  discountPercent: string | null;                 // "20%", "10%"
+  promoCode: string | null;                       // "618SALE"
+  minSpend: string | null;                        // "$900", "HK$500"
+  audience: "all" | "members" | "new" | null;     // who it applies to
+}
+
 /** AI-detected discount/sale promotion on a retail site. */
 export interface DiscountScanResult {
   hasDiscount: boolean;
+  confidence: "high" | "medium" | "low" | null;   // how clearly the page shows a deal
   title: string | null;
   discountSummary: string | null;
-  discountPercent: string | null;
-  promoCode: string | null;
+  discountPercent: string | null;                 // headline number
+  promoCode: string | null;                       // headline code
   startDate: string | null; // YYYY-MM-DD
   endDate: string | null;   // YYYY-MM-DD
+  categories: string[];                            // what's on sale ("Running shoes")
+  offers: DiscountOffer[];                         // all distinct promotions
+  evidence: string[];                              // exact phrases proving the deal (the "why")
   items: Array<{ name: string; price: string | null; originalPrice: string | null }>;
   sourceUrl: string;
   aiUsed: string;
@@ -30,29 +44,36 @@ export interface DiscountScanResult {
 const DISCOUNT_KEYWORDS =
   /sale|discount|%\s*off|\boff\b|promo|coupon|code|deal|save|clearance|outlet|markdown|折|優惠|減價|特價|清貨|促銷|限時|低至/i;
 
-const DISCOUNT_PROMPT = (text: string, url: string) => `You are analyzing the text content of a retail/e-commerce website to detect ACTIVE sale or discount promotions.
+const DISCOUNT_PROMPT = (text: string, url: string) => `You are a precise retail-deals analyst. Analyze the text of an e-commerce page and extract ALL active sale/discount promotions with supporting evidence.
 
 Return ONLY a JSON object with this exact shape:
 {
   "hasDiscount": boolean,
+  "confidence": "high"|"medium"|"low",
   "title": string|null,
   "discountSummary": string|null,
   "discountPercent": string|null,
   "promoCode": string|null,
   "startDate": "YYYY-MM-DD"|null,
   "endDate": "YYYY-MM-DD"|null,
+  "categories": string[],
+  "offers": [{ "label": string, "detail": string|null, "discountPercent": string|null, "promoCode": string|null, "minSpend": string|null, "audience": "all"|"members"|"new"|null }],
+  "evidence": string[],
   "items": [{ "name": string, "price": string|null, "originalPrice": string|null }]
 }
 
 Rules:
-- "hasDiscount" is true ONLY for explicit promotions in the text (e.g. "Up to 50% off", "額外8折", clearance/outlet pricing, promo codes). Generic marketing like "Shop new arrivals" is NOT a discount.
-- "title": short promotion name, e.g. "End of Season Sale". Use the site's own wording when present.
-- "discountSummary": one line, e.g. "Up to 50% off selected styles + extra 10% with code".
-- "discountPercent": headline number, e.g. "50%" or "20–60%".
-- "startDate"/"endDate": only when explicitly stated; otherwise null.
+- "hasDiscount": true ONLY for explicit promotions (e.g. "Up to 50% off", "低至2折", clearance/outlet pricing, promo codes, "滿$900減$50"). Generic marketing ("Shop new arrivals", "Free shipping") is NOT a discount on its own.
+- "confidence": "high" when the page clearly headlines a sale with concrete numbers/codes; "medium" when a deal is present but vague; "low" when only weak hints.
+- "title": short promotion name in the site's own wording (e.g. "618 Mid-Year Sale", "End of Season Sale").
+- "discountSummary": one punchy line capturing the headline deal.
+- "discountPercent": the single best headline number, e.g. "50%", "20–60%", "as low as 20%".
+- "categories": product groups on sale (e.g. ["Running shoes","Apparel"]). [] if not stated.
+- "offers": EVERY distinct promotion as a separate entry — do not merge them. Capture minSpend (e.g. "$900") and audience (members/new-customer offers vs everyone).
+- "evidence": 2-5 SHORT EXACT quotes copied verbatim from the page text that prove each deal (this is the "why"). e.g. ["618年中激賞低至2折","CODE: 618SALE","全單滿$900即減$50"]. Never invent — quote only what appears in the text.
+- "promoCode"/"startDate"/"endDate": only when explicitly present; otherwise null.
 - "items": up to 5 notable discounted products with prices when listed, else [].
-- If multiple promotions exist, pick the most prominent as title and mention the rest in discountSummary.
-- Match the page's language (Chinese/English) in text fields.
+- Match the page's language (Chinese/English) in all text fields.
 
 Source URL: ${url}
 
@@ -158,21 +179,47 @@ export async function POST(req: NextRequest) {
     await incrementAiLimit(uid);
     const remaining = await remainingAiCalls(uid);
 
+    const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+    const strArr = (v: unknown, max: number): string[] =>
+      Array.isArray(v)
+        ? v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean).slice(0, max)
+        : [];
+    const audienceOf = (v: unknown): DiscountOffer["audience"] =>
+      v === "all" || v === "members" || v === "new" ? v : null;
+    const confidenceOf = (v: unknown): DiscountScanResult["confidence"] =>
+      v === "high" || v === "medium" || v === "low" ? v : null;
+
     const result: DiscountScanResult = {
       hasDiscount: Boolean(data.hasDiscount),
-      title: typeof data.title === "string" ? data.title : null,
-      discountSummary: typeof data.discountSummary === "string" ? data.discountSummary : null,
-      discountPercent: typeof data.discountPercent === "string" ? data.discountPercent : null,
-      promoCode: typeof data.promoCode === "string" ? data.promoCode : null,
-      startDate: typeof data.startDate === "string" ? data.startDate : null,
-      endDate: typeof data.endDate === "string" ? data.endDate : null,
+      confidence: confidenceOf(data.confidence),
+      title: str(data.title),
+      discountSummary: str(data.discountSummary),
+      discountPercent: str(data.discountPercent),
+      promoCode: str(data.promoCode),
+      startDate: str(data.startDate),
+      endDate: str(data.endDate),
+      categories: strArr(data.categories, 8),
+      offers: Array.isArray(data.offers)
+        ? (data.offers as Array<Record<string, unknown>>)
+            .slice(0, 8)
+            .map((o) => ({
+              label: String(o.label ?? "").trim(),
+              detail: str(o.detail),
+              discountPercent: str(o.discountPercent),
+              promoCode: str(o.promoCode),
+              minSpend: str(o.minSpend),
+              audience: audienceOf(o.audience),
+            }))
+            .filter((o) => o.label)
+        : [],
+      evidence: strArr(data.evidence, 6),
       items: Array.isArray(data.items)
         ? (data.items as Array<Record<string, unknown>>)
             .slice(0, 5)
             .map((it) => ({
-              name: String(it.name ?? ""),
-              price: typeof it.price === "string" ? it.price : null,
-              originalPrice: typeof it.originalPrice === "string" ? it.originalPrice : null,
+              name: String(it.name ?? "").trim(),
+              price: str(it.price),
+              originalPrice: str(it.originalPrice),
             }))
             .filter((it) => it.name)
         : [],

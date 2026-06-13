@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import {
   BadgePercent, RefreshCw, Loader2, Plus, Trash2, ExternalLink,
-  CalendarPlus, CheckCircle2, AlertCircle,
+  CalendarPlus, CheckCircle2, AlertCircle, Copy, Check, Quote, Tag, Users, Sparkles, Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,20 +11,72 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import type { CalendarType } from "@/types";
+
+interface DiscountOffer {
+  label: string;
+  detail: string | null;
+  discountPercent: string | null;
+  promoCode: string | null;
+  minSpend: string | null;
+  audience: "all" | "members" | "new" | null;
+}
 
 interface DiscountResult {
   hasDiscount: boolean;
+  confidence: "high" | "medium" | "low" | null;
   title: string | null;
   discountSummary: string | null;
   discountPercent: string | null;
   promoCode: string | null;
   startDate: string | null;
   endDate: string | null;
+  categories: string[];
+  offers: DiscountOffer[];
+  evidence: string[];
   items: Array<{ name: string; price: string | null; originalPrice: string | null }>;
   sourceUrl: string;
   aiUsed: string;
   tokensUsed: number | null;
+}
+
+const AUDIENCE_LABEL: Record<string, string> = {
+  all: "Everyone",
+  members: "Members",
+  new: "New customers",
+};
+
+/** Days until an end date (YYYY-MM-DD), or null if absent/past. */
+function daysUntil(endDate: string | null): number | null {
+  if (!endDate) return null;
+  const end = new Date(`${endDate}T23:59:59`).getTime();
+  if (Number.isNaN(end)) return null;
+  const diff = Math.ceil((end - Date.now()) / 86_400_000);
+  return diff >= 0 ? diff : null;
+}
+
+/** Small copy-to-clipboard button for promo codes. */
+function CopyCode({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(code);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toast.error("Couldn't copy");
+        }
+      }}
+      className="inline-flex items-center gap-1 rounded-md border border-dashed border-primary/50 bg-primary/5 px-2 py-0.5 font-mono text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+      title="Copy code"
+    >
+      {code}
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+    </button>
+  );
 }
 
 type SourceStatus =
@@ -168,12 +220,23 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     const descriptionLines = [
       result.discountSummary,
       result.promoCode ? `Promo code: ${result.promoCode}` : null,
+      result.categories.length ? `On sale: ${result.categories.join(", ")}` : null,
+      result.offers.length ? "" : null,
+      ...result.offers.map((o) => {
+        const bits = [
+          o.detail || o.discountPercent,
+          o.promoCode ? `code ${o.promoCode}` : null,
+          o.minSpend ? `min ${o.minSpend}` : null,
+          o.audience && o.audience !== "all" ? AUDIENCE_LABEL[o.audience] : null,
+        ].filter(Boolean);
+        return `• ${o.label}${bits.length ? ` — ${bits.join(" · ")}` : ""}`;
+      }),
       ...result.items.map(
         (it) =>
           `• ${it.name}${it.price ? ` — ${it.price}` : ""}${it.originalPrice ? ` (was ${it.originalPrice})` : ""}`
       ),
       `Source: ${result.sourceUrl}`,
-    ].filter(Boolean);
+    ].filter((l) => l !== null);
 
     setAddingFor(result.sourceUrl);
     try {
@@ -251,9 +314,12 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     <Badge variant="secondary" className="text-xs">No discount found</Badge>
                   )}
                   {result?.hasDiscount && (
-                    <Badge className="text-xs gap-1">
+                    <Badge className="text-xs gap-1" title={result.confidence ? `${result.confidence} confidence` : undefined}>
                       <BadgePercent className="size-3" />
                       {result.discountPercent ?? "Sale"}
+                      {result.offers.length > 1 && (
+                        <span className="opacity-80">· {result.offers.length} offers</span>
+                      )}
                     </Badge>
                   )}
                   {status.state === "error" && (
@@ -299,28 +365,103 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                   </Button>
                 </div>
 
-                {/* Discount preview */}
+                {/* Discount preview — rich deal card */}
                 {result?.hasDiscount && (
-                  <div className="border-t border-border p-3 space-y-2 bg-muted/20">
-                    <p className="font-medium text-sm">{result.title ?? "Sale"}</p>
-                    {result.discountSummary && (
-                      <p className="text-sm text-muted-foreground">{result.discountSummary}</p>
-                    )}
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      {result.promoCode && (
-                        <Badge variant="outline" className="font-mono text-xs">
-                          {result.promoCode}
-                        </Badge>
+                  <div className="border-t border-border bg-muted/20">
+                    {/* Headline: big discount + title + confidence */}
+                    <div className="flex items-start gap-3 p-3 pb-2">
+                      {result.discountPercent && (
+                        <div className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1.5 text-center">
+                          <div className="text-lg font-bold leading-none text-primary">{result.discountPercent}</div>
+                          <div className="text-[10px] uppercase tracking-wide text-primary/70">off</div>
+                        </div>
                       )}
-                      {(result.startDate || result.endDate) && (
-                        <span>
-                          {result.startDate ?? "now"} → {result.endDate ?? "until further notice"}
-                        </span>
-                      )}
-                      <span className="font-mono">{result.aiUsed}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-sm">{result.title ?? "Sale"}</p>
+                          {result.confidence && (
+                            <span
+                              className={cn(
+                                "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                                result.confidence === "high"
+                                  ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                                  : result.confidence === "medium"
+                                    ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                                    : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {result.confidence} confidence
+                            </span>
+                          )}
+                        </div>
+                        {result.discountSummary && (
+                          <p className="mt-0.5 text-sm text-muted-foreground">{result.discountSummary}</p>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Meta row: dates / countdown / promo code / categories */}
+                    <div className="flex flex-wrap items-center gap-2 px-3 pb-2 text-xs text-muted-foreground">
+                      {result.promoCode && <CopyCode code={result.promoCode} />}
+                      {(() => {
+                        const d = daysUntil(result.endDate);
+                        return d !== null ? (
+                          <span className={cn("inline-flex items-center gap-1", d <= 3 && "text-amber-600 dark:text-amber-400 font-medium")}>
+                            <Clock className="size-3" />
+                            {d === 0 ? "Ends today" : `${d} day${d === 1 ? "" : "s"} left`}
+                          </span>
+                        ) : (result.startDate || result.endDate) ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="size-3" />
+                            {result.startDate ?? "now"} → {result.endDate ?? "ongoing"}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+
+                    {/* Categories on sale */}
+                    {result.categories.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 px-3 pb-2">
+                        <Tag className="size-3 text-muted-foreground" />
+                        {result.categories.map((c, i) => (
+                          <span key={i} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-foreground">
+                            {c}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Distinct offers breakdown */}
+                    {result.offers.length > 0 && (
+                      <div className="mx-3 mb-2 divide-y divide-border rounded-md border border-border bg-background/50">
+                        {result.offers.map((o, i) => (
+                          <div key={i} className="flex items-start gap-2 px-2.5 py-1.5 text-xs">
+                            <BadgePercent className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                            <div className="min-w-0 flex-1">
+                              <span className="font-medium text-foreground">{o.label}</span>
+                              {o.detail && <span className="text-muted-foreground"> — {o.detail}</span>}
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                {o.discountPercent && (
+                                  <span className="font-semibold text-primary">{o.discountPercent} off</span>
+                                )}
+                                {o.minSpend && <span className="text-muted-foreground">min spend {o.minSpend}</span>}
+                                {o.promoCode && <CopyCode code={o.promoCode} />}
+                                {o.audience && o.audience !== "all" && (
+                                  <span className="inline-flex items-center gap-0.5 text-muted-foreground">
+                                    <Users className="size-3" />
+                                    {AUDIENCE_LABEL[o.audience]}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Items with computed savings */}
                     {result.items.length > 0 && (
-                      <ul className="text-xs text-muted-foreground space-y-0.5">
+                      <ul className="px-3 pb-2 text-xs text-muted-foreground space-y-0.5">
                         {result.items.map((it, i) => (
                           <li key={i}>
                             • {it.name}
@@ -330,8 +471,27 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                         ))}
                       </ul>
                     )}
+
+                    {/* Why flagged — the evidence */}
+                    {result.evidence.length > 0 && (
+                      <details className="group px-3 pb-2">
+                        <summary className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                          <Sparkles className="size-3" />
+                          Why this was flagged ({result.evidence.length})
+                        </summary>
+                        <ul className="mt-1.5 space-y-1 border-l-2 border-border pl-3">
+                          {result.evidence.map((ev, i) => (
+                            <li key={i} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                              <Quote className="mt-0.5 size-3 shrink-0 opacity-50" />
+                              <span className="italic">{ev}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    )}
+
                     {/* Add to calendar — personal by default, user can choose */}
-                    <div className="flex items-center gap-2 pt-1">
+                    <div className="flex items-center gap-2 border-t border-border p-3">
                       <Select
                         value={selectedCalendar[result.sourceUrl] || defaultCalendarId}
                         onValueChange={(v) => {
@@ -369,6 +529,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                           Add to calendar
                         </Button>
                       )}
+                      <span className="ml-auto font-mono text-[10px] text-muted-foreground/70" title="AI provider used">
+                        via {result.aiUsed}
+                      </span>
                     </div>
                   </div>
                 )}
