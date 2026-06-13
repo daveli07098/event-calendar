@@ -36,6 +36,16 @@ interface ScoresSnapshot { groups: Record<string, GroupScores>; asOf: string }
 const TOURNAMENT_START = "2026-06-01T00:00:00.000Z";
 const TOURNAMENT_END = "2026-07-31T23:59:59.000Z";
 
+// Per-round colour so the bracket is easy to read at a glance (header + left bar).
+const ROUND_COLOR: Record<string, { head: string; border: string }> = {
+  R32: { head: "text-sky-400", border: "border-l-sky-500/70" },
+  R16: { head: "text-violet-400", border: "border-l-violet-500/70" },
+  QF: { head: "text-amber-400", border: "border-l-amber-500/70" },
+  SF: { head: "text-orange-400", border: "border-l-orange-500/70" },
+  Final: { head: "text-primary", border: "border-l-primary" },
+  ThirdPlace: { head: "text-muted-foreground", border: "border-l-muted-foreground/50" },
+};
+
 /** Format a kickoff in the user's timezone, e.g. "Jun 12, 03:00 GMT+8". */
 function fmtKickoff(iso: string, tz: string): string {
   const d = new Date(iso);
@@ -565,8 +575,9 @@ function BracketMatch({
   tz: string;
   resolved?: { home: ResolvedSlot; away: ResolvedSlot };
 }) {
+  const accent = ROUND_COLOR[match.round]?.border ?? "border-l-border";
   return (
-    <div className="relative rounded-md border border-border bg-card text-xs">
+    <div className={cn("relative rounded-md border border-border border-l-2 bg-card text-xs", accent)}>
       {/* White connector stub pointing toward the centre (Final) */}
       {match.side === "left" && (
         <span className="pointer-events-none absolute top-1/2 -right-4 h-px w-4 -translate-y-1/2 bg-white/40" />
@@ -676,9 +687,11 @@ function Bracket({
     try { wrapRef.current?.releasePointerCapture(e.pointerId); } catch { /* already released */ }
   };
 
-  const column = (label: string, matches: KnockoutMatch[], key: string) => (
+  const column = (round: KnockoutMatch["round"], matches: KnockoutMatch[], key: string) => (
     <div key={key} className="flex w-48 shrink-0 flex-col gap-3">
-      <p className="text-center text-xs font-semibold text-muted-foreground">{label}</p>
+      <p className={cn("text-center text-xs font-semibold", ROUND_COLOR[round]?.head ?? "text-muted-foreground")}>
+        {ROUND_LABELS_EN[round]}
+      </p>
       <div className="flex flex-1 flex-col justify-around gap-6">
         {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />)}
       </div>
@@ -717,7 +730,7 @@ function Bracket({
             style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
           >
             {/* Left half: R32 → SF flowing toward the centre */}
-            {rounds.map((r) => column(ROUND_LABELS_EN[r.round], r.matches.filter((m) => m.side === "left"), `L-${r.round}`))}
+            {rounds.map((r) => column(r.round, r.matches.filter((m) => m.side === "left"), `L-${r.round}`))}
 
             {/* Centre: the Final (and third-place play-off below it) */}
             <div className="flex w-48 shrink-0 flex-col items-center justify-center gap-3 px-1">
@@ -736,7 +749,7 @@ function Bracket({
             </div>
 
             {/* Right half: SF → R32 mirrored (rounds reversed so R32 sits on the far right) */}
-            {[...rounds].reverse().map((r) => column(ROUND_LABELS_EN[r.round], r.matches.filter((m) => m.side === "right"), `R-${r.round}`))}
+            {[...rounds].reverse().map((r) => column(r.round, r.matches.filter((m) => m.side === "right"), `R-${r.round}`))}
           </div>
         </div>
       </div>
