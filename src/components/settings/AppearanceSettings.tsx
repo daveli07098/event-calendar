@@ -1,6 +1,6 @@
 "use client";
 
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Sun, Check } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import {
   ACCENT_COLORS,
@@ -12,6 +12,7 @@ import {
   type ThemeMode,
   type ThemeRadius,
 } from "@/lib/theme";
+import { EVENT_THEME_ORDER, EVENT_THEMES } from "@/lib/event-themes";
 import { cn } from "@/lib/utils";
 
 const MODES: { value: ThemeMode; label: string; icon: React.ReactNode }[] = [
@@ -52,17 +53,64 @@ export function AppearanceSettings() {
         </div>
       </div>
 
+      {/* Event theme — seasonal accent skins (e.g. World Cup) */}
+      <div>
+        <p className="text-sm font-medium mb-1">Event theme</p>
+        <p className="text-xs text-muted-foreground mb-3">
+          A seasonal skin that recolors the accent. Overrides the accent color below while active.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {/* None — use the accent color instead */}
+          <button
+            onClick={() => setTheme({ eventTheme: null })}
+            className={cn(
+              "flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors",
+              !theme.eventTheme
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-background hover:bg-muted",
+            )}
+          >
+            None
+            {!theme.eventTheme && <Check className="size-3.5" />}
+          </button>
+          {EVENT_THEME_ORDER.map((id) => {
+            const ev = EVENT_THEMES[id];
+            if (!ev) return null;
+            const isSelected = theme.eventTheme === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setTheme({ eventTheme: id })}
+                title={ev.description}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-md border text-sm transition-colors",
+                  isSelected
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-background hover:bg-muted",
+                )}
+              >
+                <span className="text-base leading-none">{ev.emoji}</span>
+                {ev.label}
+                {isSelected && <Check className="size-3.5" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Accent color */}
       <div>
         <p className="text-sm font-medium mb-3">Accent color</p>
         <div className="flex flex-wrap gap-3">
           {(Object.keys(ACCENT_COLORS) as ThemeAccent[]).map((key) => {
             const accent = ACCENT_COLORS[key];
-            const isSelected = theme.accent === key;
+            const isSelected = theme.accent === key && !theme.eventTheme;
             return (
               <button
                 key={key}
-                onClick={() => setTheme({ accent: key })}
+                // Picking an accent also turns off any active event skin so the
+                // choice is actually visible.
+                onClick={() => setTheme({ accent: key, eventTheme: null })}
                 title={accent.label}
                 className={cn(
                   "size-8 rounded-full border-2 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -74,7 +122,9 @@ export function AppearanceSettings() {
           })}
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          {ACCENT_COLORS[theme.accent].label}
+          {theme.eventTheme
+            ? `Overridden by event theme · ${ACCENT_COLORS[theme.accent].label} saved`
+            : ACCENT_COLORS[theme.accent].label}
         </p>
       </div>
 

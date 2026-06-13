@@ -10,6 +10,11 @@ export interface Theme {
   radius: ThemeRadius;
   density: ThemeDensity;
   font: ThemeFont;
+  /**
+   * Active event theme id (see src/lib/event-themes.ts), or null for none.
+   * When set, it overrides the `accent` colors with the event's palette.
+   */
+  eventTheme?: string | null;
 }
 
 export const DEFAULT_THEME: Theme = {
@@ -18,6 +23,9 @@ export const DEFAULT_THEME: Theme = {
   radius: "default",
   density: "comfortable",
   font: "geist",
+  // Ships in World Cup mode so every visitor lands in the football skin; it can
+  // be switched off (→ null) from the top-right theme button or settings.
+  eventTheme: "worldcup",
 };
 
 export const FONT_OPTIONS: Record<ThemeFont, { label: string; variable: string; stack: string }> = {

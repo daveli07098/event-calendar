@@ -16,6 +16,7 @@ import {
   STORAGE_KEY,
   type Theme,
 } from "@/lib/theme";
+import { getEventTheme } from "@/lib/event-themes";
 
 interface ThemeContextValue {
   theme: Theme;
@@ -39,16 +40,28 @@ function applyTheme(theme: Theme, isDark: boolean) {
   // --- dark class ---
   root.classList.toggle("dark", isDark);
 
-  // --- accent color: override CSS vars inline or remove overrides for default slate ---
-  const accent = ACCENT_COLORS[theme.accent];
-  if (theme.accent === "slate") {
-    root.style.removeProperty("--primary");
-    root.style.removeProperty("--primary-foreground");
-    root.style.removeProperty("--ring");
+  // --- primary accent: an active event theme overrides the chosen accent color ---
+  const eventTheme = getEventTheme(theme.eventTheme);
+  if (eventTheme) {
+    // Event skin takes priority — paint its palette and tag the root so CSS can
+    // hook decorative styles via [data-event-theme="…"] if desired.
+    root.style.setProperty("--primary", isDark ? eventTheme.darkPrimary : eventTheme.lightPrimary);
+    root.style.setProperty("--primary-foreground", eventTheme.primaryForeground);
+    root.style.setProperty("--ring", isDark ? eventTheme.darkRing : eventTheme.lightRing);
+    root.dataset.eventTheme = eventTheme.id;
   } else {
-    root.style.setProperty("--primary", isDark ? accent.darkPrimary : accent.lightPrimary);
-    root.style.setProperty("--primary-foreground", accent.primaryForeground);
-    root.style.setProperty("--ring", isDark ? accent.darkRing : accent.lightRing);
+    delete root.dataset.eventTheme;
+    // Fall back to the accent color (or remove overrides for default slate).
+    const accent = ACCENT_COLORS[theme.accent];
+    if (theme.accent === "slate") {
+      root.style.removeProperty("--primary");
+      root.style.removeProperty("--primary-foreground");
+      root.style.removeProperty("--ring");
+    } else {
+      root.style.setProperty("--primary", isDark ? accent.darkPrimary : accent.lightPrimary);
+      root.style.setProperty("--primary-foreground", accent.primaryForeground);
+      root.style.setProperty("--ring", isDark ? accent.darkRing : accent.lightRing);
+    }
   }
 
   // --- border radius ---

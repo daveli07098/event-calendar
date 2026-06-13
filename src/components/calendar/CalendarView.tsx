@@ -26,6 +26,7 @@ import { CATEGORY_LABELS } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
 import { EventReminder } from "@/components/calendar/EventReminder";
+import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 
 interface CalendarViewProps {
   initialEvents: EventType[];
@@ -469,18 +470,25 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       {/* Calendar + optional day-detail panel side by side */}
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 min-w-0 p-1 md:p-4 flex flex-col">
-          {/* Visible search bar — desktop only; mobile uses FC toolbar button */}
-          {!isMobile && (
-            <button
-              className="mb-2 flex items-center gap-2.5 w-full h-9 px-3 rounded-md border border-input bg-muted/30 text-sm text-muted-foreground hover:bg-muted/60 transition-colors cursor-pointer text-left"
-              onClick={() => searchOpenRef.current?.()}
-              aria-label="Search events"
-            >
-              <Search className="size-4 shrink-0" />
-              <span className="flex-1">Search events…</span>
-              <kbd className="hidden sm:inline text-xs border border-border rounded px-1 py-0.5 bg-background font-mono">⌘K</kbd>
-            </button>
-          )}
+          {/* Top row: search bar (desktop) + theme switcher pinned top-right.
+              On mobile the search lives in the FC toolbar, so this row carries
+              just the theme switcher, kept right-aligned. */}
+          <div className="mb-2 flex items-center gap-2">
+            {!isMobile ? (
+              <button
+                className="flex flex-1 items-center gap-2.5 h-9 px-3 rounded-md border border-input bg-muted/30 text-sm text-muted-foreground hover:bg-muted/60 transition-colors cursor-pointer text-left"
+                onClick={() => searchOpenRef.current?.()}
+                aria-label="Search events"
+              >
+                <Search className="size-4 shrink-0" />
+                <span className="flex-1">Search events…</span>
+                <kbd className="hidden sm:inline text-xs border border-border rounded px-1 py-0.5 bg-background font-mono">⌘K</kbd>
+              </button>
+            ) : (
+              <div className="flex-1" />
+            )}
+            <ThemeSwitcher />
+          </div>
           {/* Empty-state hint — guides new users / explains filtered-out views */}
           {events.length === 0 ? (
             <div className="mb-2 flex items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
@@ -497,7 +505,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               No events match the current filters.
             </div>
           ) : null}
-          <div className="flex-1">
+          <div className="flex-1 min-h-0">
           <FullCalendar
             ref={calendarRef}
             plugins={[
@@ -560,7 +568,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             eventDrop={handleEventDrop}
             eventResize={handleEventResize}
             datesSet={handleDatesSet}
-            height={isMobile ? "calc(100svh - 2rem)" : "calc(100svh - 4.5rem)"}
+            height="100%"
             nowIndicator={true}
             eventDisplay="block"
           />

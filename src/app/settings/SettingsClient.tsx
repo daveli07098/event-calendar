@@ -17,6 +17,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
 import { ICSImport } from "@/components/settings/ICSImport";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
+import { BannerSettings } from "@/components/settings/BannerSettings";
 import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown, RefreshCw, Tag } from "lucide-react";
 import {
   Popover,
@@ -435,6 +436,19 @@ export function SettingsClient({ user }: SettingsClientProps) {
           </CardHeader>
           <CardContent>
             <AppearanceSettings />
+          </CardContent>
+        </Card>
+
+        {/* Site Banner */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Site Banner</CardTitle>
+            <CardDescription>
+              Announce a live event to everyone who opens the calendar
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <BannerSettings />
           </CardContent>
         </Card>
 

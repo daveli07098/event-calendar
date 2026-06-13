@@ -5,6 +5,7 @@ import { CalendarView } from "@/components/calendar/CalendarView";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
 import { SearchDialog } from "@/components/calendar/SearchDialog";
+import { SiteBanner } from "@/components/banner/SiteBanner";
 import type { CalendarType, EventType, EventCategory } from "@/types";
 
 interface CalendarPageClientProps {
@@ -95,33 +96,37 @@ export function CalendarPageClient({
   };
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <CalendarSidebar
-        calendars={calendars}
-        onCalendarToggle={handleCalendarToggle}
-        onAddCalendar={() => setAddCalendarOpen(true)}
-        mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
-        categoryFilter={categoryFilter}
-        onCategoryFilter={setCategoryFilter}
-        locationFilter={locationFilter}
-        onLocationFilter={setLocationFilter}
-        locationCounts={locationCounts}
-        onMiniDateClick={(date) => gotoDateRef.current?.(date)}
-      />
-      <CalendarView
-        calendars={calendars}
-        initialEvents={initialEvents}
-        openEventId={openEventId}
-        onOpenEventHandled={() => setOpenEventId(null)}
-        onEventOpen={handleEventOpen}
-        onEventClose={handleEventClose}
-        onSearchOpen={() => setSearchOpen(true)}
-        onMobileMenuOpen={() => setMobileSidebarOpen(true)}
-        categoryFilter={categoryFilter}
-        locationFilter={locationFilter}
-        onGotoDateReady={(fn) => { gotoDateRef.current = fn; }}
-      />
+    <div className="flex flex-col h-screen overflow-hidden">
+      {/* Site-wide announcement banner (e.g. World Cup) — full width, above all */}
+      <SiteBanner />
+      <div className="flex flex-1 overflow-hidden">
+        <CalendarSidebar
+          calendars={calendars}
+          onCalendarToggle={handleCalendarToggle}
+          onAddCalendar={() => setAddCalendarOpen(true)}
+          mobileOpen={mobileSidebarOpen}
+          onMobileClose={() => setMobileSidebarOpen(false)}
+          categoryFilter={categoryFilter}
+          onCategoryFilter={setCategoryFilter}
+          locationFilter={locationFilter}
+          onLocationFilter={setLocationFilter}
+          locationCounts={locationCounts}
+          onMiniDateClick={(date) => gotoDateRef.current?.(date)}
+        />
+        <CalendarView
+          calendars={calendars}
+          initialEvents={initialEvents}
+          openEventId={openEventId}
+          onOpenEventHandled={() => setOpenEventId(null)}
+          onEventOpen={handleEventOpen}
+          onEventClose={handleEventClose}
+          onSearchOpen={() => setSearchOpen(true)}
+          onMobileMenuOpen={() => setMobileSidebarOpen(true)}
+          categoryFilter={categoryFilter}
+          locationFilter={locationFilter}
+          onGotoDateReady={(fn) => { gotoDateRef.current = fn; }}
+        />
+      </div>
       <AddCalendarDialog
         open={addCalendarOpen}
         onOpenChange={setAddCalendarOpen}
