@@ -1,3 +1,10 @@
+## [2026-06-13] — Session: richer evidence-backed discount detection
+### Added
+- feat(discounts): deal detection now extracts confidence, categories on sale, every distinct offer (discount %, promo code, min spend, audience), and evidence — short exact quotes from the page proving WHY a deal was flagged ([ab3a79a])
+- feat(discounts): redesigned deal card — discount headline + confidence badge, copy-to-clipboard promo codes, "N days left" countdown, category chips, per-offer breakdown, and a collapsible "Why this was flagged" evidence section ([ab3a79a])
+### Changed
+- feat(discounts): add-to-calendar event description now includes offers and categories ([ab3a79a])
+
 ## [2026-06-13] — Session: reliable discount detection (no headless browser)
 ### Fixed
 - fix(ai): Gemini extraction set to temperature 0 — discount detection was flip-flopping (clear sale page returning hasDiscount true then false) because of the default high temperature; the promo text is already in the static HTML, so no headless browser is needed ([6bb0e5b])
