@@ -7,6 +7,7 @@ import { ACCENT_COLORS, type ThemeMode } from "@/lib/theme";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -54,53 +55,58 @@ export function ThemeSwitcher({ className }: { className?: string }) {
         </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Mode</DropdownMenuLabel>
-        {MODES.map((m) => (
-          <DropdownMenuItem
-            key={m.value}
-            onClick={() => setTheme({ mode: m.value })}
-            className="gap-2"
-          >
-            {m.icon}
-            <span className="flex-1">{m.label}</span>
-            {theme.mode === m.value && <Check className="size-4" />}
-          </DropdownMenuItem>
-        ))}
-
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>Event theme</DropdownMenuLabel>
-
-        {/* None — restores the user's saved accent color */}
-        <DropdownMenuItem
-          onClick={() => setTheme({ eventTheme: null })}
-          className="gap-2"
-        >
-          <span
-            className="size-4 rounded-full border border-border"
-            style={{ backgroundColor: ACCENT_COLORS[theme.accent].color }}
-          />
-          <span className="flex-1">None (accent)</span>
-          {!activeEvent && <Check className="size-4" />}
-        </DropdownMenuItem>
-
-        {EVENT_THEME_ORDER.map((id) => {
-          const ev = EVENT_THEMES[id];
-          if (!ev) return null;
-          return (
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Mode</DropdownMenuLabel>
+          {MODES.map((m) => (
             <DropdownMenuItem
-              key={id}
-              onClick={() => setTheme({ eventTheme: id })}
+              key={m.value}
+              onClick={() => setTheme({ mode: m.value })}
               className="gap-2"
             >
-              <span className="text-base leading-none">{ev.emoji}</span>
-              <span className="flex-1">
-                {ev.label}
-                <span className="block text-xs text-muted-foreground">{ev.description}</span>
-              </span>
-              {theme.eventTheme === id && <Check className="size-4" />}
+              {m.icon}
+              <span className="flex-1">{m.label}</span>
+              {theme.mode === m.value && <Check className="size-4" />}
             </DropdownMenuItem>
-          );
-        })}
+          ))}
+        </DropdownMenuGroup>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Event theme</DropdownMenuLabel>
+
+          {/* None — restores the user's saved accent color */}
+          <DropdownMenuItem
+            onClick={() => setTheme({ eventTheme: null })}
+            className="gap-2"
+          >
+            <span
+              className="size-4 rounded-full border border-border"
+              style={{ backgroundColor: ACCENT_COLORS[theme.accent].color }}
+            />
+            <span className="flex-1">None (accent)</span>
+            {!activeEvent && <Check className="size-4" />}
+          </DropdownMenuItem>
+
+          {EVENT_THEME_ORDER.map((id) => {
+            const ev = EVENT_THEMES[id];
+            if (!ev) return null;
+            return (
+              <DropdownMenuItem
+                key={id}
+                onClick={() => setTheme({ eventTheme: id })}
+                className="gap-2"
+              >
+                <span className="text-base leading-none">{ev.emoji}</span>
+                <span className="flex-1">
+                  {ev.label}
+                  <span className="block text-xs text-muted-foreground">{ev.description}</span>
+                </span>
+                {theme.eventTheme === id && <Check className="size-4" />}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
