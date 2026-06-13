@@ -423,8 +423,8 @@ function GroupCard({
               <span className="text-center tabular-nums">{t.w}</span>
               <span className="text-center tabular-nums">{t.d}</span>
               <span className="text-center tabular-nums">{t.l}</span>
-              <span className="text-center tabular-nums cursor-help" title={goalBreakdown(t.team, matches)}>{t.gd > 0 ? `+${t.gd}` : t.gd}</span>
-              <span className="text-center font-bold tabular-nums cursor-help" title={pointsBreakdown(t.team, matches)}>{t.pts}</span>
+              <span className="text-center tabular-nums" title={goalBreakdown(t.team, matches)}>{t.gd > 0 ? `+${t.gd}` : t.gd}</span>
+              <span className="text-center font-bold tabular-nums" title={pointsBreakdown(t.team, matches)}>{t.pts}</span>
             </div>
           ))}
         </div>
@@ -505,7 +505,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
     return (
       <span
         className={cn(
-          "inline-flex cursor-help items-center gap-1 truncate",
+          "inline-flex items-center gap-1 truncate",
           slot.confirmed ? "font-semibold text-foreground" : "italic text-amber-500",
         )}
         title={slot.title ?? `${slot.team} — ${slot.label}`}
@@ -516,7 +516,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
     );
   }
   return (
-    <span className="cursor-help truncate text-muted-foreground" title={slot?.title ?? `${fallback} · 尚未產生 (unavailable now)`}>
+    <span className="truncate text-muted-foreground" title={slot?.title ?? `${fallback} · 尚未產生 (unavailable now)`}>
       {fallback}
     </span>
   );
