@@ -127,8 +127,29 @@ const JUGGLE_MS = 5000; // time spent juggling the ball up and down
 const RALLY_MS = 5500; // time spent rallying (flag + drum + chant)
 const RALLY_CHANCE = 0.25; // how often a mode switch becomes a rally (seldom)
 
-// Chants shown while rallying. `%s` is replaced with the supported team name.
-const CHANTS = ["加油! 💪", "Let's go %s! ⚽", "We are the champions! 🏆", "%s 必勝! 🔥", "GO GO GO! 📣"];
+// Chants shown while rallying, picked at random. `%s` → the supported team name.
+const CHANTS = [
+  "加油! 💪",
+  "Let's go %s! ⚽",
+  "We are the champions! 🏆",
+  "%s 必勝! 🔥",
+  "GO GO GO! 📣",
+  "射門得分! ⚽",
+  "Olé olé olé! 🎶",
+  "誰是冠軍? %s! 👑",
+  "衝呀! 全力以赴! 🏃",
+  "World Cup fever! 🌍",
+  "Come on %s! 💚",
+  "勝利在望! ✨",
+  "Score! Score! Score! 🥅",
+  "永不放棄! 🙌",
+  "全場最強 %s! 💯",
+  "Believe in the team! 🌟",
+  "頂住! 加油加油! 📣",
+  "冠軍是我們的! 🏆",
+  "Unstoppable %s! ⚡",
+  "一球入魂! ⚽🔥",
+];
 
 /**
  * A small supporting fan that pops in beside the mascot during a rally and
@@ -189,10 +210,17 @@ export function FootballMascot() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing animation mode → chant text
     if (displayMode !== "rally") { setChant(null); return; }
-    let i = 0;
-    const show = () => setChant(CHANTS[i % CHANTS.length].replace("%s", teamName).replace(/\s+!/g, "!").trim());
+    let last = -1;
+    const show = () => {
+      let idx = Math.floor(Math.random() * CHANTS.length);
+      if (CHANTS.length > 1 && idx === last) idx = (idx + 1) % CHANTS.length; // avoid repeats
+      last = idx;
+      // Fill in the team name and tidy spacing when no team is set.
+      const text = CHANTS[idx].replace("%s", teamName).replace(/\s+([!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
+      setChant(text);
+    };
     show();
-    const id = window.setInterval(() => { i++; show(); }, 1600);
+    const id = window.setInterval(show, 1600);
     return () => window.clearInterval(id);
   }, [displayMode, teamName]);
 
@@ -203,7 +231,6 @@ export function FootballMascot() {
       setFriendsPhase("in");
       return;
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- start the flash-out only if friends were showing
     setFriendsPhase((p) => (p === "in" ? "out" : p));
     const t = window.setTimeout(() => setFriendsPhase("hidden"), 650);
     return () => window.clearTimeout(t);
