@@ -1,3 +1,8 @@
+## [2026-06-13] — Session: reliable discount detection (no headless browser)
+### Fixed
+- fix(ai): Gemini extraction set to temperature 0 — discount detection was flip-flopping (clear sale page returning hasDiscount true then false) because of the default high temperature; the promo text is already in the static HTML, so no headless browser is needed ([6bb0e5b])
+- fix(ai): parseJsonLoose recovers the outermost JSON object when the model prepends a text preamble ([6bb0e5b])
+
 ## [2026-06-13] — Session: bypass Gemini geo-block (proxy / base-URL)
 ### Added
 - feat(ai): GEMINI_BASE_URL (reverse-proxy override) and AI_PROXY_URL (forward http(s) proxy, falls back to HTTPS_PROXY/ALL_PROXY) to route around Gemini's regional block ("User location is not supported", HTTP 400 in HK); uses undici's version-matched fetch when proxying ([c2e9aa1])
