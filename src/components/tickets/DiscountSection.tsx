@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { CalendarType } from "@/types";
@@ -110,6 +111,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const [calendars, setCalendars] = useState<CalendarType[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState<Record<string, string>>({});
   const [addingFor, setAddingFor] = useState<string | null>(null);
+  const [preview, setPreview] = useState<DiscountResult | null>(null);
   const [addedFor, setAddedFor] = useState<Set<string>>(new Set());
 
   const sources = [...DEFAULT_SOURCES, ...customSources];
@@ -206,18 +208,12 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     setCheckingAll(false);
   };
 
-  const addToCalendar = async (result: DiscountResult) => {
-    const calendarId = selectedCalendar[result.sourceUrl] || defaultCalendarId;
-    if (!calendarId) {
-      toast.error("No calendar available");
-      return;
-    }
+  // Build the full calendar-event payload + display fields for a discount.
+  const buildEvent = (result: DiscountResult) => {
     const domain = domainOf(result.sourceUrl);
     const today = new Date().toISOString().slice(0, 10);
     const startDate = result.startDate ?? today;
     const endDate = result.endDate ?? startDate;
-
-    // Human-readable sale period for the event description.
     const fmtD = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     const period =
       result.startDate && result.endDate
@@ -231,9 +227,10 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     const descriptionLines = [
       period,
       result.discountSummary,
+      result.discountPercent ? `Headline: ${result.discountPercent} off` : null,
       result.promoCode ? `Promo code: ${result.promoCode}` : null,
       result.categories.length ? `On sale: ${result.categories.join(", ")}` : null,
-      result.offers.length ? "" : null,
+      result.offers.length ? "\nAll offers:" : null,
       ...result.offers.map((o) => {
         const bits = [
           o.detail || o.discountPercent,
@@ -243,24 +240,45 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         ].filter(Boolean);
         return `• ${o.label}${bits.length ? ` — ${bits.join(" · ")}` : ""}`;
       }),
+      result.items.length ? "\nItems:" : null,
       ...result.items.map(
         (it) =>
           `• ${it.name}${it.price ? ` — ${it.price}` : ""}${it.originalPrice ? ` (was ${it.originalPrice})` : ""}`
       ),
-      `Source: ${result.sourceUrl}`,
+      `\n🛒 Shop: ${result.sourceUrl}`,
     ].filter((l) => l !== null);
 
+    return {
+      title: `🏷️ ${result.title ?? `${domain} discount`}${result.endDate ? ` (until ${fmtD(result.endDate)})` : ""}`,
+      description: descriptionLines.join("\n"),
+      location: domain,
+      startDate,
+      endDate,
+      period,
+    };
+  };
+
+  // Confirm from the preview dialog → create the event.
+  const confirmAdd = async () => {
+    if (!preview) return;
+    const result = preview;
+    const calendarId = selectedCalendar[result.sourceUrl] || defaultCalendarId;
+    if (!calendarId) {
+      toast.error("No calendar available");
+      return;
+    }
+    const ev = buildEvent(result);
     setAddingFor(result.sourceUrl);
     try {
       const res = await fetch("/api/events", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: `🏷️ ${result.title ?? `${domain} discount`}${result.endDate ? ` (until ${fmtD(result.endDate)})` : ""}`,
-          description: descriptionLines.join("\n"),
-          location: domain,
-          startTime: `${startDate}T00:00:00`,
-          endTime: `${endDate}T23:59:00`,
+          title: ev.title,
+          description: ev.description,
+          location: ev.location,
+          startTime: `${ev.startDate}T00:00:00`,
+          endTime: `${ev.endDate}T23:59:00`,
           allDay: true,
           calendarId,
           category: "ticket",
@@ -273,6 +291,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       }
       setAddedFor((prev) => new Set(prev).add(result.sourceUrl));
       toast.success("Discount added to calendar");
+      setPreview(null);
     } catch {
       toast.error("Couldn't add event — network error");
     } finally {
@@ -532,7 +551,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                         <Button
                           size="sm"
                           className="gap-1.5"
-                          onClick={() => addToCalendar(result)}
+                          onClick={() => setPreview(result)}
                           disabled={addingFor === result.sourceUrl || !defaultCalendarId}
                         >
                           {addingFor === result.sourceUrl ? (
@@ -575,6 +594,57 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         JavaScript-rendered or bot-protected sites may return errors or miss deals —
         try a specific sale/landing page URL for those.
       </p>
+
+      {/* Preview the event before adding it to the calendar */}
+      <Dialog open={!!preview} onOpenChange={(o) => { if (!o) setPreview(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add discount to calendar</DialogTitle>
+            <DialogDescription>Preview the event, choose a calendar, then add.</DialogDescription>
+          </DialogHeader>
+          {preview && (() => {
+            const ev = buildEvent(preview);
+            const cal = selectedCalendar[preview.sourceUrl] || defaultCalendarId;
+            return (
+              <div className="space-y-3 text-sm">
+                <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <p className="font-semibold">{ev.title}</p>
+                  <p className="mt-0.5 text-xs font-medium text-primary">{ev.period} · all-day · {ev.location}</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Calendar</label>
+                  <Select value={cal} onValueChange={(v) => { if (typeof v === "string") setSelectedCalendar((prev) => ({ ...prev, [preview.sourceUrl]: v })); }}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose calendar">
+                        {(value) => calendars.find((c) => c.id === value)?.name ?? "Choose calendar"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {calendars.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          <span className="inline-block size-2.5 rounded-full" style={{ background: c.color }} />
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Details</label>
+                  <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-2 font-sans text-xs leading-relaxed text-foreground/90">{ev.description}</pre>
+                </div>
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setPreview(null)}>Cancel</Button>
+            <Button className="gap-1.5" onClick={confirmAdd} disabled={!!addingFor}>
+              {addingFor ? <Loader2 className="size-3.5 animate-spin" /> : <CalendarPlus className="size-3.5" />}
+              Add to calendar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
