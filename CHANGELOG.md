@@ -1,3 +1,7 @@
+## [2026-06-13] — Session: World Cup football mascot
+### Added
+- feat(theme): pixel-art football mascot peeking from the bottom-left corner while the ⚽ Football event theme is active — idle bob, cheers "GOAL!" on click, decorative (pointer-events-none) ([e97758d])
+
 ## [2026-06-13] — Session: richer evidence-backed discount detection
 ### Added
 - feat(discounts): deal detection now extracts confidence, categories on sale, every distinct offer (discount %, promo code, min spend, audience), and evidence — short exact quotes from the page proving WHY a deal was flagged ([ab3a79a])
