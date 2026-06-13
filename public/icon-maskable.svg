@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Full-bleed background for maskable safe zone -->
+  <rect width="512" height="512" fill="#3B82F6"/>
+  <!-- Calendar glyph, scaled 10x and centered with ~96px padding (within the
+       maskable inner safe zone) -->
+  <g transform="translate(96,96) scale(10)">
+    <rect width="32" height="32" rx="7" fill="#3B82F6"/>
+    <rect width="32" height="11" rx="7" fill="#2563EB"/>
+    <rect y="7" width="32" height="4" fill="#2563EB"/>
+    <rect x="9" y="1" width="3" height="7" rx="1.5" fill="white"/>
+    <rect x="20" y="1" width="3" height="7" rx="1.5" fill="white"/>
+    <rect x="5" y="14" width="5" height="4" rx="1" fill="white" fill-opacity="0.45"/>
+    <rect x="13.5" y="14" width="5" height="4" rx="1" fill="white" fill-opacity="0.45"/>
+    <rect x="22" y="14" width="5" height="4" rx="1" fill="white" fill-opacity="0.45"/>
+    <rect x="5" y="22" width="5" height="4" rx="1" fill="white" fill-opacity="0.45"/>
+    <rect x="13.5" y="22" width="5" height="4" rx="1" fill="white"/>
+    <rect x="22" y="22" width="5" height="4" rx="1" fill="white" fill-opacity="0.45"/>
+  </g>
+</svg>

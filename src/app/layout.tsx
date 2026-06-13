@@ -1,7 +1,8 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Inter, Roboto, Poppins, Lato } from "next/font/google";
 import { Toaster } from "sonner";
 import { Providers } from "@/components/Providers";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -40,6 +41,16 @@ const lato = Lato({
 export const metadata: Metadata = {
   title: "Event Calendar",
   description: "A Google Calendar-like web app with multiple calendar support",
+  // Enables iOS "Add to Home Screen" to launch full-screen with our title.
+  appleWebApp: {
+    capable: true,
+    title: "Calendar",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#3b82f6",
 };
 
 export default function RootLayout({
@@ -56,6 +67,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <Providers>
           {children}
+          <InstallPrompt />
           <Toaster />
         </Providers>
       </body>
