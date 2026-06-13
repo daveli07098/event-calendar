@@ -22,6 +22,12 @@
   z-index: 8 !important;
 }
 
+/* ── Football mascot idle bob (World Cup theme) ── */
+@keyframes mascotBob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3px); }
+}
+
 /* ── Event reminder animations ── */
 @keyframes reminderEnter {
   from { opacity: 0; transform: translateX(120%) scale(0.85); }

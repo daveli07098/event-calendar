@@ -6,6 +6,7 @@ import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
 import { SearchDialog } from "@/components/calendar/SearchDialog";
 import { SiteBanner } from "@/components/banner/SiteBanner";
+import { FootballMascot } from "@/components/theme/FootballMascot";
 import type { CalendarType, EventType, EventCategory } from "@/types";
 
 interface CalendarPageClientProps {
@@ -140,6 +141,8 @@ export function CalendarPageClient({
           setSearchOpen(false);
         }}
       />
+      {/* Decorative mascot — only shows under the ⚽ Football event theme */}
+      <FootballMascot />
     </div>
   );
 }
