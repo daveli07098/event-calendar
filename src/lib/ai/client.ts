@@ -179,6 +179,62 @@ export async function callGeminiJson(
   };
 }
 
+/**
+ * Gemini call WITH Google Search grounding — for prompts that need live, real
+ * world facts the model can't know from training (e.g. current match scores).
+ *
+ * Differs from callGeminiJson:
+ *   • adds `tools: [{ google_search: {} }]` so the model searches the web;
+ *   • omits responseMimeType — forcing application/json is incompatible with the
+ *     grounding tool, so we instruct JSON in the prompt and parse it loosely.
+ * Reuses the same key, proxy/geo-bypass plumbing (aiFetch + GEMINI_BASE_URL) and
+ * lenient parser as the rest of the cascade.
+ */
+export async function callGeminiGrounded(
+  prompt: string,
+  model: string
+): Promise<AiJsonResult> {
+  const apiKey = process.env.GEMINI_API_KEY!;
+  const endpoint = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: { maxOutputTokens: 8192, temperature: 0 },
+  });
+
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
+    res = await aiFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (res.ok || res.status !== 503) break;
+  }
+
+  if (!res || !res.ok) {
+    let detail = "";
+    try {
+      const errBody = await res?.json();
+      if (errBody?.error?.message) detail = ` — ${errBody.error.message}`;
+    } catch {
+      // Non-JSON error body — status code alone will have to do
+    }
+    throw new Error(`Gemini API error: ${res?.status ?? "unknown"}${detail}`);
+  }
+  const data = await res.json();
+  // Grounded answers can span multiple parts — concatenate the text parts.
+  const parts: Array<{ text?: string }> = data.candidates?.[0]?.content?.parts ?? [];
+  const raw = parts.map((p) => p.text ?? "").join("") || "{}";
+  const usage = data.usageMetadata as { totalTokenCount?: number } | undefined;
+  return {
+    data: parseJsonLoose(raw),
+    provider: model,
+    tokensUsed: usage?.totalTokenCount ?? null,
+  };
+}
+
 export async function callOpenAICompatibleJson(
   prompt: string,
   endpoint: string,

@@ -135,3 +135,14 @@ model EventVenue {
 
   @@index([name])
 }
+
+// Singleton cache of AI-fetched World Cup scores/standings. Scores are global
+// facts, so a single row (id = "global") is shared by all users — one refresh
+// serves everyone and survives reloads. `data` holds the JSON snapshot:
+//   { groups: { [letter]: { standings: TeamStanding[], matches: MatchScore[] } }, asOf }
+model WorldCupScores {
+  id        String   @id @default("global")
+  data      Json
+  provider  String?
+  fetchedAt DateTime @updatedAt
+}
