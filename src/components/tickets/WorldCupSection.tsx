@@ -72,18 +72,36 @@ function scoreFor(matches: MatchScore[], home: string, away: string): MatchScore
  * never clipped by the card's overflow, and follows the cursor. Replaces the
  * unreliable native `title` attribute.
  */
-function InfoTip({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+function InfoTip({
+  label, children, className, tone = "default",
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+  tone?: "default" | "green" | "amber";
+}) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const track = (e: React.MouseEvent) => setPos({ x: e.clientX, y: e.clientY });
+  const lines = label.split("\n");
+  const toneCls =
+    tone === "green" ? { border: "border-l-primary", head: "text-primary" }
+    : tone === "amber" ? { border: "border-l-amber-500", head: "text-amber-400" }
+    : { border: "border-l-sky-500", head: "text-sky-300" };
   return (
     <span className={className} onMouseEnter={track} onMouseMove={track} onMouseLeave={() => setPos(null)}>
       {children}
       {pos && typeof document !== "undefined" && createPortal(
         <div
-          className="pointer-events-none fixed z-[9999] max-w-xs whitespace-pre-line rounded-md bg-popover px-2 py-1.5 text-[11px] leading-relaxed text-popover-foreground shadow-lg ring-1 ring-foreground/15"
+          className={cn(
+            "pointer-events-none fixed z-[9999] max-w-xs rounded-md border-l-2 bg-popover px-2.5 py-1.5 text-[11px] leading-relaxed text-popover-foreground shadow-lg ring-1 ring-foreground/15",
+            toneCls.border,
+          )}
           style={{ left: Math.min(pos.x + 14, window.innerWidth - 220), top: pos.y + 14 }}
         >
-          {label}
+          <div className={cn("font-semibold", toneCls.head)}>{lines[0]}</div>
+          {lines.slice(1).map((l, i) => (
+            <div key={i} className="text-muted-foreground">{l}</div>
+          ))}
         </div>,
         document.body,
       )}
@@ -549,6 +567,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
   if (slot?.team) {
     return (
       <InfoTip
+        tone={slot.confirmed ? "green" : "amber"}
         className={cn(
           "inline-flex items-center gap-1 truncate",
           slot.confirmed ? "font-semibold text-foreground" : "italic text-amber-500",
