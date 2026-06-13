@@ -1,3 +1,14 @@
+## [2026-06-13] — Session: World Cup hub, mascot kit & timezone
+### Added
+- feat(worldcup): World Cup tab in the Event Section — group standings (rank/P/W/D/L/GD/Pts) + fixtures and a two-sided "Road to Trophy" knockout bracket converging on the centre Final, all parsed deterministically from existing calendar events ([410f7a1])
+- feat(worldcup): "Refresh scores (AI)" button — Gemini grounded with Google Search fetches live group-stage scores; standings computed server-side; results mapped to fixtures by number so name/order/locale drift can't zero the table; cached in a global WorldCupScores singleton ([410f7a1])
+- feat(worldcup): per-match "add to calendar" button with a calendar picker (group fixtures + bracket matches) ([410f7a1])
+- feat(ai): callGeminiGrounded — Gemini call with google_search grounding, reusing the existing geo-bypass proxy/base-URL and lenient JSON parsing ([410f7a1])
+- feat(mascot): mascot now paces and chases a ball (arc kicks, wall bounces) and periodically juggles it up and down; draggable with persisted position; wears the kit of the user's supported team ([3809d39])
+- feat(theme): first-run TeamPicker dialog to choose the team you support (mascot wears its kit), changeable in Settings; favouriteTeam + display timezone (default GMT+8) added to the theme with a timezone selector ([7a80f5b], [3809d39])
+### Fixed
+- fix(banner): the World Cup announcement now reappears on every refresh/login — dismissal is in-memory only instead of persisted to localStorage ([b0425a9])
+
 ## [2026-06-13] — Session: World Cup football mascot
 ### Added
 - feat(theme): pixel-art football mascot peeking from the bottom-left corner while the ⚽ Football event theme is active — idle bob, cheers "GOAL!" on click, decorative (pointer-events-none) ([e97758d])
