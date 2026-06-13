@@ -7,6 +7,10 @@ import {
   buildGroups,
   buildBracket,
   computeStandings,
+  rankThirds,
+  resolveKnockout,
+  type TeamStanding,
+  type KnockoutMatch,
 } from "@/lib/worldcup";
 
 // Minimal EventType factory — only the fields the parser reads matter.
@@ -134,5 +138,66 @@ describe("computeStandings", () => {
   it("ignores matches with missing scores", () => {
     const table = computeStandings(["A", "B"], [{ home: "A", away: "B", homeScore: null, awayScore: 2 }]);
     expect(table.every((t) => t.p === 0 && t.pts === 0)).toBe(true);
+  });
+});
+
+describe("computeStandings head-to-head tiebreak", () => {
+  it("separates teams level on pts/GD/GF by their head-to-head result", () => {
+    // Z and A both finish pts 6, GD +1, GF 2 — but Z beat A, so Z ranks above
+    // A (alphabetical order would wrongly put A first).
+    const teams = ["Z", "A", "C", "D"];
+    const scores = [
+      { home: "Z", away: "A", homeScore: 1, awayScore: 0 }, // Z beats A (h2h)
+      { home: "Z", away: "C", homeScore: 1, awayScore: 0 },
+      { home: "D", away: "Z", homeScore: 1, awayScore: 0 }, // Z loses to D
+      { home: "A", away: "C", homeScore: 1, awayScore: 0 },
+      { home: "A", away: "D", homeScore: 1, awayScore: 0 },
+      { home: "C", away: "D", homeScore: 0, awayScore: 0 },
+    ];
+    const table = computeStandings(teams, scores);
+    const z = table.find((t) => t.team === "Z")!;
+    const a = table.find((t) => t.team === "A")!;
+    expect(z.pts).toBe(a.pts);
+    expect(z.gd).toBe(a.gd);
+    expect(z.gf).toBe(a.gf);
+    expect(table[0].team).toBe("Z"); // head-to-head winner ranked first
+    expect(table[1].team).toBe("A");
+  });
+});
+
+// Build a finished group standing (p=3) quickly.
+function st(team: string, pts: number, gd: number, gf: number, rank: number): TeamStanding {
+  return { team, p: 3, w: 0, d: 0, l: 0, gf, ga: gf - gd, gd, pts, rank };
+}
+
+describe("rankThirds", () => {
+  it("orders third-placed teams by pts → GD → GF", () => {
+    const perGroup = {
+      A: [st("A1", 9, 5, 6, 1), st("A2", 6, 2, 4, 2), st("A3", 3, 0, 2, 3)],
+      B: [st("B1", 9, 4, 5, 1), st("B2", 6, 1, 3, 2), st("B3", 4, 1, 3, 3)],
+    };
+    const thirds = rankThirds(perGroup);
+    expect(thirds.map((t) => t.standing.team)).toEqual(["B3", "A3"]); // B3 has 4 pts > A3's 3
+  });
+});
+
+describe("resolveKnockout", () => {
+  const r32: KnockoutMatch[] = [
+    { eventId: "e1", round: "R32", roundLabel: "32強", matchId: 73, home: "A組冠軍", away: "B組亞軍", kickoff: "2026-06-28T19:00:00Z", side: "left" },
+    { eventId: "e2", round: "R32", roundLabel: "32強", matchId: 74, home: "最佳第三名(AB)", away: "M70勝者", kickoff: "2026-06-29T19:00:00Z", side: "left" },
+  ];
+
+  it("resolves group winner/runner-up and marks them confirmed when the group is complete", () => {
+    const perGroup = {
+      A: [st("Mexico", 9, 5, 6, 1), st("Korea", 6, 2, 4, 2), st("Czechia", 3, 0, 2, 3), st("South Africa", 0, -7, 1, 4)],
+      B: [st("Canada", 7, 3, 5, 1), st("Qatar", 5, 1, 3, 2), st("Bosnia", 4, 0, 3, 3), st("Switzerland", 1, -4, 2, 4)],
+    };
+    const out = resolveKnockout(r32, perGroup);
+    expect(out["e1"].home).toMatchObject({ team: "Mexico", confirmed: true }); // A組冠軍
+    expect(out["e1"].away).toMatchObject({ team: "Qatar", confirmed: true });  // B組亞軍
+    // best third among {A,B}: Bosnia (4) > Czechia (3); not all 12 groups present → provisional
+    expect(out["e2"].home.team).toBe("Bosnia");
+    expect(out["e2"].home.confirmed).toBe(false);
+    expect(out["e2"].away.team).toBeNull(); // M70勝者 — not derivable
   });
 });

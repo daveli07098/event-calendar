@@ -249,10 +249,119 @@ export function computeStandings(teams: string[], scores: MatchScore[]): TeamSta
 
   const rows = [...table.values()];
   for (const r of rows) r.gd = r.gf - r.ga;
-  rows.sort(
-    (a, b) =>
-      b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || a.team.localeCompare(b.team),
-  );
-  rows.forEach((r, i) => (r.rank = i + 1));
-  return rows;
+
+  // FIFA group ranking: 1) points 2) goal difference 3) goals for. Teams still
+  // level on all three are separated by head-to-head among themselves:
+  // 4) h2h points 5) h2h goal difference 6) h2h goals for (then team name).
+  rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || 0);
+  const ordered: TeamStanding[] = [];
+  for (let i = 0; i < rows.length; ) {
+    let j = i + 1;
+    while (j < rows.length && rows[j].pts === rows[i].pts && rows[j].gd === rows[i].gd && rows[j].gf === rows[i].gf) j++;
+    const tied = rows.slice(i, j);
+    if (tied.length > 1) {
+      const h2h = headToHead(tied.map((t) => t.team), scores);
+      tied.sort((a, b) => {
+        const A = h2h.get(a.team)!, B = h2h.get(b.team)!;
+        return B.pts - A.pts || B.gd - A.gd || B.gf - A.gf || a.team.localeCompare(b.team);
+      });
+    }
+    ordered.push(...tied);
+    i = j;
+  }
+  ordered.forEach((r, i) => (r.rank = i + 1));
+  return ordered;
+}
+
+/** Mini-table among a tied subset, counting only the matches between them. */
+function headToHead(subset: string[], scores: MatchScore[]): Map<string, { pts: number; gd: number; gf: number }> {
+  const set = new Set(subset);
+  const m = new Map(subset.map((t) => [t, { pts: 0, gd: 0, gf: 0 }]));
+  for (const s of scores) {
+    if (s.homeScore == null || s.awayScore == null) continue;
+    if (!set.has(s.home) || !set.has(s.away)) continue;
+    const h = m.get(s.home)!, a = m.get(s.away)!;
+    h.gf += s.homeScore; h.gd += s.homeScore - s.awayScore;
+    a.gf += s.awayScore; a.gd += s.awayScore - s.homeScore;
+    if (s.homeScore > s.awayScore) h.pts += 3;
+    else if (s.homeScore < s.awayScore) a.pts += 3;
+    else { h.pts += 1; a.pts += 1; }
+  }
+  return m;
+}
+
+/** A resolved knockout slot: the team (if derivable) and whether it's locked. */
+export interface ResolvedSlot {
+  label: string;       // original placeholder, e.g. "A組亞軍" / "最佳第三名(ABCDF)"
+  team: string | null; // resolved team name, or null if not yet derivable
+  confirmed: boolean;  // true = mathematically locked; false = provisional
+}
+
+/** A group is complete once all four teams have played their three matches. */
+function groupComplete(standings?: TeamStanding[]): boolean {
+  return !!standings && standings.length >= 4 && standings.every((s) => s.p >= 3);
+}
+
+/**
+ * The 12 third-placed teams ranked to pick the best 8. FIFA order: group points
+ * → goal difference → goals for → fair-play points → drawing of lots. Card data
+ * isn't in our snapshot, so fair-play is skipped and the group letter stands in
+ * for the draw (deterministic).
+ */
+export function rankThirds(perGroup: Record<string, TeamStanding[]>): { group: string; standing: TeamStanding }[] {
+  const thirds: { group: string; standing: TeamStanding }[] = [];
+  for (const [group, st] of Object.entries(perGroup)) {
+    if (st && st[2]) thirds.push({ group, standing: st[2] });
+  }
+  thirds.sort((a, b) => {
+    const A = a.standing, B = b.standing;
+    return B.pts - A.pts || B.gd - A.gd || B.gf - A.gf || a.group.localeCompare(b.group);
+  });
+  return thirds;
+}
+
+/**
+ * Resolve Round-of-32 placeholder slots to actual teams from the standings:
+ *   "X組冠軍" → group X winner · "X組亞軍" → runner-up · "最佳第三名(SET)" →
+ *   highest-ranked best-third from one of the groups in SET (greedy, no reuse).
+ * `confirmed` is true when the spot is locked (group complete, or all groups
+ * complete for best-thirds), else the result is provisional. Unresolvable labels
+ * (e.g. "M73勝者") return team:null so the caller keeps the placeholder.
+ * Keyed by match eventId.
+ */
+export function resolveKnockout(
+  r32: KnockoutMatch[],
+  perGroup: Record<string, TeamStanding[]>,
+): Record<string, { home: ResolvedSlot; away: ResolvedSlot }> {
+  const groups = Object.keys(perGroup);
+  const allComplete = groups.length >= 12 && groups.every((g) => groupComplete(perGroup[g]));
+  const qualified = rankThirds(perGroup).slice(0, 8); // best 8 thirds advance
+  const usedThirds = new Set<string>();
+
+  const resolveLabel = (label: string): ResolvedSlot => {
+    let m = label.match(/^([A-L])組冠軍$/);
+    if (m) {
+      const st = perGroup[m[1]];
+      return { label, team: st?.[0]?.team ?? null, confirmed: groupComplete(st) };
+    }
+    m = label.match(/^([A-L])組亞軍$/);
+    if (m) {
+      const st = perGroup[m[1]];
+      return { label, team: st?.[1]?.team ?? null, confirmed: groupComplete(st) };
+    }
+    m = label.match(/^最佳第三名\(([A-L]+)\)$/);
+    if (m) {
+      const allowed = new Set(m[1].split(""));
+      const pick = qualified.find((t) => allowed.has(t.group) && !usedThirds.has(t.group));
+      if (pick) usedThirds.add(pick.group);
+      return { label, team: pick?.standing.team ?? null, confirmed: allComplete };
+    }
+    return { label, team: null, confirmed: false };
+  };
+
+  const out: Record<string, { home: ResolvedSlot; away: ResolvedSlot }> = {};
+  for (const match of [...r32].sort((a, b) => (a.matchId ?? 0) - (b.matchId ?? 0))) {
+    out[match.eventId] = { home: resolveLabel(match.home), away: resolveLabel(match.away) };
+  }
+  return out;
 }

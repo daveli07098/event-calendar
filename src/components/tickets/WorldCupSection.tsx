@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check, Plus, Minus, Maximize2 } from "lucide-react";
+import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check, Plus, Minus, Maximize2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,10 +18,12 @@ import {
   buildGroups,
   buildBracket,
   computeStandings,
+  resolveKnockout,
   ROUND_LABELS_EN,
   type MatchScore,
   type TeamStanding,
   type KnockoutMatch,
+  type ResolvedSlot,
 } from "@/lib/worldcup";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
@@ -187,6 +189,15 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
   const groups = useMemo(() => buildGroups(events), [events]);
   const bracket = useMemo(() => buildBracket(events), [events]);
 
+  // Resolve Round-of-32 placeholders (組冠軍/組亞軍/最佳第三名) from the synced
+  // standings — provisional until each group/the thirds are mathematically locked.
+  const resolved = useMemo(() => {
+    const r32 = bracket.find((r) => r.round === "R32")?.matches ?? [];
+    const perGroup: Record<string, TeamStanding[]> = {};
+    if (snapshot) for (const [g, v] of Object.entries(snapshot.groups)) perGroup[g] = v.standings;
+    return resolveKnockout(r32, perGroup);
+  }, [bracket, snapshot]);
+
   async function refreshScores() {
     setRefreshing(true);
     setRefreshError(null);
@@ -293,7 +304,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
           {bracket.length === 0 ? (
             <p className="text-sm text-muted-foreground">No knockout fixtures found yet.</p>
           ) : (
-            <Bracket bracket={bracket} calendars={calendars} tz={tz} />
+            <Bracket bracket={bracket} calendars={calendars} tz={tz} resolved={resolved} />
           )}
         </TabsContent>
       </Tabs>
@@ -399,25 +410,52 @@ function GroupCard({
   );
 }
 
-function BracketMatch({ match, calendars, tz }: { match: KnockoutMatch; calendars: CalendarType[]; tz: string }) {
+/** One side of a bracket match: a resolved team (provisional = amber/italic,
+ *  confirmed = solid + ✓) or the original placeholder when not yet derivable. */
+function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot }) {
+  if (slot?.team) {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1 truncate",
+          slot.confirmed ? "font-semibold text-foreground" : "italic text-amber-500",
+        )}
+        title={slot.confirmed ? "Confirmed" : `Provisional — ${slot.label}`}
+      >
+        {slot.confirmed && <CheckCircle2 className="size-2.5 shrink-0" />}
+        {slot.team}
+      </span>
+    );
+  }
+  return <span className="truncate text-muted-foreground">{fallback}</span>;
+}
+
+function BracketMatch({
+  match, calendars, tz, resolved,
+}: {
+  match: KnockoutMatch;
+  calendars: CalendarType[];
+  tz: string;
+  resolved?: { home: ResolvedSlot; away: ResolvedSlot };
+}) {
   return (
     <div className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs">
       <div className="flex items-start gap-1">
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-center justify-between gap-1">
-            <span className="truncate font-medium">{match.home}</span>
+            <SlotName fallback={match.home} slot={resolved?.home} />
             {match.matchId != null && (
               <span className="text-[9px] text-muted-foreground/60 shrink-0">M{match.matchId}</span>
             )}
           </div>
-          <div className="flex items-center gap-1 text-muted-foreground">
-            <Goal className="size-2.5 shrink-0" />
-            <span className="truncate">{match.away}</span>
+          <div className="flex items-center gap-1">
+            <Goal className="size-2.5 shrink-0 text-muted-foreground" />
+            <SlotName fallback={match.away} slot={resolved?.away} />
           </div>
           <p className="text-[9px] text-muted-foreground/60">{fmtKickoff(match.kickoff, tz)}</p>
         </div>
         <AddMatchButton
-          title={`${match.roundLabel}: ${match.home} vs ${match.away}`}
+          title={`${match.roundLabel}: ${resolved?.home?.team ?? match.home} vs ${resolved?.away?.team ?? match.away}`}
           startIso={match.kickoff}
           calendars={calendars}
         />
@@ -429,11 +467,12 @@ function BracketMatch({ match, calendars, tz }: { match: KnockoutMatch; calendar
 /** Two-sided knockout bracket: left half flows inward, right half mirrors it,
  *  meeting at the centre Final — like a printed tournament bracket. */
 function Bracket({
-  bracket, calendars, tz,
+  bracket, calendars, tz, resolved,
 }: {
   bracket: ReturnType<typeof buildBracket>;
   calendars: CalendarType[];
   tz: string;
+  resolved: Record<string, { home: ResolvedSlot; away: ResolvedSlot }>;
 }) {
   const rounds = bracket.filter((r) => r.round !== "Final" && r.round !== "ThirdPlace");
   const final = bracket.find((r) => r.round === "Final");
@@ -466,6 +505,20 @@ function Bracket({
     setZoom(clampZoom(Math.min(1, w.clientWidth / c.scrollWidth)));
   };
 
+  // Trackpad pinch-zoom (macOS): a pinch arrives as a wheel event with ctrlKey.
+  // Attached non-passively so we can preventDefault and zoom instead of scroll.
+  useEffect(() => {
+    const w = wrapRef.current;
+    if (!w) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return; // normal scroll/pan passes through
+      e.preventDefault();
+      setZoom((z) => clampZoom(z - e.deltaY * 0.01));
+    };
+    w.addEventListener("wheel", onWheel, { passive: false });
+    return () => w.removeEventListener("wheel", onWheel);
+  }, []);
+
   // Click-and-drag to pan the bracket (skips drags that start on a button).
   const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const onPanDown = (e: React.PointerEvent) => {
@@ -490,7 +543,7 @@ function Bracket({
     <div key={key} className="flex w-44 shrink-0 flex-col gap-2">
       <p className="text-center text-xs font-semibold text-muted-foreground">{label}</p>
       <div className="flex flex-1 flex-col justify-around gap-2">
-        {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} />)}
+        {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />)}
       </div>
     </div>
   );
@@ -534,13 +587,13 @@ function Bracket({
               <p className="text-center text-sm font-semibold">🏆 Final</p>
               {final?.matches.map((m) => (
                 <div key={m.eventId} className="w-full rounded-lg border-2 border-primary/60 bg-primary/5 p-1">
-                  <BracketMatch match={m} calendars={calendars} tz={tz} />
+                  <BracketMatch match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />
                 </div>
               ))}
               {third && third.matches.length > 0 && (
                 <div className="w-full space-y-1">
                   <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground/70">Third place</p>
-                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} />)}
+                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />)}
                 </div>
               )}
             </div>
