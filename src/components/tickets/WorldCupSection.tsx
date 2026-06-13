@@ -69,6 +69,25 @@ function goalBreakdown(team: string, matches: MatchScore[]): string {
   return `得球 ${gf} / 失球 ${ga}\n${lines.join("\n")}`;
 }
 
+/** Win/draw/loss breakdown and points for a team, for the Pts hover tooltip. */
+function pointsBreakdown(team: string, matches: MatchScore[]): string {
+  const lines: string[] = [];
+  let pts = 0;
+  for (const m of matches) {
+    if (m.homeScore == null || m.awayScore == null) continue;
+    const isHome = m.home === team, isAway = m.away === team;
+    if (!isHome && !isAway) continue;
+    const my = isHome ? m.homeScore : m.awayScore;
+    const opp = isHome ? m.awayScore : m.homeScore;
+    const oppName = isHome ? m.away : m.home;
+    if (my > opp) { pts += 3; lines.push(`勝 vs ${oppName} (${my}-${opp})  +3`); }
+    else if (my === opp) { pts += 1; lines.push(`和 vs ${oppName} (${my}-${opp})  +1`); }
+    else { lines.push(`負 vs ${oppName} (${my}-${opp})  +0`); }
+  }
+  if (!lines.length) return "未開賽 (no matches played)";
+  return `${pts} 分\n${lines.join("\n")}`;
+}
+
 /** Small popover button that adds a single match to a chosen calendar. */
 function AddMatchButton({
   title, startIso, location, calendars,
@@ -405,7 +424,7 @@ function GroupCard({
               <span className="text-center tabular-nums">{t.d}</span>
               <span className="text-center tabular-nums">{t.l}</span>
               <span className="text-center tabular-nums cursor-help" title={goalBreakdown(t.team, matches)}>{t.gd > 0 ? `+${t.gd}` : t.gd}</span>
-              <span className="text-center font-bold tabular-nums">{t.pts}</span>
+              <span className="text-center font-bold tabular-nums cursor-help" title={pointsBreakdown(t.team, matches)}>{t.pts}</span>
             </div>
           ))}
         </div>
@@ -416,6 +435,9 @@ function GroupCard({
           {fixtures.map((f, i) => {
             const s = scoreFor(matches, f.home, f.away);
             const played = s != null && s.homeScore != null && s.awayScore != null;
+            const homeWin = played && s!.homeScore! > s!.awayScore!;
+            const awayWin = played && s!.awayScore! > s!.homeScore!;
+            const draw = played && s!.homeScore! === s!.awayScore!;
             const t = new Date(f.kickoff).getTime();
             // Finished = kicked off in the past; soon = kicks off within 12 hours.
             const finished = now > 0 && t < now;
@@ -429,7 +451,16 @@ function GroupCard({
                   soon && "bg-amber-400/10 ring-1 ring-amber-400/50",
                 )}
               >
-                <span className={cn("flex-1 text-right truncate", (finished || soon) && "font-medium")}>{f.home}</span>
+                <span
+                  className={cn(
+                    "flex-1 text-right truncate inline-flex items-center justify-end gap-1",
+                    homeWin ? "font-bold text-foreground" : awayWin ? "text-muted-foreground" : (finished || soon) && "font-medium",
+                  )}
+                >
+                  {f.home}
+                  {homeWin && <Trophy className="size-3 shrink-0 text-amber-400" />}
+                  {draw && <span className="text-muted-foreground/60 text-[9px]">=</span>}
+                </span>
                 {played ? (
                   <span className="font-bold tabular-nums px-1.5 py-0.5 rounded bg-primary/15 text-primary">
                     {s!.homeScore} - {s!.awayScore}
@@ -442,7 +473,16 @@ function GroupCard({
                     {fmtKickoff(f.kickoff, tz)}
                   </span>
                 )}
-                <span className={cn("flex-1 truncate", (finished || soon) && "font-medium")}>{f.away}</span>
+                <span
+                  className={cn(
+                    "flex-1 truncate inline-flex items-center gap-1",
+                    awayWin ? "font-bold text-foreground" : homeWin ? "text-muted-foreground" : (finished || soon) && "font-medium",
+                  )}
+                >
+                  {draw && <span className="text-muted-foreground/60 text-[9px]">=</span>}
+                  {awayWin && <Trophy className="size-3 shrink-0 text-amber-400" />}
+                  {f.away}
+                </span>
                 <AddMatchButton
                   title={`${f.home} vs ${f.away}`}
                   startIso={f.kickoff}
