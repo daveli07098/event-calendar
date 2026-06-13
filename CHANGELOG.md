@@ -4,6 +4,7 @@
 ### Changed
 - feat(theme): top-right ThemeSwitcher now mirrors the current selection exactly — event-theme emoji+label when active, else accent swatch+name — matching Settings ([61fbcd2])
 ### Fixed
+- fix(theme): ThemeSwitcher dropdown labels wrapped in DropdownMenuGroup — base-ui requires GroupLabel inside a Group; opening the menu previously crashed the calendar page ([c3d8828])
 - fix(discounts): detailed backend logging for scan failures — full AI provider cascade per attempt, fetch blocks (403), and thin content — so failures are diagnosable in the server console ([61fbcd2])
 
 ## [2026-06-13] — Session: Event themes + customizable site banner
