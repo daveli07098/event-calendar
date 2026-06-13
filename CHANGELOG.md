@@ -1,3 +1,10 @@
+## [2026-06-13] — Session: Event themes + customizable site banner
+### Added
+- feat(theme): event themes — seasonal accent skins (extensible registry), ships ⚽ Football/World Cup; top-right ThemeSwitcher with light/dark/system + event picker; defaults everyone to the World Cup skin ([cbd8cd9])
+- feat(banner): dismissible site banner announcing live events — World Cup preset with stadium image + gradient fallback; full editor in Settings → Site Banner (toggle, preset, live preview, title/subtitle/image/CTA) ([cbd8cd9])
+### Changed
+- refactor(calendar): FullCalendar height is now container-based (height=100%) so the banner never causes overflow ([cbd8cd9])
+
 ## [2026-06-13] — Session: Discount Sale section + shared AI module
 ### Added
 - feat(discounts): Discount Sale tab in Event Section — scans Nike, adidas, Puma and Marathon Sports HK (plus custom sources) for active sales via AI; discount preview cards with add-to-calendar and calendar picker ([07b7be6])
