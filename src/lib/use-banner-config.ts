@@ -10,8 +10,6 @@ import {
   BANNER_CHANGE_EVENT,
   BANNER_STORAGE_KEY,
   DEFAULT_BANNER,
-  dismissBanner as dismissBannerStore,
-  isBannerDismissed,
   readBannerConfig,
   writeBannerConfig,
   type BannerConfig,
@@ -31,7 +29,8 @@ export function useBannerConfig() {
   const refresh = useCallback(() => {
     const cfg = readBannerConfig();
     setConfig(cfg);
-    setDismissed(isBannerDismissed(cfg));
+    // Dismissal is intentionally NOT read from storage: the announcement should
+    // reappear on every refresh / login. The X only hides it for this view.
   }, []);
 
   useEffect(() => {
@@ -52,13 +51,13 @@ export function useBannerConfig() {
   const save = useCallback((next: BannerConfig) => {
     writeBannerConfig(next);
     setConfig(next);
-    setDismissed(isBannerDismissed(next));
+    setDismissed(false); // a freshly saved banner is always shown
   }, []);
 
+  // Hide for the current view only — not persisted, so refresh/login shows it again.
   const dismiss = useCallback(() => {
-    dismissBannerStore(config);
     setDismissed(true);
-  }, [config]);
+  }, []);
 
   return { config, dismissed, hydrated, save, dismiss };
 }
