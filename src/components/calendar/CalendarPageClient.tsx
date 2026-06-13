@@ -7,6 +7,7 @@ import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
 import { SearchDialog } from "@/components/calendar/SearchDialog";
 import { SiteBanner } from "@/components/banner/SiteBanner";
 import { FootballMascot } from "@/components/theme/FootballMascot";
+import { TeamPicker } from "@/components/theme/TeamPicker";
 import type { CalendarType, EventType, EventCategory } from "@/types";
 
 interface CalendarPageClientProps {
@@ -143,6 +144,8 @@ export function CalendarPageClient({
       />
       {/* Decorative mascot — only shows under the ⚽ Football event theme */}
       <FootballMascot />
+      {/* First-run prompt: which team do you support? (mascot wears its kit) */}
+      <TeamPicker />
     </div>
   );
 }

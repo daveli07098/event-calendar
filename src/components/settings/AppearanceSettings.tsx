@@ -6,6 +6,8 @@ import {
   ACCENT_COLORS,
   FONT_OPTIONS,
   RADIUS_VALUES,
+  TIMEZONE_OPTIONS,
+  DEFAULT_TIME_ZONE,
   type ThemeAccent,
   type ThemeDensity,
   type ThemeFont,
@@ -13,6 +15,8 @@ import {
   type ThemeRadius,
 } from "@/lib/theme";
 import { EVENT_THEME_ORDER, EVENT_THEMES } from "@/lib/event-themes";
+import { TeamSelect, useWorldCupTeams } from "@/components/theme/TeamPicker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 const MODES: { value: ThemeMode; label: string; icon: React.ReactNode }[] = [
@@ -28,6 +32,7 @@ const DENSITIES: { value: ThemeDensity; label: string; desc: string }[] = [
 
 export function AppearanceSettings() {
   const { theme, setTheme } = useTheme();
+  const { teams } = useWorldCupTeams(theme.eventTheme === "worldcup");
 
   return (
     <div className="space-y-6">
@@ -96,6 +101,42 @@ export function AppearanceSettings() {
             );
           })}
         </div>
+
+        {/* Favourite team — the mascot wears this team's kit (World Cup only) */}
+        {theme.eventTheme === "worldcup" && (
+          <div className="mt-3 max-w-xs">
+            <p className="text-xs text-muted-foreground mb-1.5">
+              Team you support — the pitch mascot wears their kit.
+            </p>
+            <TeamSelect
+              value={theme.favouriteTeam}
+              onChange={(t) => setTheme({ favouriteTeam: t })}
+              teams={teams}
+              placeholder={teams.length ? "Choose a team…" : "No World Cup events found"}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Timezone — how event times are displayed across the app */}
+      <div>
+        <p className="text-sm font-medium mb-1">Timezone</p>
+        <p className="text-xs text-muted-foreground mb-3">
+          Match and event times are shown in this timezone. Defaults to GMT+8.
+        </p>
+        <Select
+          value={theme.timeZone ?? DEFAULT_TIME_ZONE}
+          onValueChange={(v) => setTheme({ timeZone: String(v) })}
+        >
+          <SelectTrigger className="w-full max-w-xs" size="default">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TIMEZONE_OPTIONS.map((tz) => (
+              <SelectItem key={tz.value} value={tz.value}>{tz.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Accent color */}
