@@ -1,3 +1,13 @@
+## [2026-06-15] — Session: AI model pool, scrape reliability & token cuts
+### Added
+- feat(scrape): parseRemixEvent() reads structured event data from a Remix app's window.__remixContext (Timable etc., which ship no JSON-LD) — venue, end date/time and slots are now extracted deterministically with zero tokens, folded into extractMeta behind JSON-LD/OG ([154c4f2])
+- feat(scrape): AI-composed descriptions — when the page yields only a keyword/tag dump (isKeywordSoup) or nothing, a small gated lite-model call writes one clean sentence from the trusted facts; main prompt also asks for a real sentence, never a tag list ([154c4f2])
+### Changed
+- refactor(ai): consolidated four drifting per-feature Gemini model arrays into one shared pool (src/lib/ai/models.ts) with a ModelPool class exposing .cascade()/.grounded()/.lite(); client.ts, scrape, classify and World Cup all derive their lists from it ([9441526])
+- perf(worldcup): score refresh now grounds only kicked-off, not-yet-final fixtures and reuses cached finals (was all 72 every click) — far fewer tokens, no quota spend when nothing changed ([602c600])
+### Fixed
+- fix(scrape): request timeouts (30s) on the Gemini/OpenAI-compatible calls and timeout/abort errors now classed transient, so a stalled model falls through to the next provider instead of hanging the cascade or bailing to OG-meta ([154c4f2])
+
 ## [2026-06-13] — Session: World Cup polish (deep-link, bracket zoom, rally friends)
 ### Added
 - feat(worldcup): the "View matches" banner CTA now opens the World Cup section directly (/tickets?section=worldcup) ([64cfbeb])
