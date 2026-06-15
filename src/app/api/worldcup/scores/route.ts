@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { callGeminiGrounded, hasAiProvider } from "@/lib/ai/client";
+import { callGeminiGrounded, hasAiProvider, GROUNDED_MODELS } from "@/lib/ai/client";
 import {
   AI_DAILY_LIMIT,
   checkRemainingAiLimit,
@@ -23,10 +23,6 @@ interface ScoresSnapshot {
   groups: Record<string, GroupScores>;
   asOf: string; // ISO timestamp of the refresh
 }
-
-// Grounding-capable Gemini models, tried in order until one answers.
-// Strongest grounding-capable models first; flash-lite is a weak last resort.
-const GROUNDED_MODELS = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"];
 
 // ── GET: return the cached snapshot (or null if never refreshed / table absent) ──
 export async function GET() {
@@ -71,6 +67,31 @@ async function loadGroupEvents(uid: string): Promise<EventType[]> {
   }));
 }
 
+/** A previously-fetched scoreline, keyed by group/home/away for cheap reuse. */
+type CachedScore = { homeScore: number | null; awayScore: number | null; status: string | null };
+
+/** Load the last snapshot's scorelines as a lookup map (empty if none/unmigrated). */
+async function loadCachedScores(): Promise<Map<string, CachedScore>> {
+  const map = new Map<string, CachedScore>();
+  try {
+    const row = await prisma.worldCupScores.findUnique({ where: { id: SCORES_ID } });
+    const groups = (row?.data as ScoresSnapshot | undefined)?.groups;
+    if (!groups) return map;
+    for (const [group, gs] of Object.entries(groups)) {
+      for (const m of gs.matches ?? []) {
+        map.set(`${group}|${m.home}|${m.away}`, {
+          homeScore: m.homeScore ?? null,
+          awayScore: m.awayScore ?? null,
+          status: m.status ?? null,
+        });
+      }
+    }
+  } catch {
+    // Table not migrated / malformed JSON — treat as no cache.
+  }
+  return map;
+}
+
 interface FlatFixture { n: number; group: string; home: string; away: string; kickoff: string }
 
 /** Number every group fixture so the AI can return scores by number — no
@@ -87,21 +108,18 @@ function flattenFixtures(groups: ReturnType<typeof buildGroups>): FlatFixture[] 
 }
 
 function buildPrompt(flat: FlatFixture[]): string {
+  // Compact one-line-per-fixture format keeps the prompt small. Only fixtures
+  // that have already kicked off are sent (callers pre-filter), so every line
+  // is a match the model should actually be able to find a score for.
   const lines = flat
-    .map((f) => `${f.n}. [Group ${f.group}] ${f.home} vs ${f.away} (kickoff ${f.kickoff.slice(0, 10)})`)
+    .map((f) => `${f.n}. ${f.home} vs ${f.away} [${f.group}, ${f.kickoff.slice(0, 10)}]`)
     .join("\n");
 
-  return `You are a football data assistant. Use Google Search to find the actual result of each 2026 FIFA World Cup group-stage match listed below. Today's date may be mid-tournament, so many matches already have final scores — search for them.
+  return `Use Google Search to find the final/current score of each 2026 FIFA World Cup match below. homeScore = first team, awayScore = second team. If a match has not been played yet or no real score is found, use null for both (never guess).
 
-For EACH numbered fixture return its score. If a match genuinely has not been played yet, use null for both scores and status "scheduled". Report the score for the team listed first as "homeScore" and the team listed second as "awayScore".
-
-Fixtures (keep the numbers — do not reorder):
 ${lines}
 
-Return ONLY a JSON object (no markdown, no prose) of this exact shape:
-{ "results": [ { "n": 1, "homeScore": 2, "awayScore": 1, "status": "FT" }, { "n": 2, "homeScore": null, "awayScore": null, "status": "scheduled" } ] }
-
-Use integers for scores. Include every fixture number. Never invent results — if a real score can't be found, use null.`;
+Return ONLY this JSON (no prose): {"results":[{"n":1,"homeScore":2,"awayScore":1,"status":"FT"}]}. Integers only. Include every number above.`;
 }
 
 // Coerce an AI score value (number or numeric string) to an int, else null.
@@ -125,12 +143,6 @@ export async function POST() {
       { status: 503 },
     );
   }
-  if (!(await checkRemainingAiLimit(uid))) {
-    return NextResponse.json(
-      { error: `Daily AI limit reached (${AI_DAILY_LIMIT}/day)`, resetAt: getResetAt() },
-      { status: 429 },
-    );
-  }
 
   const events = await loadGroupEvents(uid);
   const groups = buildGroups(events);
@@ -142,76 +154,114 @@ export async function POST() {
   }
 
   const flat = flattenFixtures(groups);
-  const prompt = buildPrompt(flat);
 
-  // Try each grounding-capable model. A model that answers but returns an empty
-  // results array is treated as a soft miss — fall through to a stronger model,
-  // keeping the empty answer only as a last resort.
-  let aiData: Record<string, unknown> | null = null;
+  // Reuse already-known scores from the last snapshot so we never spend tokens
+  // re-grounding a match that's already final. Keyed by group|home|away.
+  const prior = await loadCachedScores();
+  const keyOf = (group: string, home: string, away: string) => `${group}|${home}|${away}`;
+  const today = new Date().toISOString().slice(0, 10);
+
+  // A fixture needs an AI lookup only when it has already kicked off AND isn't
+  // already locked in cache. "Locked" = both scores known and the match was on a
+  // previous day (today's matches may still be live, so re-fetch those).
+  const needed = flat.filter((f) => {
+    const day = f.kickoff.slice(0, 10);
+    if (day > today) return false; // future match — no score to find yet
+    const cached = prior.get(keyOf(f.group, f.home, f.away));
+    const locked = cached && cached.homeScore != null && cached.awayScore != null && day < today;
+    return !locked;
+  });
+
+  const byNum = new Map<number, { homeScore: number | null; awayScore: number | null; status: string | null }>();
   let provider = "";
-  let fallback: { data: Record<string, unknown>; provider: string } | null = null;
-  const failures: string[] = [];
-  for (const model of GROUNDED_MODELS) {
-    try {
-      const res = await callGeminiGrounded(prompt, model);
-      const arr = Array.isArray(res.data.results) ? res.data.results : [];
-      if (arr.length > 0) {
-        aiData = res.data;
-        provider = res.provider;
-        break;
-      }
-      fallback ??= { data: res.data, provider: res.provider };
-      failures.push(`${model}: empty results`);
-      console.warn(`[worldcup/scores] ${model} returned no results — trying next model`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      failures.push(`${model}: ${msg}`);
-      console.warn(`[worldcup/scores] ${model} failed: ${msg}`);
+
+  if (needed.length === 0) {
+    // Nothing new to fetch (pre-tournament, or every kicked-off match already
+    // cached). Rebuild from cache without spending AI quota.
+    provider = (await prisma.worldCupScores.findUnique({ where: { id: SCORES_ID } }).then((r) => r?.provider).catch(() => null)) || "cache";
+    console.log(`[worldcup/scores] no fixtures need refresh — served ${prior.size} cached scores`);
+  } else {
+    // Only now — when we genuinely have matches to ground — does this cost quota.
+    if (!(await checkRemainingAiLimit(uid))) {
+      return NextResponse.json(
+        { error: `Daily AI limit reached (${AI_DAILY_LIMIT}/day)`, resetAt: getResetAt() },
+        { status: 429 },
+      );
     }
-  }
-  if (!aiData) aiData = fallback?.data ?? null;
-  if (!aiData) {
-    return NextResponse.json(
-      { error: `Score lookup failed: ${[...new Set(failures)].slice(0, 2).join(" | ") || "unknown"}` },
-      { status: 502 },
+    const prompt = buildPrompt(needed);
+    // Size the output budget to the (now small) fixture count instead of a flat
+    // 8192 — fewer matches → less to write back → cheaper, faster call.
+    const maxOut = Math.min(8192, Math.max(1024, needed.length * 48));
+
+    // Try each grounding-capable model. A model that answers but returns an empty
+    // results array is a soft miss — fall through to the next, keeping the empty
+    // answer only as a last resort.
+    let aiData: Record<string, unknown> | null = null;
+    let fallback: { data: Record<string, unknown>; provider: string } | null = null;
+    const failures: string[] = [];
+    for (const model of GROUNDED_MODELS) {
+      try {
+        const res = await callGeminiGrounded(prompt, model, maxOut);
+        const arr = Array.isArray(res.data.results) ? res.data.results : [];
+        if (arr.length > 0) {
+          aiData = res.data;
+          provider = res.provider;
+          break;
+        }
+        fallback ??= { data: res.data, provider: res.provider };
+        failures.push(`${model}: empty results`);
+        console.warn(`[worldcup/scores] ${model} returned no results — trying next model`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        failures.push(`${model}: ${msg}`);
+        console.warn(`[worldcup/scores] ${model} failed: ${msg}`);
+      }
+    }
+    if (!aiData) aiData = fallback?.data ?? null;
+    if (!aiData) {
+      return NextResponse.json(
+        { error: `Score lookup failed: ${[...new Set(failures)].slice(0, 2).join(" | ") || "unknown"}` },
+        { status: 502 },
+      );
+    }
+    provider = provider || fallback?.provider || "";
+    await incrementAiLimit(uid);
+
+    // Map AI results back onto OUR fixtures by fixture number — robust against the
+    // model translating names, swapping home/away, or returning numeric strings.
+    const results = Array.isArray(aiData.results) ? aiData.results : [];
+    for (const raw of results) {
+      if (!raw || typeof raw !== "object") continue;
+      const r = raw as Record<string, unknown>;
+      const n = toInt(r.n);
+      if (n == null) continue;
+      byNum.set(n, {
+        homeScore: toInt(r.homeScore),
+        awayScore: toInt(r.awayScore),
+        status: typeof r.status === "string" ? r.status : null,
+      });
+    }
+
+    const scoredCount = [...byNum.values()].filter((v) => v.homeScore != null && v.awayScore != null).length;
+    console.log(
+      `[worldcup/scores] provider=${provider} sent=${needed.length}/${flat.length} results=${byNum.size} scored=${scoredCount} (${prior.size} reused from cache)`,
     );
   }
-  provider = provider || fallback?.provider || "";
-  await incrementAiLimit(uid);
 
-  // Map AI results back onto OUR fixtures by fixture number — robust against the
-  // model translating names, swapping home/away, or returning numeric strings.
-  const results = Array.isArray(aiData.results) ? aiData.results : [];
-  const byNum = new Map<number, { homeScore: number | null; awayScore: number | null; status: string | null }>();
-  for (const raw of results) {
-    if (!raw || typeof raw !== "object") continue;
-    const r = raw as Record<string, unknown>;
-    const n = toInt(r.n);
-    if (n == null) continue;
-    byNum.set(n, {
-      homeScore: toInt(r.homeScore),
-      awayScore: toInt(r.awayScore),
-      status: typeof r.status === "string" ? r.status : null,
-    });
-  }
-
-  // Diagnosability: how much did the model actually return / score?
-  const scoredCount = [...byNum.values()].filter((v) => v.homeScore != null && v.awayScore != null).length;
-  console.log(
-    `[worldcup/scores] provider=${provider} fixtures=${flat.length} results=${byNum.size} scored=${scoredCount}`,
-  );
-
+  // Merge per fixture: fresh AI result (by number) → prior cached score → null.
   const snapshot: ScoresSnapshot = { groups: {}, asOf: new Date().toISOString() };
   for (const g of groups) {
     const scores: MatchScore[] = [];
     for (const f of flat.filter((x) => x.group === g.group)) {
-      const r = byNum.get(f.n);
+      const ai = byNum.get(f.n);
+      const cached = prior.get(keyOf(f.group, f.home, f.away));
+      const src = ai ?? cached ?? null;
       scores.push({
         home: f.home,
         away: f.away,
-        homeScore: r?.homeScore ?? null,
-        awayScore: r?.awayScore ?? null,
-        status: r?.status ?? null,
+        homeScore: src?.homeScore ?? null,
+        awayScore: src?.awayScore ?? null,
+        status: src?.status ?? null,
       });
     }
     snapshot.groups[g.group] = {
