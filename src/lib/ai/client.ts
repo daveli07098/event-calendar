@@ -15,6 +15,7 @@
  *     in a supported region. Falls back to HTTPS_PROXY / ALL_PROXY if set.
  */
 import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
+import { geminiPool } from "./models";
 
 /** Result of a JSON-mode AI call: parsed object plus usage metadata. */
 export interface AiJsonResult {
@@ -70,16 +71,13 @@ async function aiFetch(url: string, init: RequestInit): Promise<Response> {
   }) as unknown as Response;
 }
 
-// Gemini models in priority order — all share GEMINI_API_KEY.
-// Models that returned 404 ("not found for API version v1beta") were removed —
-// they don't exist on the generateContent endpoint and only wasted a hop.
-export const GEMINI_MODELS = [
-  "gemini-3.5-flash",       // Gemini 3.5 Flash      — 5 RPM  free
-  "gemini-3.1-flash-lite",  // Gemini 3.1 Flash Lite — 15 RPM free
-  "gemini-2.5-flash",       // Gemini 2.5 Flash      — 5 RPM  free (stable)
-  "gemini-2.5-flash-lite",  // Gemini 2.5 Flash Lite — 10 RPM free (stable)
-  "gemma-4-31b-it",         // Gemma 4 31B           — 15 RPM free
-];
+// Model lists are derived from the single shared pool (src/lib/ai/models.ts) so
+// the roster + quota knowledge lives in exactly one place. See ModelPool.
+//   • GEMINI_MODELS  — full cascade, priority order (general JSON extraction).
+//   • GROUNDED_MODELS — grounding-capable only, highest free-tier quota first
+//     (Gemma excluded — it can't use the google_search tool).
+export const GEMINI_MODELS = geminiPool.cascade();
+export const GROUNDED_MODELS = geminiPool.grounded();
 
 /** True when at least one AI provider is configured via env. */
 export function hasAiProvider(): boolean {
@@ -192,14 +190,15 @@ export async function callGeminiJson(
  */
 export async function callGeminiGrounded(
   prompt: string,
-  model: string
+  model: string,
+  maxOutputTokens = 8192
 ): Promise<AiJsonResult> {
   const apiKey = process.env.GEMINI_API_KEY!;
   const endpoint = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: prompt }] }],
     tools: [{ google_search: {} }],
-    generationConfig: { maxOutputTokens: 8192, temperature: 0 },
+    generationConfig: { maxOutputTokens, temperature: 0 },
   });
 
   let res: Response | null = null;

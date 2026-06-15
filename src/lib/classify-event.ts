@@ -1,4 +1,5 @@
 import { EVENT_CATEGORIES, type EventCategory } from "@/types";
+import { geminiPool } from "@/lib/ai/models";
 
 const VALID_CATEGORIES = new Set<string>(EVENT_CATEGORIES);
 
@@ -17,7 +18,9 @@ const CATEGORY_PROMPT_LINES = `  concert    — live music, band show, K-pop con
   ticket     — ticket sale / presale reminder with no physical performance on that date
   other      — does not fit any above`;
 
-const GEMINI_MODELS = ["gemini-2.5-flash-lite", "gemini-2.0-flash"];
+// Classification is a cheap, high-volume task — use the pool's lightweight
+// models (highest free-tier quota first) from the shared roster.
+const GEMINI_MODELS = geminiPool.lite();
 
 async function callGemini(prompt: string, apiKey: string): Promise<string | null> {
   for (const model of GEMINI_MODELS) {
