@@ -369,6 +369,7 @@ interface RemixEvent {
   time: string | null;
   endDate: string | null;
   endTime: string | null;
+  ticketPlatforms: string[] | null; // authoritative sellers from ticketing[]
   concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>;
 }
 
@@ -424,6 +425,21 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
   if (concertEvents.length === 0) return null;
   concertEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
 
+  // Ticketing sellers — the authoritative platform list. Timable's page text /
+  // sidebars often mention unrelated sellers (e.g. 膠紙座 from related events),
+  // so this structured source must win over the text-pattern scan.
+  let ticketPlatforms: string[] | null = null;
+  if (Array.isArray(event.ticketing)) {
+    const names = new Set<string>();
+    for (const t of event.ticketing) {
+      if (!isRec(t)) continue;
+      const loc = isRec(t.location) ? t.location : null;
+      const name = loc && typeof loc.name === "string" ? loc.name.trim() : null;
+      if (name) names.add(name);
+    }
+    if (names.size) ticketPlatforms = [...names];
+  }
+
   const first = concertEvents[0]!;
   const last = concertEvents[concertEvents.length - 1]!;
   const [d0, t0 = ""] = first.startDate.split("T");
@@ -439,6 +455,7 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
     // shows have an end TIME but no end DATE).
     endDate: ed && d0 && ed > d0 ? ed : null,
     endTime: et ? et.slice(0, 5) : null,
+    ticketPlatforms,
     concertEvents,
   };
 }
@@ -933,7 +950,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     saleDate: schemaSaleDate,
     saleFirstDate: schemaSaleFirstDate,
     saleDates: schemaSaleDates.length > 0 ? schemaSaleDates : null,
-    ticketPlatforms: metaPlatforms,
+    // Structured ticketing sellers (Remix) are authoritative — the text-pattern
+    // scan misfires on unrelated sellers mentioned elsewhere on the page.
+    ticketPlatforms: remix?.ticketPlatforms?.length ? remix.ticketPlatforms : metaPlatforms,
     sourceTimezone: sourceTz,
     // Prefer JSON-LD slots; fall back to the Remix sections when JSON-LD is absent.
     slots: concertEvents.length > 0 ? groupIntoSlots(concertEvents) : groupIntoSlots(remix?.concertEvents ?? []),
