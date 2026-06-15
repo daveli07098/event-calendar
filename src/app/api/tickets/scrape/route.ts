@@ -10,6 +10,7 @@ import {
   remainingAiCalls,
   getResetAt,
 } from "@/lib/ai/quota";
+import { geminiPool } from "@/lib/ai/models";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -352,6 +353,96 @@ function detectTimezoneFromUrl(url: string): string | null {
   return null;
 }
 
+/**
+ * Structured event data parsed from a Remix app's embedded `window.__remixContext`
+ * blob. Some ticketing sites (notably Timable) render with Remix and ship NO
+ * JSON-LD at all — the page body is just keyword-soup the AI extracts poorly
+ * (it routinely drops the venue and end time). This blob, by contrast, carries
+ * clean fields: Event.name + sections[].{startDatetime,endDatetime,location,address}.
+ * Parsing it deterministically is far more reliable than asking the AI.
+ */
+interface RemixEvent {
+  title: string | null;
+  venue: string | null;
+  location: string | null;
+  date: string | null;
+  time: string | null;
+  endDate: string | null;
+  endTime: string | null;
+  concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>;
+}
+
+function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | null {
+  const m = html.match(/window\.__remixContext\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
+  if (!m) return null;
+  let ctx: unknown;
+  try {
+    ctx = JSON.parse(m[1]!);
+  } catch {
+    return null; // malformed / truncated blob — fall back to OG + AI
+  }
+
+  // Depth-first search for the Event node — an object typed "Event" with sections.
+  const isRec = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null;
+  let event: Record<string, unknown> | null = null;
+  const stack: unknown[] = [ctx];
+  while (stack.length && !event) {
+    const cur = stack.pop();
+    if (Array.isArray(cur)) { stack.push(...cur); continue; }
+    if (!isRec(cur)) continue;
+    if (cur.__typename === "Event" && Array.isArray(cur.sections)) { event = cur; break; }
+    stack.push(...Object.values(cur));
+  }
+  if (!event) return null;
+
+  // Each section is a performance window: start/end in UTC + its venue/address.
+  const sections = (event.sections as unknown[]).filter(isRec);
+  const tz = sourceTz ?? "+00:00";
+  const concertEvents: RemixEvent["concertEvents"] = [];
+  let venue: string | null = null;
+  let location: string | null = null;
+
+  for (const s of sections) {
+    const startIso = typeof s.startDatetime === "string" ? s.startDatetime : null;
+    if (!startIso) continue;
+    const start = utcToLocalStrings(new Date(startIso), tz, startIso);
+    const endIso = typeof s.endDatetime === "string" ? s.endDatetime : null;
+    const end = endIso ? utcToLocalStrings(new Date(endIso), tz, endIso) : null;
+    concertEvents.push({
+      startDate: `${start.date}T${start.time}`,
+      dateObj: new Date(startIso),
+      raw: end ? { endDate: `${end.date}T${end.time}` } : {},
+    });
+    // First section with a venue wins (single-venue events repeat the same one).
+    if (!venue) {
+      const loc = isRec(s.location) ? s.location : null;
+      if (loc && typeof loc.name === "string") venue = loc.name.trim();
+      if (typeof s.address === "string" && s.address.trim()) location = s.address.trim();
+    }
+  }
+  if (concertEvents.length === 0) return null;
+  concertEvents.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+  const first = concertEvents[0]!;
+  const last = concertEvents[concertEvents.length - 1]!;
+  const [d0, t0 = ""] = first.startDate.split("T");
+  const endRaw = typeof last.raw.endDate === "string" ? last.raw.endDate : null;
+  const [ed, et = ""] = endRaw ? endRaw.split("T") : [null];
+  return {
+    title: typeof event.name === "string" ? event.name : null,
+    venue,
+    location,
+    date: d0 ?? null,
+    time: t0 ? t0.slice(0, 5) : null,
+    // endDate only when the run genuinely spans multiple days (single-night
+    // shows have an end TIME but no end DATE).
+    endDate: ed && d0 && ed > d0 ? ed : null,
+    endTime: et ? et.slice(0, 5) : null,
+    concertEvents,
+  };
+}
+
 function extractMeta(html: string, pageUrl: string): MetaFallback {
   const get = (pattern: RegExp) => {
     const m = html.match(pattern);
@@ -396,6 +487,10 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   // when the concert JSON-LD block has no embedded tz offset. JSON-LD processing
   // below may override this with a more precise value.
   let sourceTz: string | null = detectTimezoneFromUrl(pageUrl);
+  // Remix-embedded structured event data (Timable etc.) — used as a reliable
+  // fallback when the page ships no JSON-LD. Parsed up front so the return below
+  // can fold it in behind any JSON-LD/OG values.
+  const remix = parseRemixEvent(html, sourceTz);
   // Strategy A sale-window events (non-location Event blocks from JSON-LD)
   const stratASaleWindows: Array<{ date: string; time: string | null; label: string }> = [];
   // All concert-night events (with location) — hoisted so groupIntoSlots can use them
@@ -822,23 +917,26 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 
   const metaPlatforms = platformSet.size > 0 ? Array.from(platformSet) : null;
 
+  // Remix structured data is as trustworthy as a JSON-LD concert block, so it
+  // ranks just behind JSON-LD/OG and ahead of the AI in every field below.
   return {
-    title: ogTitle ?? htmlTitle,
+    title: ogTitle ?? remix?.title ?? htmlTitle,
     description: decodeHtml(ogDesc),
     imageUrl: ogImage,
-    date: schemaDate ?? (eventDate ? eventDate.split("T")[0] : null),
-    dateConfident: concertEvents.length > 0,
-    time: schemaTime ?? (eventDate && eventDate.includes("T") ? eventDate.split("T")[1].slice(0, 5) : null),
-    endDate: schemaEndDate,
-    endTime: schemaEndTime,
-    venue: schemaVenue || null,
-    location: schemaLocation || null,
+    date: schemaDate ?? remix?.date ?? (eventDate ? eventDate.split("T")[0] : null),
+    dateConfident: concertEvents.length > 0 || !!remix?.date,
+    time: schemaTime ?? remix?.time ?? (eventDate && eventDate.includes("T") ? eventDate.split("T")[1].slice(0, 5) : null),
+    endDate: schemaEndDate ?? remix?.endDate ?? null,
+    endTime: schemaEndTime ?? remix?.endTime ?? null,
+    venue: schemaVenue || remix?.venue || null,
+    location: schemaLocation || remix?.location || null,
     saleDate: schemaSaleDate,
     saleFirstDate: schemaSaleFirstDate,
     saleDates: schemaSaleDates.length > 0 ? schemaSaleDates : null,
     ticketPlatforms: metaPlatforms,
     sourceTimezone: sourceTz,
-    slots: groupIntoSlots(concertEvents),
+    // Prefer JSON-LD slots; fall back to the Remix sections when JSON-LD is absent.
+    slots: concertEvents.length > 0 ? groupIntoSlots(concertEvents) : groupIntoSlots(remix?.concertEvents ?? []),
   };
 }
 
@@ -848,7 +946,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"1 sentence","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"venueRuns":[{"venue":"venue name","location":"city or null","date":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|kuji|crane|comedy|film|food|other"}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"ONE natural sentence summarising the event (who/what/where/when), written in the same language as the title — write it yourself from the facts; NEVER a comma-separated keyword/tag list","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"venueRuns":[{"venue":"venue name","location":"city or null","date":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|kuji|crane|comedy|film|food|other"}
 
 CRITICAL — performance date vs sale dates:
   • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
@@ -881,13 +979,22 @@ async function callGemini(text: string, url: string, model = "gemini-3-flash-pre
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
-    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048 },
+    // temperature 0 → deterministic extraction. 2048 output tokens so events with
+    // many sale windows / venue runs don't truncate before the later JSON fields.
+    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0 },
   });
 
   let res: Response | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 2000)); // wait before retry
-    res = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    // Cap each attempt so a model that accepts the request but stalls can't hang
+    // the whole cascade for minutes — fail fast and fall through to the next model.
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(30_000),
+    });
     if (res.ok || res.status !== 503) break; // success or non-retryable error
   }
 
@@ -934,6 +1041,8 @@ async function callOpenAICompatible(
       max_tokens: 2048,
       temperature: 0,
     }),
+    // Bound the call so a stalled provider falls through instead of hanging.
+    signal: AbortSignal.timeout(30_000),
   });
 
   if (!res.ok) throw new Error(`AI API error: ${res.status}`);
@@ -985,6 +1094,66 @@ async function callCopilot(text: string, url: string, githubToken: string): Prom
       "Editor-Plugin-Version": "copilot-chat/0.22.4",
     }
   );
+}
+
+/**
+ * Heuristic: is this string a keyword/tag dump rather than a real description?
+ * Sites like Timable put a comma-separated tag list in og:description
+ * ("演唱會, fans, 現場, 韓國, live, …") — useless as a calendar description.
+ */
+function isKeywordSoup(s: string | null): boolean {
+  const text = (s ?? "").trim();
+  if (!text) return true;
+  // A real sentence usually ends with terminal punctuation; tag lists don't.
+  const parts = text.split(/[,，、]/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 5) return false;
+  const shortTokens = parts.filter((p) => p.split(/\s+/).length <= 3).length;
+  return shortTokens / parts.length >= 0.7; // mostly short comma-separated tokens
+}
+
+/**
+ * Generate a clean one-sentence description from the structured facts we already
+ * trust (title/date/venue/category). Used when extraction yields no usable
+ * description — the AI's best job here is composing readable content, not
+ * pulling it out of keyword-soup body text. Small, gated call (cheap lite model).
+ */
+async function generateDescription(t: TicketData, apiKey: string): Promise<string | null> {
+  const facts = [
+    `Title: ${t.title}`,
+    t.date ? `Date: ${t.date}${t.time ? ` ${t.time}` : ""}` : null,
+    t.venue ? `Venue: ${t.venue}` : null,
+    t.location ? `Location: ${t.location}` : null,
+    t.category ? `Category: ${t.category}` : null,
+  ].filter(Boolean).join("\n");
+
+  const prompt = `Write ONE natural, concise calendar description (max 25 words) for this event, in the SAME language as the title. Say what it is and where/when. Output ONLY the sentence — no keywords, tags, hashtags, quotes, or labels.\n\n${facts}`;
+
+  // Lightweight task → use the pool's lite models (highest free-tier quota first).
+  for (const model of geminiPool.lite()) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            // A little warmth for natural phrasing; 120 tokens is plenty for a sentence.
+            generationConfig: { maxOutputTokens: 120, temperature: 0.4 },
+          }),
+          signal: AbortSignal.timeout(12_000),
+        },
+      );
+      if (!res.ok) continue; // 429/400 → try next lite model
+      const data = await res.json();
+      const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      const clean = raw.trim().replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s+/g, " ");
+      if (clean) return clean;
+    } catch {
+      // network/timeout — fall through to the next model, then give up
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1267,19 +1436,10 @@ export async function POST(req: NextRequest) {
     // Try each provider in order; skip to next on 429
     const providers: Array<() => Promise<{ result: Partial<TicketData>; name: string }>> = [];
 
-    // Gemini models in priority order — all share GEMINI_API_KEY
-    // Free-tier RPM from Google AI Studio rate limits (2026-05):
-    const geminiModels = [
-      "gemini-3.5-flash",             // Gemini 3.5 Flash      — 5 RPM  free
-      "gemini-3.1-flash-lite",        // Gemini 3.1 Flash Lite — 15 RPM free
-      "gemini-3-flash",               // Gemini 3 Flash        — 5 RPM  free
-      "gemini-2.5-flash",              // Gemini 2.5 Flash      — 5 RPM  free (stable)
-      "gemini-2.5-flash-lite",         // Gemini 2.5 Flash Lite — 10 RPM free (stable)
-      "gemma-4-31b-it",                // Gemma 4 31B           — 15 RPM free
-      "gemma-4-26b-it",                // Gemma 4 26B           — 15 RPM free
-    ];
+    // Gemini models in priority order — sourced from the shared pool so the
+    // roster stays in sync with every other AI feature (see src/lib/ai/models.ts).
     if (geminiKey) {
-      for (const model of geminiModels) {
+      for (const model of geminiPool.cascade()) {
         const m = model; // capture for closure
         providers.push(async () => ({
           result: await callGemini(pageText, url, m),
@@ -1321,24 +1481,31 @@ export async function POST(req: NextRequest) {
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        const lower = msg.toLowerCase();
         // Transient errors: HTTP 400 (bad request / model not available),
-        // 429/503 (quota/unavailable), 404 (model not found),
-        // and any network-level failure (socket closed, connection refused, fetch failed).
+        // 429/503 (quota/unavailable), 404 (model not found), any network-level
+        // failure (socket closed, connection refused, fetch failed), and a
+        // request timeout / abort — AbortSignal.timeout throws a TimeoutError
+        // ("The operation was aborted due to timeout"), which must fall through
+        // to the next model/provider, NOT bail the whole cascade to OG-meta.
         const isTransient =
           msg.includes("400") ||
           msg.includes("429") ||
           msg.includes("503") ||
           msg.includes("404") ||
-          msg.toLowerCase().includes("fetch failed") ||
-          msg.toLowerCase().includes("socket") ||
-          msg.toLowerCase().includes("econnrefused") ||
-          msg.toLowerCase().includes("etimedout") ||
-          msg.toLowerCase().includes("network");
+          lower.includes("fetch failed") ||
+          lower.includes("socket") ||
+          lower.includes("econnrefused") ||
+          lower.includes("etimedout") ||
+          lower.includes("timeout") ||
+          lower.includes("abort") ||
+          lower.includes("network");
         if (isTransient) {
           const reason = msg.includes("400") ? "bad request / model unavailable (400)"
             : msg.includes("429") ? "quota exceeded (429)"
             : msg.includes("404") ? "not found (404)"
             : msg.includes("503") ? "unavailable (503)"
+            : (lower.includes("timeout") || lower.includes("abort")) ? "request timed out"
             : "network error";
           console.warn(`[tickets/scrape] ${reason} for ${currentProviderName} — trying next provider`);
           aiError = "AI temporarily unavailable — trying next provider";
@@ -1495,6 +1662,18 @@ export async function POST(req: NextRequest) {
   // (same prompt and model cascade used by the Classify Category tab).
   if (!ticket.category) {
     ticket.category = await classifySingleEvent(ticket.title, ticket.venue ?? ticket.location, ticket.description);
+  }
+
+  // Make good use of AI for the content: when the page only yielded a keyword/tag
+  // dump (e.g. Timable's og:description) or no description at all, have the AI
+  // compose a real one-sentence description from the facts we already trust.
+  // Gated — only when AI is allowed and the description is genuinely unusable.
+  if (geminiKey && !forceOgMeta && isKeywordSoup(ticket.description)) {
+    const generated = await generateDescription(ticket, geminiKey);
+    if (generated) {
+      ticket.description = generated;
+      console.log(`[tickets/scrape] generated description via AI (was keyword-soup/empty)`);
+    }
   }
 
   if (!ticket.title || ticket.title === "Untitled Event") {
