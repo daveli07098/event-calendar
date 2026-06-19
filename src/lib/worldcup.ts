@@ -290,6 +290,29 @@ function headToHead(subset: string[], scores: MatchScore[]): Map<string, { pts: 
   return m;
 }
 
+/**
+ * Official 2026 Round-of-32 third-place slots: which Round-of-32 match (by FIFA
+ * match number) is filled by a best-third, and the exact set of groups that
+ * third can come from. 8 of the 12 groups' third-placed teams advance, and FIFA
+ * fixes in advance which group-letters feed which match (there are 495 possible
+ * group combinations; the *slots* themselves are these 8 fixed letter-sets).
+ *
+ * Source: 2026 FIFA World Cup knockout stage bracket (Wikipedia).
+ *   Match 74 ← 3rd of A/B/C/D/F · Match 77 ← C/D/F/G/H · Match 79 ← C/E/F/H/I
+ *   Match 80 ← E/H/I/J/K · Match 81 ← B/E/F/I/J · Match 82 ← A/E/H/I/J
+ *   Match 85 ← E/F/G/I/J · Match 87 ← D/E/I/J/L
+ */
+export const THIRD_PLACE_SLOTS: Record<number, string[]> = {
+  74: ["A", "B", "C", "D", "F"],
+  77: ["C", "D", "F", "G", "H"],
+  79: ["C", "E", "F", "H", "I"],
+  80: ["E", "H", "I", "J", "K"],
+  81: ["B", "E", "F", "I", "J"],
+  82: ["A", "E", "H", "I", "J"],
+  85: ["E", "F", "G", "I", "J"],
+  87: ["D", "E", "I", "J", "L"],
+};
+
 /** A resolved knockout slot: the team (if derivable) and whether it's locked. */
 export interface ResolvedSlot {
   label: string;          // original placeholder, e.g. "A組亞軍" / "最佳第三名(ABCDF)"
@@ -297,6 +320,7 @@ export interface ResolvedSlot {
   confirmed: boolean;     // true = mathematically locked; false = provisional
   group: string | null;   // the group this position comes from (for the tooltip)
   position: 1 | 2 | 3 | null; // 1=winner 2=runner-up 3=third
+  thirdGroups?: string[] | null; // for a 3rd-place slot: the candidate groups (e.g. ["A","B","C","D","F"])
   title?: string;         // hover tooltip text, filled in by the UI layer
 }
 
@@ -376,7 +400,7 @@ export function resolveKnockout(
   const qualified = rankThirds(perGroup).slice(0, 8); // best 8 thirds advance
   const usedThirds = new Set<string>();
 
-  const resolveLabel = (label: string): ResolvedSlot => {
+  const resolveLabel = (label: string, matchId: number | null): ResolvedSlot => {
     let m = label.match(/^([A-L])組冠軍$/);
     if (m) {
       const st = perGroup[m[1]];
@@ -387,19 +411,30 @@ export function resolveKnockout(
       const st = perGroup[m[1]];
       return { label, team: st?.[1]?.team ?? null, confirmed: groupComplete(st), group: m[1], position: 2 };
     }
-    m = label.match(/^最佳第三名\(([A-L]+)\)$/);
-    if (m) {
-      const allowed = new Set(m[1].split(""));
+    // A best-third slot. The candidate group-set is taken from the official
+    // FIFA slot table (by match number) — authoritative even when the imported
+    // title encodes the set wrongly or generically ("最佳第三名" with no list).
+    if (/第三名/.test(label)) {
+      const fromMap = matchId != null ? THIRD_PLACE_SLOTS[matchId] : undefined;
+      const fromLabel = label.match(/\(([A-L]+)\)/)?.[1].split("");
+      const allowedArr = fromMap ?? fromLabel ?? [];
+      const allowed = new Set(allowedArr);
       const pick = qualified.find((t) => allowed.has(t.group) && !usedThirds.has(t.group));
       if (pick) usedThirds.add(pick.group);
-      return { label, team: pick?.standing.team ?? null, confirmed: allComplete, group: pick?.group ?? null, position: 3 };
+      return {
+        label, team: pick?.standing.team ?? null, confirmed: allComplete,
+        group: pick?.group ?? null, position: 3, thirdGroups: allowedArr,
+      };
     }
     return { label, team: null, confirmed: false, group: null, position: null };
   };
 
   const out: Record<string, { home: ResolvedSlot; away: ResolvedSlot }> = {};
   for (const match of [...r32].sort((a, b) => (a.matchId ?? 0) - (b.matchId ?? 0))) {
-    out[match.eventId] = { home: resolveLabel(match.home), away: resolveLabel(match.away) };
+    out[match.eventId] = {
+      home: resolveLabel(match.home, match.matchId),
+      away: resolveLabel(match.away, match.matchId),
+    };
   }
   return out;
 }

@@ -20,6 +20,7 @@ import {
   buildBracket,
   computeStandings,
   resolveKnockout,
+  rankThirds,
   groupOdds,
   ROUND_LABELS_EN,
   type MatchScore,
@@ -283,6 +284,15 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
   const groups = useMemo(() => buildGroups(events), [events]);
   const bracket = useMemo(() => buildBracket(events), [events]);
 
+  // The 12 third-placed teams ranked (Pts → GD → GF); the best 8 advance to the
+  // Round of 32. Only meaningful once scores are synced.
+  const thirds = useMemo(() => {
+    if (!snapshot) return [];
+    const perGroup: Record<string, TeamStanding[]> = {};
+    for (const [g, v] of Object.entries(snapshot.groups)) perGroup[g] = v.standings;
+    return rankThirds(perGroup);
+  }, [snapshot]);
+
   // Resolve Round-of-32 placeholders (組冠軍/組亞軍/最佳第三名) from the synced
   // standings — provisional until each group/the thirds are mathematically locked.
   // Each slot gets a hover tooltip: what it stands for, current group record, and
@@ -305,7 +315,10 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     const meaningOf = (slot: typeof base[string]["home"]): string => {
       if (slot.position === 1 && slot.group) return `Group ${slot.group} winner`;
       if (slot.position === 2 && slot.group) return `Group ${slot.group} runner-up`;
-      if (slot.position === 3) return "best 3rd place";
+      if (slot.position === 3)
+        return slot.thirdGroups?.length
+          ? `best 3rd place — from Group ${slot.thirdGroups.join("/")}`
+          : "best 3rd place";
       return slot.label; // e.g. "M74勝者"
     };
     const titleFor = (slot: typeof base[string]["home"]): string => {
@@ -371,7 +384,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       <div className="space-y-1">
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <Trophy className="size-6 text-primary" />
@@ -408,6 +421,9 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
             </p>
           )}
 
+          {/* Best third-placed teams — 8 of 12 advance; top 8 highlighted */}
+          {thirds.length > 0 && <ThirdPlaceTable thirds={thirds} />}
+
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {groups.map((g) => {
               const gs = snapshot?.groups[g.group];
@@ -439,6 +455,55 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/** Ranking block for the 12 third-placed teams — the best 8 advance to the R32. */
+function ThirdPlaceTable({ thirds }: { thirds: { group: string; standing: TeamStanding }[] }) {
+  return (
+    <Card size="sm">
+      <CardHeader className="pb-1">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Trophy className="size-4 text-primary" />
+          Best Third-Placed Teams
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Top 8 of 12 advance to the Round of 32 · ranked by Pts → GD → GF
+        </p>
+      </CardHeader>
+      <CardContent>
+        <div className="grid gap-x-6 gap-y-0 sm:grid-cols-2">
+          {thirds.map((t, i) => {
+            const qualifies = i < 8;
+            const s = t.standing;
+            return (
+              <div
+                key={t.group}
+                className={cn(
+                  "grid grid-cols-[1.4rem_1.5rem_1fr_auto] items-center gap-x-2 rounded px-1.5 py-1 text-xs",
+                  qualifies ? "bg-primary/5" : "opacity-55",
+                  // Visual cut-off line under the 8th-ranked team (only in the
+                  // left column on 2-col layouts; full-width on 1-col).
+                  i === 7 && "border-b-2 border-dashed border-primary/40 sm:rounded-b-none",
+                )}
+              >
+                <span className="tabular-nums text-muted-foreground">{i + 1}</span>
+                <span className="inline-flex size-5 items-center justify-center rounded bg-primary/10 text-primary text-[10px] font-bold">
+                  {t.group}
+                </span>
+                <span className="truncate font-medium inline-flex items-center gap-1">
+                  {s.team}
+                  {qualifies && <CheckCircle2 className="size-3 shrink-0 text-primary" />}
+                </span>
+                <span className="tabular-nums text-muted-foreground whitespace-nowrap">
+                  GD {s.gd >= 0 ? "+" : ""}{s.gd} · <span className="font-bold text-foreground">{s.pts} pts</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -576,6 +641,19 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
       >
         {slot.confirmed && <CheckCircle2 className="size-2.5 shrink-0" />}
         {slot.team}
+      </InfoTip>
+    );
+  }
+  // Unresolved best-third slot: show every group it could come from, e.g.
+  // "A/B/C/D/F組第三名" (the official FIFA candidate set), not the raw placeholder.
+  if (slot?.position === 3 && slot.thirdGroups?.length) {
+    return (
+      <InfoTip
+        tone="amber"
+        className="inline-flex items-center gap-1 truncate italic text-amber-500/90"
+        label={slot.title ?? `best 3rd place — from Group ${slot.thirdGroups.join("/")}`}
+      >
+        {slot.thirdGroups.join("/")}組第三名
       </InfoTip>
     );
   }

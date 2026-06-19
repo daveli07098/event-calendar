@@ -198,6 +198,22 @@ describe("resolveKnockout", () => {
     // best third among {A,B}: Bosnia (4) > Czechia (3); not all 12 groups present → provisional
     expect(out["e2"].home.team).toBe("Bosnia");
     expect(out["e2"].home.confirmed).toBe(false);
+    expect(out["e2"].home.thirdGroups).toEqual(["A", "B", "C", "D", "F"]); // official slot for match 74
     expect(out["e2"].away.team).toBeNull(); // M70勝者 — not derivable
+  });
+
+  it("takes the candidate group-set from the official table even for a generic 最佳第三名 label", () => {
+    const generic: KnockoutMatch[] = [
+      { eventId: "g1", round: "R32", roundLabel: "32強", matchId: 74, home: "E組冠軍", away: "最佳第三名", kickoff: "2026-06-30T19:00:00Z", side: "left" },
+    ];
+    const perGroup = {
+      A: [st("A1", 9, 5, 6, 1), st("A2", 6, 2, 4, 2), st("A3rd", 4, 1, 3, 3), st("A4", 0, -8, 1, 4)],
+      B: [st("B1", 9, 4, 5, 1), st("B2", 6, 1, 3, 2), st("B3rd", 3, 0, 2, 3), st("B4", 1, -5, 2, 4)],
+    };
+    const out = resolveKnockout(generic, perGroup);
+    // Match 74's third comes from A/B/C/D/F → among present groups, A3rd (4 pts) wins.
+    expect(out["g1"].away.position).toBe(3);
+    expect(out["g1"].away.thirdGroups).toEqual(["A", "B", "C", "D", "F"]);
+    expect(out["g1"].away.team).toBe("A3rd");
   });
 });
