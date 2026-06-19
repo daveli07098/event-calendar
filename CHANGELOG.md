@@ -2,6 +2,11 @@
 ### Added
 - feat(worldcup): official best-third slot table (THIRD_PLACE_SLOTS — match→group-set from the 2026 knockout bracket); the Road to Trophy now labels an unresolved third-place slot with all its possibilities, e.g. "A/B/C/D/F組第三名", with a tooltip naming the candidate groups ([89905dc])
 - feat(worldcup): "Best Third-Placed Teams" block atop Group Stage — all 12 third-placed teams ranked (Pts → GD → GF) with the top 8 highlighted and a cut-off line ([89905dc])
+- feat(worldcup): early-clinch detection (clinchedPositions) — a team that has mathematically locked a group position before its group finishes is flagged with a green check ("clinched Nth — can't be caught"), and the Road to Trophy confirms those winner/runner-up slots early ([6b00e52])
+- feat(worldcup): "?" help tooltip on Best Third-Placed Teams explaining the Pts → GD → GF order and the fair-play / FIFA-ranking tie-break ([af9f088])
+- feat(calendar): stronger, theme-agnostic "today" highlight — primary inset ring on the cell plus a filled date-number pill ([af9f088])
+### Changed
+- refactor(worldcup): group standings now use the 2026 FIFA tiebreaker order — head-to-head (pts/GD/GF) precedes overall goal difference, and drawing of lots is removed ([6b00e52])
 ### Fixed
 - fix(worldcup): best-third candidate groups are taken from the official table by match number, so they're correct even when the imported fixture title encodes the set wrongly or generically ([89905dc])
 - fix(tickets): Event Section is now usable on mobile — nav is a horizontal scrollable strip on small screens (vertical sidebar on md+), the body stacks, and the header wraps ([9a435bb])
