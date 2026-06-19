@@ -250,20 +250,30 @@ export function computeStandings(teams: string[], scores: MatchScore[]): TeamSta
   const rows = [...table.values()];
   for (const r of rows) r.gd = r.gf - r.ga;
 
-  // FIFA group ranking: 1) points 2) goal difference 3) goals for. Teams still
-  // level on all three are separated by head-to-head among themselves:
-  // 4) h2h points 5) h2h goal difference 6) h2h goals for (then team name).
-  rows.sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf || 0);
+  // 2026 FIFA group ranking order (changed from prior tournaments — head-to-head
+  // now precedes overall goal difference, and drawing of lots was removed):
+  //   1) points
+  //   among teams level on points, by matches BETWEEN them:
+  //   2) head-to-head points  3) h2h goal difference  4) h2h goals scored
+  //   then overall:
+  //   5) overall goal difference  6) overall goals scored
+  //   7) fair-play points  8) FIFA World Ranking  (neither in our data → team
+  //   name as a deterministic final stand-in).
+  rows.sort((a, b) => b.pts - a.pts);
   const ordered: TeamStanding[] = [];
   for (let i = 0; i < rows.length; ) {
     let j = i + 1;
-    while (j < rows.length && rows[j].pts === rows[i].pts && rows[j].gd === rows[i].gd && rows[j].gf === rows[i].gf) j++;
+    while (j < rows.length && rows[j].pts === rows[i].pts) j++;
     const tied = rows.slice(i, j);
     if (tied.length > 1) {
       const h2h = headToHead(tied.map((t) => t.team), scores);
       tied.sort((a, b) => {
         const A = h2h.get(a.team)!, B = h2h.get(b.team)!;
-        return B.pts - A.pts || B.gd - A.gd || B.gf - A.gf || a.team.localeCompare(b.team);
+        return (
+          B.pts - A.pts || B.gd - A.gd || B.gf - A.gf ||   // head-to-head first
+          b.gd - a.gd || b.gf - a.gf ||                     // then overall GD/GF
+          a.team.localeCompare(b.team)
+        );
       });
     }
     ordered.push(...tied);
@@ -271,6 +281,76 @@ export function computeStandings(teams: string[], scores: MatchScore[]): TeamSta
   }
   ordered.forEach((r, i) => (r.rank = i + 1));
   return ordered;
+}
+
+/** Result of the early-clinch analysis for one group. */
+export interface GroupClinch {
+  /** Per team: the best and worst rank still mathematically possible. */
+  byTeam: Record<string, { best: number; worst: number }>;
+  first: string | null;  // team that has clinched 1st (best === worst === 1)
+  second: string | null; // team that has clinched exactly 2nd
+}
+
+/**
+ * Detect teams that have mathematically clinched a final group position before
+ * all matches are played — e.g. a team on 6 pts that beat its only rival who
+ * could match it is already 1st, because the 2026 tiebreak puts head-to-head
+ * ahead of goal difference (so that result can't be overturned).
+ *
+ * Sound (never over-confirms): a position is reported clinched only when it
+ * holds in every remaining outcome. The check is analytic — a team X can finish
+ * at/above team T only if X's maximum points reach T's current (minimum) points,
+ * and if they can only tie there, T's clinch holds when T won their head-to-head
+ * (a single group match, already locked). Clinches that would depend on overall
+ * goal difference (manipulable by lopsided scorelines) are conservatively not
+ * reported.
+ */
+export function clinchedPositions(
+  teams: string[],
+  fixtures: { home: string; away: string }[],
+  scores: MatchScore[],
+): GroupClinch {
+  const standings = computeStandings(teams, scores);
+  const ptsOf = new Map(standings.map((s) => [s.team, s.pts]));
+  const pts = (t: string) => ptsOf.get(t) ?? 0;
+
+  // Remaining games per team (fixtures with no final score yet).
+  const playedKey = new Set(
+    scores.filter((s) => s.homeScore != null && s.awayScore != null).map((s) => `${s.home}|${s.away}`),
+  );
+  const rem: Record<string, number> = Object.fromEntries(teams.map((t) => [t, 0]));
+  for (const f of fixtures) {
+    if (!playedKey.has(`${f.home}|${f.away}`)) { rem[f.home]++; rem[f.away]++; }
+  }
+  const maxPts = (t: string) => pts(t) + 3 * (rem[t] ?? 0);
+
+  // "winner|loser" for every decided match — the locked head-to-head record.
+  const beat = new Set<string>();
+  for (const s of scores) {
+    if (s.homeScore == null || s.awayScore == null) continue;
+    if (s.homeScore > s.awayScore) beat.add(`${s.home}|${s.away}`);
+    else if (s.awayScore > s.homeScore) beat.add(`${s.away}|${s.home}`);
+  }
+
+  // Is `low` guaranteed to finish below `high`? (high always ranks above low)
+  const belowLocked = (low: string, high: string): boolean => {
+    if (maxPts(low) < pts(high)) return true;                       // can't even reach high
+    if (maxPts(low) === pts(high) && beat.has(`${high}|${low}`)) return true; // tie → h2h locks high
+    return false;
+  };
+
+  const byTeam: Record<string, { best: number; worst: number }> = {};
+  for (const t of teams) {
+    let guaranteedAbove = 0, possiblyAbove = 0;
+    for (const x of teams) {
+      if (x === t) continue;
+      if (belowLocked(t, x)) guaranteedAbove++;   // x is certainly above t
+      if (!belowLocked(x, t)) possiblyAbove++;     // x could still be above t
+    }
+    byTeam[t] = { best: 1 + guaranteedAbove, worst: 1 + possiblyAbove };
+  }
+  const clinchedAt = (r: number) => teams.find((t) => byTeam[t].best === r && byTeam[t].worst === r) ?? null;
+  return { byTeam, first: clinchedAt(1), second: clinchedAt(2) };
 }
 
 /** Mini-table among a tied subset, counting only the matches between them. */
@@ -394,6 +474,7 @@ export function rankThirds(perGroup: Record<string, TeamStanding[]>): { group: s
 export function resolveKnockout(
   r32: KnockoutMatch[],
   perGroup: Record<string, TeamStanding[]>,
+  clinch?: Record<string, { first: string | null; second: string | null }>,
 ): Record<string, { home: ResolvedSlot; away: ResolvedSlot }> {
   const groups = Object.keys(perGroup);
   const allComplete = groups.length >= 12 && groups.every((g) => groupComplete(perGroup[g]));
@@ -404,12 +485,18 @@ export function resolveKnockout(
     let m = label.match(/^([A-L])組冠軍$/);
     if (m) {
       const st = perGroup[m[1]];
-      return { label, team: st?.[0]?.team ?? null, confirmed: groupComplete(st), group: m[1], position: 1 };
+      const team = st?.[0]?.team ?? null;
+      // Confirmed once the group is complete OR the leader has mathematically
+      // clinched 1st place early (e.g. via a locked head-to-head result).
+      const confirmed = groupComplete(st) || (team != null && clinch?.[m[1]]?.first === team);
+      return { label, team, confirmed, group: m[1], position: 1 };
     }
     m = label.match(/^([A-L])組亞軍$/);
     if (m) {
       const st = perGroup[m[1]];
-      return { label, team: st?.[1]?.team ?? null, confirmed: groupComplete(st), group: m[1], position: 2 };
+      const team = st?.[1]?.team ?? null;
+      const confirmed = groupComplete(st) || (team != null && clinch?.[m[1]]?.second === team);
+      return { label, team, confirmed, group: m[1], position: 2 };
     }
     // A best-third slot. The candidate group-set is taken from the official
     // FIFA slot table (by match number) — authoritative even when the imported

@@ -9,6 +9,7 @@ import {
   computeStandings,
   rankThirds,
   resolveKnockout,
+  clinchedPositions,
   type TeamStanding,
   type KnockoutMatch,
 } from "@/lib/worldcup";
@@ -169,6 +170,47 @@ describe("computeStandings head-to-head tiebreak", () => {
 function st(team: string, pts: number, gd: number, gf: number, rank: number): TeamStanding {
   return { team, p: 3, w: 0, d: 0, l: 0, gf, ga: gf - gd, gd, pts, rank };
 }
+
+describe("clinchedPositions", () => {
+  // Group A after round 2 (the user's real scenario):
+  //   Mexico 6 (beat S.Africa 2-0, beat Korea 1-0), Korea 3, Czechia 1, S.Africa 1.
+  //   Remaining: Czechia v Mexico, S.Africa v Korea.
+  const teams = ["墨西哥", "韓國", "捷克", "南非"];
+  const fixtures = [
+    { home: "墨西哥", away: "南非" },
+    { home: "韓國", away: "捷克" },
+    { home: "捷克", away: "南非" },
+    { home: "墨西哥", away: "韓國" },
+    { home: "捷克", away: "墨西哥" }, // remaining
+    { home: "南非", away: "韓國" },   // remaining
+  ];
+  const scores = [
+    { home: "墨西哥", away: "南非", homeScore: 2, awayScore: 0 },
+    { home: "韓國", away: "捷克", homeScore: 2, awayScore: 1 },
+    { home: "捷克", away: "南非", homeScore: 1, awayScore: 1 },
+    { home: "墨西哥", away: "韓國", homeScore: 1, awayScore: 0 },
+  ];
+
+  it("clinches 1st for a leader who won the head-to-head against its only challenger", () => {
+    const c = clinchedPositions(teams, fixtures, scores);
+    // Korea can reach 6 pts but Mexico beat Korea → 2026 h2h precedes overall GD,
+    // so Mexico is mathematically 1st even if it loses its last game.
+    expect(c.first).toBe("墨西哥");
+    expect(c.byTeam["墨西哥"]).toEqual({ best: 1, worst: 1 });
+    // 2nd is NOT locked yet — Korea/Czechia/S.Africa can still rearrange.
+    expect(c.second).toBeNull();
+  });
+
+  it("does not clinch 1st when the leader only drew the challenger (overall GD could decide)", () => {
+    const drawScores = scores.map((s) =>
+      s.home === "墨西哥" && s.away === "韓國" ? { ...s, homeScore: 1, awayScore: 1 } : s,
+    );
+    // Now Mexico 4, Korea 4 — tie possible and the h2h was a draw, so GD (which a
+    // big remaining win can swing) would decide → not yet clinched.
+    const c = clinchedPositions(teams, fixtures, drawScores);
+    expect(c.first).toBeNull();
+  });
+});
 
 describe("rankThirds", () => {
   it("orders third-placed teams by pts → GD → GF", () => {

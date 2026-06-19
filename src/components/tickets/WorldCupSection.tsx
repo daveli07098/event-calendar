@@ -21,12 +21,14 @@ import {
   computeStandings,
   resolveKnockout,
   rankThirds,
+  clinchedPositions,
   groupOdds,
   ROUND_LABELS_EN,
   type MatchScore,
   type TeamStanding,
   type KnockoutMatch,
   type ResolvedSlot,
+  type GroupClinch,
 } from "@/lib/worldcup";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
@@ -293,6 +295,18 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     return rankThirds(perGroup);
   }, [snapshot]);
 
+  // Early-clinch analysis per group — which teams have mathematically locked a
+  // final position before the group is complete (2026 h2h-before-GD tiebreaks).
+  const clinchByGroup = useMemo(() => {
+    const out: Record<string, GroupClinch> = {};
+    for (const g of groups) {
+      const fixtures = g.matches.map((m) => ({ home: m.home, away: m.away }));
+      const scores = snapshot?.groups[g.group]?.matches ?? [];
+      out[g.group] = clinchedPositions(g.teams, fixtures, scores);
+    }
+    return out;
+  }, [groups, snapshot]);
+
   // Resolve Round-of-32 placeholders (組冠軍/組亞軍/最佳第三名) from the synced
   // standings — provisional until each group/the thirds are mathematically locked.
   // Each slot gets a hover tooltip: what it stands for, current group record, and
@@ -301,7 +315,10 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     const r32 = bracket.find((r) => r.round === "R32")?.matches ?? [];
     const perGroup: Record<string, TeamStanding[]> = {};
     if (snapshot) for (const [g, v] of Object.entries(snapshot.groups)) perGroup[g] = v.standings;
-    const base = resolveKnockout(r32, perGroup);
+    const clinch = Object.fromEntries(
+      Object.entries(clinchByGroup).map(([g, c]) => [g, { first: c.first, second: c.second }]),
+    );
+    const base = resolveKnockout(r32, perGroup, clinch);
 
     // Per-group qualification odds from played results + remaining fixtures.
     const odds: Record<string, ReturnType<typeof groupOdds>> = {};
@@ -324,7 +341,11 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     const titleFor = (slot: typeof base[string]["home"]): string => {
       const meaning = meaningOf(slot);
       if (!slot.team) return `${meaning}\nNot decided yet — depends on the earlier matches`;
-      if (slot.confirmed) return `${slot.team} — ${meaning}\n✓ Confirmed`;
+      if (slot.confirmed) {
+        // Distinguish "locked because the group finished" from "clinched early".
+        const groupDone = slot.group ? snapshot?.groups[slot.group]?.standings.every((t) => t.p >= 3) : false;
+        return `${slot.team} — ${meaning}\n✓ ${groupDone ? "Confirmed" : "Already clinched — can't be caught"}`;
+      }
       const st = slot.group ? snapshot?.groups[slot.group]?.standings.find((t) => t.team === slot.team) : undefined;
       const o = slot.group ? odds[slot.group]?.[slot.team] : undefined;
       const pct = o ? Math.round((slot.position === 1 ? o.first : slot.position === 2 ? o.second : o.third) * 100) : null;
@@ -339,7 +360,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
       out[id] = { home: { ...m.home, title: titleFor(m.home) }, away: { ...m.away, title: titleFor(m.away) } };
     }
     return out;
-  }, [bracket, snapshot, groups]);
+  }, [bracket, snapshot, groups, clinchByGroup]);
 
   async function refreshScores() {
     setRefreshing(true);
@@ -439,6 +460,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
                   calendars={calendars}
                   tz={tz}
                   now={now}
+                  clinch={clinchByGroup[g.group]}
                 />
               );
             })}
@@ -465,7 +487,7 @@ const THIRDS_HELP = [
   "1. Pts — points (win 3 · draw 1 · loss 0)",
   "2. GD — goal difference (goals scored − conceded)",
   "3. GF — goals scored (goals for)",
-  "Still level on all three? FIFA breaks it by fair-play points (fewer yellow/red cards), then by drawing of lots.",
+  "Still level on all three? FIFA breaks it by fair-play points (fewer yellow/red cards), then by FIFA World Ranking. (Third-placed teams are in different groups, so head-to-head doesn't apply here.)",
 ].join("\n");
 
 /** Ranking block for the 12 third-placed teams — the best 8 advance to the R32. */
@@ -520,8 +542,11 @@ function ThirdPlaceTable({ thirds }: { thirds: { group: string; standing: TeamSt
   );
 }
 
+/** Ordinal helper for clinch labels (1 → "1st"). */
+const ord = (n: number) => (n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`);
+
 function GroupCard({
-  group, standings, fixtures, matches, calendars, tz, now,
+  group, standings, fixtures, matches, calendars, tz, now, clinch,
 }: {
   group: string;
   standings: TeamStanding[];
@@ -530,6 +555,7 @@ function GroupCard({
   calendars: CalendarType[];
   tz: string;
   now: number;
+  clinch?: GroupClinch;
 }) {
   return (
     <Card size="sm">
@@ -559,7 +585,24 @@ function GroupCard({
               )}
             >
               <span className="text-muted-foreground tabular-nums">{t.rank}</span>
-              <span className="truncate font-medium">{t.team}</span>
+              {(() => {
+                const c = clinch?.byTeam[t.team];
+                const lockedRank = c && c.best === c.worst ? c.best : null;
+                // Only flag a clinched top-2 spot (guaranteed into the R32).
+                if (lockedRank === 1 || lockedRank === 2) {
+                  return (
+                    <InfoTip
+                      tone="green"
+                      className="truncate font-medium inline-flex items-center gap-1"
+                      label={`${t.team} — clinched ${ord(lockedRank)} place\n✓ Mathematically through to the Round of 32 (can't be caught)`}
+                    >
+                      <span className="truncate">{t.team}</span>
+                      <CheckCircle2 className="size-3 shrink-0 text-primary" />
+                    </InfoTip>
+                  );
+                }
+                return <span className="truncate font-medium">{t.team}</span>;
+              })()}
               <span className="text-center tabular-nums">{t.p}</span>
               <span className="text-center tabular-nums">{t.w}</span>
               <span className="text-center tabular-nums">{t.d}</span>
