@@ -598,7 +598,7 @@ export function TicketSection() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="border-b border-border bg-card px-6 py-4 flex items-center gap-4 shrink-0">
+      <header className="border-b border-border bg-card px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
         <a href="/">
           <Button variant="ghost" size="icon" className="size-8">
             <ArrowLeft className="size-4" />
@@ -671,13 +671,13 @@ export function TicketSection() {
         </div>
       </header>
 
-      {/* Body: left sidebar + main content */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar nav */}
-        <nav className="w-52 border-r shrink-0 p-2 space-y-0.5">
+      {/* Body: nav (top bar on mobile, left sidebar on desktop) + main content */}
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
+        {/* Nav — horizontal scrollable strip on mobile, vertical sidebar on md+ */}
+        <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-x-visible border-b md:border-b-0 md:border-r shrink-0 p-2 md:w-52 md:space-y-0.5">
           <button
             onClick={() => setSection("import")}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "import"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -688,7 +688,7 @@ export function TicketSection() {
           </button>
           <button
             onClick={() => setSection("classify")}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "classify"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -699,7 +699,7 @@ export function TicketSection() {
           </button>
           <button
             onClick={() => setSection("discounts")}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "discounts"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -710,7 +710,7 @@ export function TicketSection() {
           </button>
           <button
             onClick={() => setSection("venues")}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "venues"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -721,7 +721,7 @@ export function TicketSection() {
           </button>
           <button
             onClick={() => setSection("worldcup")}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "worldcup"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
