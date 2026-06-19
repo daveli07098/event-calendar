@@ -401,6 +401,9 @@ export interface ResolvedSlot {
   group: string | null;   // the group this position comes from (for the tooltip)
   position: 1 | 2 | 3 | null; // 1=winner 2=runner-up 3=third
   thirdGroups?: string[] | null; // for a 3rd-place slot: the candidate groups (e.g. ["A","B","C","D","F"])
+  // for a 3rd-place slot: each candidate group's current 3rd-placed team
+  // (team is null until that group has standings), e.g. [{group:"A",team:"荷蘭"},…]
+  thirdCandidates?: { group: string; team: string | null }[] | null;
   title?: string;         // hover tooltip text, filled in by the UI layer
 }
 
@@ -508,9 +511,12 @@ export function resolveKnockout(
       const allowed = new Set(allowedArr);
       const pick = qualified.find((t) => allowed.has(t.group) && !usedThirds.has(t.group));
       if (pick) usedThirds.add(pick.group);
+      // Every candidate group's current 3rd-placed team, so the UI can show the
+      // actual teams that could fill this slot (荷蘭/巴西/…), not just letters.
+      const thirdCandidates = allowedArr.map((g) => ({ group: g, team: perGroup[g]?.[2]?.team ?? null }));
       return {
         label, team: pick?.standing.team ?? null, confirmed: allComplete,
-        group: pick?.group ?? null, position: 3, thirdGroups: allowedArr,
+        group: pick?.group ?? null, position: 3, thirdGroups: allowedArr, thirdCandidates,
       };
     }
     return { label, team: null, confirmed: false, group: null, position: null };

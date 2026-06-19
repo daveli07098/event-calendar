@@ -332,10 +332,12 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     const meaningOf = (slot: typeof base[string]["home"]): string => {
       if (slot.position === 1 && slot.group) return `Group ${slot.group} winner`;
       if (slot.position === 2 && slot.group) return `Group ${slot.group} runner-up`;
-      if (slot.position === 3)
-        return slot.thirdGroups?.length
-          ? `best 3rd place — from Group ${slot.thirdGroups.join("/")}`
-          : "best 3rd place";
+      if (slot.position === 3) {
+        // List the actual candidate teams (a group's current 3rd) where known.
+        const cands = slot.thirdCandidates?.map((c) => c.team ?? `Group ${c.group}`) ?? [];
+        if (cands.length) return `best 3rd place — one of: ${cands.join(" / ")}`;
+        return slot.thirdGroups?.length ? `best 3rd place — from Group ${slot.thirdGroups.join("/")}` : "best 3rd place";
+      }
       return slot.label; // e.g. "M74勝者"
     };
     const titleFor = (slot: typeof base[string]["home"]): string => {
@@ -685,6 +687,21 @@ function GroupCard({
 /** One side of a bracket match: a resolved team (provisional = amber/italic,
  *  confirmed = solid + ✓) or the original placeholder when not yet derivable. */
 function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot }) {
+  // Provisional best-third slot: list ALL candidate teams (each candidate group's
+  // current 3rd), e.g. "荷蘭/巴西/摩洛哥/…", not the single greedy pick — the real
+  // qualifier isn't decided until the group stage finishes.
+  if (slot?.position === 3 && !slot.confirmed && slot.thirdCandidates?.length) {
+    const names = slot.thirdCandidates.map((c) => c.team ?? `${c.group}組`);
+    return (
+      <InfoTip
+        tone="amber"
+        className="inline-flex items-center gap-1 truncate italic text-amber-500/90"
+        label={slot.title ?? `best 3rd place — one of: ${names.join(" / ")}`}
+      >
+        {names.join("/")}
+      </InfoTip>
+    );
+  }
   if (slot?.team) {
     return (
       <InfoTip
@@ -700,8 +717,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
       </InfoTip>
     );
   }
-  // Unresolved best-third slot: show every group it could come from, e.g.
-  // "A/B/C/D/F組第三名" (the official FIFA candidate set), not the raw placeholder.
+  // Best-third slot before any standings exist: fall back to the group letters.
   if (slot?.position === 3 && slot.thirdGroups?.length) {
     return (
       <InfoTip
