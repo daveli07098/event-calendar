@@ -248,6 +248,28 @@
   padding: 4px 8px;
 }
 
+/* ── "Today" cell — strong, theme-agnostic highlight ──
+   The faint tint alone was hard to spot on dark themes, so add a primary inset
+   ring around the cell plus a filled pill on the date number (à la Google
+   Calendar). Both use --primary so every theme stays in sync. */
+.fc .fc-daygrid-day.fc-day-today {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 75%, transparent);
+  border-radius: 6px;
+}
+.fc .fc-day-today .fc-daygrid-day-number {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 700;
+  border-radius: 9999px;
+  margin: 3px;
+  padding: 2px 8px;
+}
+/* Week/Day (timegrid) views: ring the today column header instead. */
+.fc .fc-timegrid-col.fc-day-today,
+.fc .fc-col-header-cell.fc-day-today {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
 /* ── Mobile responsive overrides ── */
 @media (max-width: 767px) {
   /* Tighter toolbar for small screens */

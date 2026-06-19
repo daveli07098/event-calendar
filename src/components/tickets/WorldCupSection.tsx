@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check, Plus, Minus, Maximize2, CheckCircle2 } from "lucide-react";
+import { Trophy, RefreshCw, Loader2, Clock, AlertCircle, Goal, CalendarPlus, Check, Plus, Minus, Maximize2, CheckCircle2, HelpCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -458,6 +458,16 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
   );
 }
 
+/** Explains the third-place ranking tie-break order, shown on the "?" hover. */
+const THIRDS_HELP = [
+  "How the ranking works",
+  "The best 8 of 12 third-placed teams advance to the Round of 32, ordered by:",
+  "1. Pts — points (win 3 · draw 1 · loss 0)",
+  "2. GD — goal difference (goals scored − conceded)",
+  "3. GF — goals scored (goals for)",
+  "Still level on all three? FIFA breaks it by fair-play points (fewer yellow/red cards), then by drawing of lots.",
+].join("\n");
+
 /** Ranking block for the 12 third-placed teams — the best 8 advance to the R32. */
 function ThirdPlaceTable({ thirds }: { thirds: { group: string; standing: TeamStanding }[] }) {
   return (
@@ -466,6 +476,9 @@ function ThirdPlaceTable({ thirds }: { thirds: { group: string; standing: TeamSt
         <CardTitle className="text-base flex items-center gap-2">
           <Trophy className="size-4 text-primary" />
           Best Third-Placed Teams
+          <InfoTip tone="green" label={THIRDS_HELP} className="inline-flex">
+            <HelpCircle className="size-3.5 text-muted-foreground hover:text-primary transition-colors" />
+          </InfoTip>
         </CardTitle>
         <p className="text-xs text-muted-foreground">
           Top 8 of 12 advance to the Round of 32 · ranked by Pts → GD → GF
