@@ -24,8 +24,10 @@ export function CalendarPageClient({
   const [searchOpen, setSearchOpen] = useState(false);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>(null);
-  const [locationFilter, setLocationFilter] = useState<string | null>(null);
+  // Default the calendar to the most-used view: Hong Kong concerts. Both filters
+  // are still freely toggleable (and clearable) from the sidebar.
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>("concert");
+  const [locationFilter, setLocationFilter] = useState<string | null>("Hong Kong");
   const [locationCounts, setLocationCounts] = useState<Record<string, number>>({});
   // Ref to CalendarView's gotoDate function (set by CalendarView via callback)
   const gotoDateRef = useRef<((date: Date) => void) | null>(null);
@@ -34,6 +36,7 @@ export function CalendarPageClient({
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get("event");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of URL on mount
     if (eventId) setOpenEventId(eventId);
   }, []);
 
