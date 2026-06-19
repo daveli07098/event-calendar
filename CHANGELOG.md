@@ -1,3 +1,11 @@
+## [2026-06-20] — Session: World Cup best-thirds, candidate labels & mobile
+### Added
+- feat(worldcup): official best-third slot table (THIRD_PLACE_SLOTS — match→group-set from the 2026 knockout bracket); the Road to Trophy now labels an unresolved third-place slot with all its possibilities, e.g. "A/B/C/D/F組第三名", with a tooltip naming the candidate groups ([89905dc])
+- feat(worldcup): "Best Third-Placed Teams" block atop Group Stage — all 12 third-placed teams ranked (Pts → GD → GF) with the top 8 highlighted and a cut-off line ([89905dc])
+### Fixed
+- fix(worldcup): best-third candidate groups are taken from the official table by match number, so they're correct even when the imported fixture title encodes the set wrongly or generically ([89905dc])
+- fix(tickets): Event Section is now usable on mobile — nav is a horizontal scrollable strip on small screens (vertical sidebar on md+), the body stacks, and the header wraps ([9a435bb])
+
 ## [2026-06-15] — Session: AI model pool, scrape reliability & token cuts
 ### Added
 - feat(scrape): parseRemixEvent() reads structured event data from a Remix app's window.__remixContext (Timable etc., which ship no JSON-LD) — venue, end date/time and slots are now extracted deterministically with zero tokens, folded into extractMeta behind JSON-LD/OG ([154c4f2])
