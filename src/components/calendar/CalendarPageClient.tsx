@@ -24,10 +24,12 @@ export function CalendarPageClient({
   const [searchOpen, setSearchOpen] = useState(false);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  // Default the calendar to the most-used view: Hong Kong concerts. Both filters
-  // are still freely toggleable (and clearable) from the sidebar.
-  const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>("concert");
-  const [locationFilter, setLocationFilter] = useState<string | null>("Hong Kong");
+  // Filters start unset (show everything) and are remembered across visits: a
+  // first-time user sees all events, while a returning user gets back whatever
+  // they last had (e.g. Hong Kong + Concert). Persisted in localStorage below.
+  const [categoryFilter, setCategoryFilter] = useState<EventCategory | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string | null>(null);
+  const [filtersLoaded, setFiltersLoaded] = useState(false);
   const [locationCounts, setLocationCounts] = useState<Record<string, number>>({});
   // Ref to CalendarView's gotoDate function (set by CalendarView via callback)
   const gotoDateRef = useRef<((date: Date) => void) | null>(null);
@@ -39,6 +41,32 @@ export function CalendarPageClient({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of URL on mount
     if (eventId) setOpenEventId(eventId);
   }, []);
+
+  // Restore the user's last filter selection (none for first-time visitors).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("calendar.filters");
+      if (raw) {
+        const f = JSON.parse(raw) as { category?: unknown; location?: unknown };
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore on mount
+        if (typeof f.category === "string") setCategoryFilter(f.category as EventCategory);
+        if (typeof f.location === "string") setLocationFilter(f.location);
+      }
+    } catch { /* corrupt/blocked storage → stay unfiltered */ }
+    setFiltersLoaded(true);
+  }, []);
+
+  // Persist filter changes so the next visit restores them. Gated on
+  // filtersLoaded so the initial restore doesn't immediately clobber storage.
+  useEffect(() => {
+    if (!filtersLoaded) return;
+    try {
+      localStorage.setItem(
+        "calendar.filters",
+        JSON.stringify({ category: categoryFilter, location: locationFilter }),
+      );
+    } catch { /* storage unavailable — non-fatal */ }
+  }, [filtersLoaded, categoryFilter, locationFilter]);
 
   // Fetch location counts on mount (for sidebar chips)
   useEffect(() => {
