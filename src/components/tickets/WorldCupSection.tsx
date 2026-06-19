@@ -340,9 +340,17 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
       }
       return slot.label; // e.g. "M74勝者"
     };
+    // For a provisional best-third slot, a reference line naming the official
+    // candidate groups (e.g. "A/B/C/D/F組第三名") — a reminder the team isn't
+    // locked because the group stage hasn't finished.
+    const thirdRef = (slot: typeof base[string]["home"]): string | null =>
+      slot.position === 3 && !slot.confirmed && slot.thirdGroups?.length
+        ? `Slot: ${slot.thirdGroups.join("/")}組第三名`
+        : null;
     const titleFor = (slot: typeof base[string]["home"]): string => {
       const meaning = meaningOf(slot);
-      if (!slot.team) return `${meaning}\nNot decided yet — depends on the earlier matches`;
+      const ref = thirdRef(slot);
+      if (!slot.team) return [meaning, "Not decided yet — depends on the earlier matches", ref].filter(Boolean).join("\n");
       if (slot.confirmed) {
         // Distinguish "locked because the group finished" from "clinched early".
         const groupDone = slot.group ? snapshot?.groups[slot.group]?.standings.every((t) => t.p >= 3) : false;
@@ -354,6 +362,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
       const lines = [`${slot.team} — currently ${meaning} (not yet confirmed)`];
       if (st) lines.push(`${st.pts} ${st.pts === 1 ? "point" : "points"} from ${st.p} ${st.p === 1 ? "game" : "games"} played · goal difference ${st.gd >= 0 ? "+" : ""}${st.gd}`);
       if (pct != null) lines.push(`~${pct}% chance to finish ${ordinal(slot.position)}`);
+      if (ref) lines.push(ref);
       return lines.join("\n");
     };
 
