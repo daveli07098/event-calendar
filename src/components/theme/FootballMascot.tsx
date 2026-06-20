@@ -648,7 +648,7 @@ export function FootballMascot() {
 
         {/* Rally: chant bubble, a waving team flag, and a drum to beat */}
         {chant && (
-          <div className="absolute -top-7 left-1/2 -translate-x-1/2 animate-bounce whitespace-nowrap rounded-md bg-foreground px-2 py-0.5 text-[10px] font-bold text-background shadow">
+          <div className="absolute -top-10 left-1/2 max-w-[150px] -translate-x-1/2 animate-bounce text-balance rounded-md bg-foreground px-2 py-0.5 text-center text-[10px] font-bold leading-snug text-background shadow">
             {chant}
           </div>
         )}
