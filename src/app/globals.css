@@ -277,6 +277,38 @@
   to   { background-position: 80px 0; }
 }
 
+/* ── World Cup theme: decorative pennant bunting under the banner ── */
+.ec-bunting {
+  display: flex;
+  justify-content: space-around;
+  align-items: flex-start;
+  gap: 2px;
+  height: 14px;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 0 4px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--primary) 22%, transparent),
+    transparent
+  );
+  border-bottom: 1px solid var(--border);
+}
+.ec-bunting-flag {
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 12px solid currentColor; /* colour set inline via border-top-color */
+  transform-origin: top center;
+  animation: buntingSway 2.6s ease-in-out infinite;
+}
+@keyframes buntingSway {
+  0%, 100% { transform: rotate(-4deg); }
+  50%      { transform: rotate(4deg); }
+}
+
 /* ── World Cup section: live tournament-progress bar shimmer ── */
 .ec-wc-progress-fill {
   background-image: linear-gradient(
@@ -353,7 +385,8 @@
   .ec-banner-pitch,
   .ec-confetti,
   .ec-wc-progress-fill,
-  .ec-trophy-shine {
+  .ec-trophy-shine,
+  .ec-bunting-flag {
     animation: none;
   }
 }

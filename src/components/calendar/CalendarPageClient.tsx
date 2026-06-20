@@ -8,6 +8,7 @@ import { SearchDialog } from "@/components/calendar/SearchDialog";
 import { SiteBanner } from "@/components/banner/SiteBanner";
 import { FootballMascot } from "@/components/theme/FootballMascot";
 import { TeamPicker } from "@/components/theme/TeamPicker";
+import { FlagBunting, WorldCupTabFlair } from "@/components/theme/WorldCupFlair";
 import type { CalendarType, EventType, EventCategory } from "@/types";
 
 interface CalendarPageClientProps {
@@ -132,6 +133,8 @@ export function CalendarPageClient({
     <div className="flex flex-col h-screen overflow-hidden">
       {/* Site-wide announcement banner (e.g. World Cup) — full width, above all */}
       <SiteBanner />
+      {/* Decorative pennant bunting under the banner (World Cup theme only) */}
+      <FlagBunting />
       <div className="flex flex-1 overflow-hidden">
         <CalendarSidebar
           calendars={calendars}
@@ -177,6 +180,8 @@ export function CalendarPageClient({
       <FootballMascot />
       {/* First-run prompt: which team do you support? (mascot wears its kit) */}
       <TeamPicker />
+      {/* Turns the browser tab into ⚽ + live match while the World Cup theme is on */}
+      <WorldCupTabFlair />
     </div>
   );
 }
