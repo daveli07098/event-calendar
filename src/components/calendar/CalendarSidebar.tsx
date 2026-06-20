@@ -71,6 +71,68 @@ function SidebarSection({
   );
 }
 
+/** Default number of chips shown before a section collapses behind "+N more". */
+const COLLAPSED_TAG_LIMIT = 8;
+
+const tagChipClass = (active: boolean) =>
+  `text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border transition-colors ${
+    active ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-accent"
+  }`;
+
+/**
+ * A wrapping list of filter chips that stays compact as the set grows: it shows
+ * the first `limit` chips and tucks the rest behind a "+N more" toggle (→ "Show
+ * less"). The active chip is always kept visible even when collapsed, so the
+ * current filter is never hidden.
+ */
+function TagFilter<T extends string>({
+  items,
+  active,
+  onSelect,
+  limit = COLLAPSED_TAG_LIMIT,
+}: {
+  items: { key: T; label: ReactNode }[];
+  active: T | null;
+  onSelect: (key: T | null) => void;
+  limit?: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const overflowing = items.length > limit;
+  const hiddenCount = items.length - limit;
+
+  let visible = items;
+  if (!expanded && overflowing) {
+    visible = items.slice(0, limit);
+    // Keep the active chip reachable: if it's hidden, swap it into the last slot.
+    const activeIdx = items.findIndex((i) => i.key === active);
+    if (activeIdx >= limit) visible = [...items.slice(0, limit - 1), items[activeIdx]];
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {visible.map((it) => (
+        <button
+          key={it.key}
+          onClick={() => onSelect(active === it.key ? null : it.key)}
+          className={tagChipClass(active === it.key)}
+        >
+          {it.label}
+        </button>
+      ))}
+      {overflowing && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border border-dashed border-border text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          {expanded ? "Show less" : `+${hiddenCount} more`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function CalendarSidebar({
   calendars,
   onCalendarToggle,
@@ -362,23 +424,20 @@ export function CalendarSidebar({
               ) : undefined
             }
           >
-            <div className="flex flex-wrap gap-1">
-              {Object.entries(locationCounts)
+            <TagFilter
+              active={locationFilter ?? null}
+              onSelect={onLocationFilter}
+              items={Object.entries(locationCounts)
                 .sort((a, b) => b[1] - a[1])
-                .map(([loc, count]) => (
-                  <button
-                    key={loc}
-                    onClick={() => onLocationFilter(locationFilter === loc ? null : loc)}
-                    className={`text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border transition-colors ${
-                      locationFilter === loc
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border hover:bg-accent"
-                    }`}
-                  >
-                    {loc} <span className="opacity-60">{count}</span>
-                  </button>
-                ))}
-            </div>
+                .map(([loc, count]) => ({
+                  key: loc,
+                  label: (
+                    <>
+                      {loc} <span className="opacity-60">{count}</span>
+                    </>
+                  ),
+                }))}
+            />
           </SidebarSection>
         )}
 
@@ -411,21 +470,14 @@ export function CalendarSidebar({
               ) : undefined
             }
           >
-            <div className="flex flex-wrap gap-1">
-              {EVENT_CATEGORIES.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => onCategoryFilter(categoryFilter === cat ? null : cat)}
-                  className={`text-xs md:text-[11px] px-2 py-1 md:px-1.5 md:py-0.5 rounded-full border transition-colors ${
-                    categoryFilter === cat
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border hover:bg-accent"
-                  }`}
-                >
-                  {CATEGORY_LABELS[cat]}
-                </button>
-              ))}
-            </div>
+            <TagFilter
+              active={categoryFilter ?? null}
+              onSelect={onCategoryFilter}
+              items={EVENT_CATEGORIES.map((cat) => ({
+                key: cat,
+                label: CATEGORY_LABELS[cat],
+              }))}
+            />
           </SidebarSection>
         )}
         </div>
