@@ -168,6 +168,18 @@ export function TicketSection() {
       setSection(s);
     }
   }, []);
+
+  // Is the World Cup on right now? Drives the pulsing "LIVE" badge on the nav
+  // item so the section reads as a live event during the tournament window.
+  const [wcLive, setWcLive] = useState(false);
+  useEffect(() => {
+    const now = Date.now();
+    // 2026 FIFA World Cup runs ~Jun 11 – Jul 19, 2026.
+    const start = Date.parse("2026-06-11T00:00:00Z");
+    const end = Date.parse("2026-07-20T00:00:00Z");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time clock read on mount
+    setWcLive(now >= start && now <= end);
+  }, []);
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
@@ -724,11 +736,22 @@ export function TicketSection() {
             className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "worldcup"
                 ? "bg-primary/10 text-primary font-medium"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                : wcLive
+                  ? "text-foreground font-medium hover:bg-muted"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
             }`}
           >
-            <Trophy className="size-4 shrink-0" />
+            <Trophy className={`size-4 shrink-0 ${wcLive ? "ec-trophy-shine text-primary" : ""}`} />
             World Cup
+            {wcLive && (
+              <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-500">
+                <span className="relative flex size-1.5">
+                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-red-500 opacity-75" />
+                  <span className="relative inline-flex size-1.5 rounded-full bg-red-500" />
+                </span>
+                Live
+              </span>
+            )}
           </button>
         </nav>
 
