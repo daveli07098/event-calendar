@@ -1,5 +1,6 @@
 ## [2026-06-21] — Session: World Cup theme rename & match-day UI
 ### Added
+- feat(worldcup): live tournament stage tracker in the World Cup section header — a shimmering progress bar plus a Groups → R32 → R16 → QF → SF → Final stepper derived from fixture kickoffs (past stages fill, the in-progress stage pulses with an "in progress" badge, upcoming stages dim); gentle gleam on the header trophy ([719859c])
 - feat(worldcup): live match-day banner strip — countdown to the next kickoff (or a pulsing "LIVE" chip during a match), a "today" match count, and the supported team's next fixture; plus slow-drifting pitch stripes over the banner. New `use-worldcup-matches` hook + `WorldCupBannerExtras` ([bacaba4])
 - feat(worldcup): themed calendar match cells — World Cup fixtures show flagged team names and a ⚽ marker (🔴 + gentle pulse on match day) across month/week/list views ([bacaba4])
 - feat(mascot): national-flag "MATCH DAY" pennant when the supported team plays today, and a confetti burst on the GOAL cheer ([bacaba4])
