@@ -231,6 +231,98 @@ function AddMatchButton({
   );
 }
 
+/** A match counts as "live" for ~2h after kickoff (no scores needed). */
+const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Live tournament stage tracker shown in the World Cup header: a progress bar
+ * plus a Groups → R32 → R16 → QF → SF → Final stepper. Each stage is derived
+ * from its fixtures' kickoffs — past stages are filled, the in-progress stage
+ * pulses, and upcoming stages are dimmed. Reflects how far the tournament has
+ * progressed at a glance.
+ */
+function TournamentProgress({ events, now }: { events: EventType[]; now: number }) {
+  const stages = useMemo(() => {
+    const groupKickoffs = buildGroups(events).flatMap((g) => g.matches.map((m) => m.kickoff));
+    const byRound = new Map(buildBracket(events).map((r) => [r.round, r.matches.map((m) => m.kickoff)]));
+    const defs: { key: string; label: string; kickoffs: string[] }[] = [
+      { key: "group", label: "Groups", kickoffs: groupKickoffs },
+      { key: "R32", label: "R32", kickoffs: byRound.get("R32") ?? [] },
+      { key: "R16", label: "R16", kickoffs: byRound.get("R16") ?? [] },
+      { key: "QF", label: "QF", kickoffs: byRound.get("QF") ?? [] },
+      { key: "SF", label: "SF", kickoffs: byRound.get("SF") ?? [] },
+      { key: "Final", label: "Final", kickoffs: byRound.get("Final") ?? [] },
+    ];
+    return defs.map((d) => {
+      const ms = d.kickoffs
+        .map((k) => new Date(k).getTime())
+        .filter((n) => !Number.isNaN(n))
+        .sort((a, b) => a - b);
+      return { key: d.key, label: d.label, earliest: ms[0] ?? null, latest: ms[ms.length - 1] ?? null };
+    });
+  }, [events]);
+
+  if (now === 0) return null; // wait for the on-mount clock read
+
+  const items = stages.map((s) => {
+    if (s.earliest === null) return { ...s, status: "upcoming" as const };
+    const started = s.earliest <= now;
+    const done = s.latest !== null && s.latest + LIVE_WINDOW_MS < now;
+    return { ...s, status: !started ? ("upcoming" as const) : done ? ("done" as const) : ("live" as const) };
+  });
+
+  const doneCount = items.filter((i) => i.status === "done").length;
+  const liveIdx = items.findIndex((i) => i.status === "live");
+  const frac = Math.min(1, (doneCount + (liveIdx >= 0 ? 0.5 : 0)) / items.length);
+
+  return (
+    <div className="rounded-lg border border-border bg-card/50 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">Tournament progress</span>
+        {liveIdx >= 0 && (
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary">
+            <span className="relative flex size-1.5">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+              <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
+            </span>
+            {items[liveIdx].label} in progress
+          </span>
+        )}
+      </div>
+
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+        <div
+          className="ec-wc-progress-fill h-full rounded-full bg-primary transition-[width] duration-700"
+          style={{ width: `${frac * 100}%` }}
+        />
+      </div>
+
+      <div className="mt-2 flex items-start justify-between gap-1">
+        {items.map((it) => (
+          <div key={it.key} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+            <span
+              className={cn(
+                "size-2.5 rounded-full transition-colors",
+                it.status === "done" && "bg-primary",
+                it.status === "live" && "bg-primary ring-2 ring-primary/30 animate-pulse",
+                it.status === "upcoming" && "bg-muted-foreground/30",
+              )}
+            />
+            <span
+              className={cn(
+                "truncate text-[10px]",
+                it.status === "upcoming" ? "text-muted-foreground/60" : "font-medium text-foreground",
+              )}
+            >
+              {it.label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota) => void }) {
   const { theme } = useTheme();
   const tz = theme.timeZone || DEFAULT_TIME_ZONE;
@@ -419,13 +511,15 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
       <div className="space-y-1">
         <h2 className="text-2xl font-bold flex items-center gap-2">
-          <Trophy className="size-6 text-primary" />
+          <Trophy className="size-6 text-primary ec-trophy-shine" />
           2026 FIFA World Cup
         </h2>
         <p className="text-muted-foreground text-sm">
           Group standings, fixtures and the road to the trophy — times shown in {tz.replace(/_/g, " ")}.
         </p>
       </div>
+
+      <TournamentProgress events={events} now={now} />
 
       <Tabs defaultValue="groups">
         <TabsList>
