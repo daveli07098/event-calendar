@@ -1,3 +1,13 @@
+## [2026-06-21] — Session: World Cup theme rename & match-day UI
+### Added
+- feat(worldcup): live match-day banner strip — countdown to the next kickoff (or a pulsing "LIVE" chip during a match), a "today" match count, and the supported team's next fixture; plus slow-drifting pitch stripes over the banner. New `use-worldcup-matches` hook + `WorldCupBannerExtras` ([bacaba4])
+- feat(worldcup): themed calendar match cells — World Cup fixtures show flagged team names and a ⚽ marker (🔴 + gentle pulse on match day) across month/week/list views ([bacaba4])
+- feat(mascot): national-flag "MATCH DAY" pennant when the supported team plays today, and a confetti burst on the GOAL cheer ([bacaba4])
+- feat(theme): pitch-stripe swatch with a ⚽ for the World Cup option in the theme switcher; shared `src/lib/team-flags.ts` (team name → flag emoji) ([bacaba4])
+### Changed
+- refactor(theme): rename the event theme label "Football" → "World Cup" (id stays `worldcup`, so no data/storage migration); sharpened description ([bacaba4])
+- chore(a11y): all new World Cup animations (pitch drift, match pulse, confetti) respect `prefers-reduced-motion` ([bacaba4])
+
 ## [2026-06-20] — Session: World Cup best-thirds, candidate labels & mobile
 ### Added
 - feat(worldcup): official best-third slot table (THIRD_PLACE_SLOTS — match→group-set from the 2026 knockout bracket); the Road to Trophy now labels an unresolved third-place slot with all its possibilities, e.g. "A/B/C/D/F組第三名", with a tooltip naming the candidate groups ([89905dc])
