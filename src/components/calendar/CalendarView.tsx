@@ -27,6 +27,41 @@ import { EventModal } from "@/components/events/EventModal";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
 import { EventReminder } from "@/components/calendar/EventReminder";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
+import { useTheme } from "@/context/ThemeContext";
+import { parseGroupMatch, parseKnockoutMatch } from "@/lib/worldcup";
+import { getTeamFlag } from "@/lib/team-flags";
+import { cn } from "@/lib/utils";
+
+/**
+ * For a World Cup match event, return its two team names with flags prepended
+ * (e.g. "🇲🇽 墨西哥" / "🇿🇦 南非"). Returns null for non-match events so the
+ * caller falls back to the plain title. Knockout placeholders (e.g. "M73勝者")
+ * simply get no flag.
+ */
+function worldCupMatchTeams(
+  ev: EventType | undefined,
+): { home: string; away: string; kickoff: string } | null {
+  if (!ev) return null;
+  const g = parseGroupMatch(ev);
+  const m = g ?? parseKnockoutMatch(ev);
+  if (!m) return null;
+  const flag = (t: string) => {
+    const f = getTeamFlag(t);
+    return f ? `${f} ${t}` : t;
+  };
+  return { home: flag(m.home), away: flag(m.away), kickoff: m.kickoff };
+}
+
+/** True when the ISO timestamp falls on the local calendar's "today". */
+function isTodayLocal(iso: string): boolean {
+  const d = new Date(iso);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
 
 interface CalendarViewProps {
   initialEvents: EventType[];
@@ -54,6 +89,8 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const { theme } = useTheme();
+  const worldCupActive = theme.eventTheme === "worldcup";
 
   // Expose gotoDate to parent on mount
   useEffect(() => {
@@ -397,11 +434,17 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     const ev = event.extendedProps.event as EventType;
     const region = regionLabel(ev?.location);
 
+    // World Cup match (only decorated while the World Cup theme is active).
+    const wcMatch = worldCupActive ? worldCupMatchTeams(ev) : null;
+    const wcToday = wcMatch ? isTodayLocal(wcMatch.kickoff) : false;
+    const wcTitle = wcMatch ? `${wcMatch.home} vs ${wcMatch.away}` : null;
+
     // List view — title + optional region badge; FC handles dot + time columns
     if (viewType.startsWith("list")) {
       return (
         <span className="text-sm flex items-center gap-1.5 flex-wrap">
-          <span>{event.title}</span>
+          {wcToday && <span title="Match today" aria-label="Match today">🔴</span>}
+          <span>{wcTitle ?? event.title}</span>
           {region && (
             <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 leading-tight shrink-0">
               {region}
@@ -426,14 +469,16 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     }
 
     if (viewType.startsWith("dayGrid")) {
-      // Timed in month grid: dot + title + smaller time + region badge
+      // Timed in month grid: dot + title + smaller time + region badge.
+      // World Cup matches get a ⚽ marker, flagged team names, and a 🔴 when live today.
       return (
-        <div className="ec-timed-event">
-          <span
-            className="ec-event-dot"
-            style={{ backgroundColor: color }}
-          />
-          <span className="ec-event-title">{event.title}</span>
+        <div className={cn("ec-timed-event", wcMatch && "ec-wc-event")}>
+          {wcMatch ? (
+            <span className="ec-wc-marker" aria-hidden="true">{wcToday ? "🔴" : "⚽"}</span>
+          ) : (
+            <span className="ec-event-dot" style={{ backgroundColor: color }} />
+          )}
+          <span className="ec-event-title">{wcTitle ?? event.title}</span>
           {timeText && (
             <span className="ec-event-time">{timeText}</span>
           )}
@@ -449,7 +494,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     // timeGrid (week / day): title on top, optional region badge, time below
     return (
       <div className="ec-timegrid-event">
-        <span className="ec-event-title">{event.title}</span>
+        <span className="ec-event-title">
+          {wcMatch && <span aria-hidden="true">{wcToday ? "🔴 " : "⚽ "}</span>}
+          {wcTitle ?? event.title}
+        </span>
         {region && (
           <span className="inline-flex items-center rounded px-1 py-0 text-[9px] font-medium bg-white/20 leading-tight mt-0.5 self-start">
             {region}

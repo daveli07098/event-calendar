@@ -5,6 +5,7 @@ import Link from "next/link";
 import { X } from "lucide-react";
 import { BANNER_PRESETS, DEFAULT_BANNER_PRESET } from "@/lib/banner";
 import { useBannerConfig } from "@/lib/use-banner-config";
+import { WorldCupBannerExtras } from "@/components/banner/WorldCupBannerExtras";
 import { cn } from "@/lib/utils";
 
 /**
@@ -21,6 +22,7 @@ export function SiteBanner() {
   const preset = BANNER_PRESETS[config.preset] ?? BANNER_PRESETS[DEFAULT_BANNER_PRESET];
   const gradient = preset.gradient;
   const showImage = config.imageUrl && !imageFailed;
+  const isWorldCup = config.preset === "worldcup";
 
   return (
     <div
@@ -42,6 +44,9 @@ export function SiteBanner() {
       )}
       <div className="absolute inset-0 bg-black/45" aria-hidden="true" />
 
+      {/* World Cup only: slow-drifting pitch stripes over the scrim */}
+      {isWorldCup && <div className="ec-banner-pitch" aria-hidden="true" />}
+
       {/* Content */}
       <div className="relative flex items-center gap-4 px-4 py-3 md:px-6">
         <div className="min-w-0 flex-1">
@@ -49,6 +54,7 @@ export function SiteBanner() {
           {config.subtitle && (
             <p className="truncate text-xs text-white/85 md:text-sm">{config.subtitle}</p>
           )}
+          {isWorldCup && <WorldCupBannerExtras />}
         </div>
 
         {config.ctaLabel && config.ctaHref && (

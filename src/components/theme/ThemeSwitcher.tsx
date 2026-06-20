@@ -14,6 +14,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import type { EventTheme } from "@/lib/event-themes";
+
+/**
+ * Icon for an event theme. The World Cup theme gets a little pitch-stripe chip
+ * with a ⚽ so the option reads as a tournament skin, not just another colour;
+ * any other event theme falls back to its emoji.
+ */
+function EventThemeIcon({ ev }: { ev: EventTheme }) {
+  if (ev.id === "worldcup") {
+    return (
+      <span className="ec-pitch-swatch" aria-hidden="true">
+        <span className="ec-pitch-ball">⚽</span>
+      </span>
+    );
+  }
+  return <span className="text-base leading-none">{ev.emoji}</span>;
+}
 
 const MODES: { value: ThemeMode; label: string; icon: React.ReactNode }[] = [
   { value: "light", label: "Light", icon: <Sun className="size-4" /> },
@@ -43,7 +60,7 @@ export function ThemeSwitcher({ className }: { className?: string }) {
         {/* Always mirror the current selection so the button matches Settings:
             event theme emoji when one is active, else the accent swatch. */}
         {activeEvent ? (
-          <span className="text-base leading-none">{activeEvent.emoji}</span>
+          <EventThemeIcon ev={activeEvent} />
         ) : (
           <span
             className="size-3.5 rounded-full border border-border"
@@ -97,7 +114,7 @@ export function ThemeSwitcher({ className }: { className?: string }) {
                 onClick={() => setTheme({ eventTheme: id })}
                 className="gap-2"
               >
-                <span className="text-base leading-none">{ev.emoji}</span>
+                <EventThemeIcon ev={ev} />
                 <span className="flex-1">
                   {ev.label}
                   <span className="block text-xs text-muted-foreground">{ev.description}</span>

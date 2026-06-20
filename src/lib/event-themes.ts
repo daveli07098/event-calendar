@@ -36,9 +36,9 @@ export interface EventTheme {
 export const EVENT_THEMES: Record<string, EventTheme> = {
   worldcup: {
     id: "worldcup",
-    label: "Football",
+    label: "World Cup",
     emoji: "⚽",
-    description: "World Cup — pitch green",
+    description: "Pitch-green skin for the tournament",
     swatch: "#15a34a",
     // Vibrant grass-pitch green
     lightPrimary: "oklch(0.567 0.166 149.3)",

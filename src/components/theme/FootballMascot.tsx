@@ -4,6 +4,33 @@ import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { getEventTheme } from "@/lib/event-themes";
 import { getTeamKit } from "@/lib/team-kits";
+import { getTeamFlag } from "@/lib/team-flags";
+import { useWorldCupMatches } from "@/lib/use-worldcup-matches";
+
+// Pre-baked confetti burst (fixed offsets/colours so it never re-randomizes on
+// re-render). Each piece flies up-and-out then falls; see `confettiBurst` in CSS.
+const CONFETTI: { dx: number; color: string; delay: number }[] = [
+  { dx: -34, color: "#dc2626", delay: 0 },
+  { dx: -22, color: "#fcd116", delay: 40 },
+  { dx: -10, color: "#2563eb", delay: 90 },
+  { dx: 2, color: "#16a34a", delay: 20 },
+  { dx: 14, color: "#f97316", delay: 70 },
+  { dx: 26, color: "#a855f7", delay: 30 },
+  { dx: 38, color: "#06b6d4", delay: 110 },
+  { dx: -28, color: "#ec4899", delay: 130 },
+  { dx: 8, color: "#fcd116", delay: 150 },
+];
+
+/** True when the ISO timestamp falls on the local "today". */
+function isTodayLocal(iso: string): boolean {
+  const d = new Date(iso);
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
 
 /**
  * A little pixel-art footballer that lives along the bottom of the screen while
@@ -216,6 +243,18 @@ export function FootballMascot() {
   const kit = getTeamKit(theme.favouriteTeam);
   const palette: Record<string, string> = { ...COLORS, j: kit.jersey, p: kit.shorts, n: kit.trim };
   const teamName = theme.favouriteTeam ?? "";
+
+  // Match-day awareness: does the supported team play today? If so the mascot
+  // flies a national-flag pennant. Best-effort — no team or no fixtures → off.
+  const { matches } = useWorldCupMatches(active && !!theme.favouriteTeam);
+  const teamFlag = getTeamFlag(theme.favouriteTeam);
+  const matchDay =
+    !!theme.favouriteTeam &&
+    matches.some(
+      (m) =>
+        (m.home === theme.favouriteTeam || m.away === theme.favouriteTeam) &&
+        isTodayLocal(m.kickoff),
+    );
 
   // While rallying, rotate through chants every ~1.6s (and clear when it ends).
   useEffect(() => {
@@ -572,6 +611,35 @@ export function FootballMascot() {
         {cheer && (
           <div className="absolute -top-6 left-10 animate-bounce rounded-md bg-foreground px-2 py-0.5 text-[10px] font-bold text-background shadow">
             GOAL! ⚽
+          </div>
+        )}
+
+        {/* Confetti burst on the GOAL cheer */}
+        {cheer && (
+          <div className="pointer-events-none absolute left-1/2 top-2" aria-hidden="true">
+            {CONFETTI.map((c, i) => (
+              <span
+                key={i}
+                className="ec-confetti"
+                style={{
+                  backgroundColor: c.color,
+                  // CSS custom prop consumed by the confettiBurst keyframes
+                  ["--dx" as string]: `${c.dx}px`,
+                  animationDelay: `${c.delay}ms`,
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Match-day pennant: supported team's national flag flies above him */}
+        {matchDay && teamFlag && !cheer && (
+          <div
+            className="absolute -top-7 left-8 flex items-center gap-1 rounded-full bg-foreground px-1.5 py-0.5 text-[9px] font-bold text-background shadow"
+            style={{ animation: "mascotBob 1.6s ease-in-out infinite" }}
+          >
+            <span className="text-[11px] leading-none">{teamFlag}</span>
+            MATCH DAY
           </div>
         )}
 
