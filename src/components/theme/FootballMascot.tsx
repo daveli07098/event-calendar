@@ -632,8 +632,11 @@ export function FootballMascot() {
           </div>
         )}
 
-        {/* Match-day pennant: supported team's national flag flies above him */}
-        {matchDay && teamFlag && !cheer && (
+        {/* Match-day pennant: supported team's national flag flies above him.
+            Shown only in the calm dribble/juggle state — suppressed while
+            cheering or rallying (chant bubble, waving flag, drum and friends
+            already occupy the space above him) to avoid overlapping. */}
+        {matchDay && teamFlag && !cheer && !chant && displayMode !== "rally" && friendsPhase === "hidden" && (
           <div
             className="absolute -top-7 left-8 flex items-center gap-1 rounded-full bg-foreground px-1.5 py-0.5 text-[9px] font-bold text-background shadow"
             style={{ animation: "mascotBob 1.6s ease-in-out infinite" }}
