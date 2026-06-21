@@ -1,5 +1,6 @@
 ## [2026-06-21] — Session: World Cup theme rename & match-day UI
 ### Added
+- feat(worldcup): the tournament progress bar's in-progress segment fills by how far "today" is through that stage's fixture day-span (grows across the ~2-week group stage), with a "Day X of Y" badge + per-step caption ([7cb17f3])
 - feat(worldcup): browser-tab flair under the World Cup theme — favicon swaps to ⚽ and the tab title shows the live match or next-kickoff countdown (restored when the theme is off) ([f8b5289])
 - feat(worldcup): decorative pennant bunting strip under the banner (gently swaying triangular flags) for a stadium feel ([f8b5289])
 - feat(worldcup): pulsing "LIVE" badge + gleaming trophy on the Event Section's World Cup nav item during the tournament window ([cad6a1b])
