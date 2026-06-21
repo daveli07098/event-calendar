@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Plus, Clock, MapPin } from "lucide-react";
+import { X, Plus, Clock, MapPin, CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CalendarType, EventType } from "@/types";
@@ -129,9 +129,17 @@ export function DayDetailPanel({
       {/* Events list */}
       <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {dayEvents.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-10">
-            No events
-          </p>
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+            <CalendarDays className="size-8 text-muted-foreground/40" />
+            <div>
+              <p className="text-sm font-medium">Nothing planned</p>
+              <p className="text-xs text-muted-foreground">This day is wide open.</p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => onCreateEvent(date)} className="gap-1.5">
+              <Plus className="size-4" />
+              Create event
+            </Button>
+          </div>
         ) : (
           dayEvents.map((event) => (
             <button
