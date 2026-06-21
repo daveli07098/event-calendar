@@ -1,5 +1,6 @@
 ## [2026-06-21] — Session: World Cup theme rename & match-day UI
 ### Added
+- feat(calendar): actionable empty state in the day detail panel — icon + "Nothing planned" copy + an inline "Create event" button ([2714012])
 - feat(worldcup): the tournament progress bar's in-progress segment fills by how far "today" is through that stage's fixture day-span (grows across the ~2-week group stage), with a "Day X of Y" badge + per-step caption ([7cb17f3])
 - feat(worldcup): browser-tab flair under the World Cup theme — favicon swaps to ⚽ and the tab title shows the live match or next-kickoff countdown (restored when the theme is off) ([f8b5289])
 - feat(worldcup): decorative pennant bunting strip under the banner (gently swaying triangular flags) for a stadium feel ([f8b5289])
@@ -13,6 +14,8 @@
 ### Changed
 - refactor(theme): rename the event theme label "Football" → "World Cup" (id stays `worldcup`, so no data/storage migration); sharpened description ([bacaba4])
 - chore(a11y): all new World Cup animations (pitch drift, match pulse, confetti) respect `prefers-reduced-motion` ([bacaba4])
+### Fixed
+- fix(ux): keyboard focus ring on mini-calendar dates; full location on hover in the day panel; clearer active search-result highlight with always-visible ↑↓/↵/esc hints; event modal now shows the device's real timezone instead of a hardcoded "UTC" ([251fb81])
 
 ## [2026-06-20] — Session: World Cup best-thirds, candidate labels & mobile
 ### Added
