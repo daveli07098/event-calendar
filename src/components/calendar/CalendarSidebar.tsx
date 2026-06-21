@@ -277,7 +277,7 @@ export function CalendarSidebar({
                 onClick={() => onMiniDateClick?.(clickDate)}
                 aria-label={clickDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                 aria-current={isToday ? "date" : undefined}
-                className={`text-xs py-1 md:text-[11px] md:py-0.5 rounded-full cursor-pointer select-none ${
+                className={`text-xs py-1 md:text-[11px] md:py-0.5 rounded-full cursor-pointer select-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   isToday
                     ? "bg-primary text-primary-foreground font-bold"
                     : "hover:bg-accent"

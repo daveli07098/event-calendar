@@ -52,9 +52,6 @@ interface EventModalProps {
   readOnly?: boolean;
 }
 
-// Define userTimezone at the top of the file
-const userTimezone = "UTC"; // Replace with a server-provided or user-configurable timezone
-
 export function EventModal({
   open,
   onOpenChange,
@@ -93,6 +90,14 @@ export function EventModal({
     ticket: Record<string, unknown>;
     diffResult: { eventId: string | null; saleEventIds: Record<string, string>; saleEventId: string | null; presaleEventId: string | null };
   } | null>(null);
+
+  // The datetime-local inputs use the device's local time, so label them with
+  // the real IANA zone (read on mount to avoid an SSR/client hydration mismatch).
+  const [userTimezone, setUserTimezone] = useState("");
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of the device timezone
+    setUserTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  }, []);
 
   const hasInvalidDateRange = Boolean(startTime && endTime) && new Date(endTime).getTime() < new Date(startTime).getTime();
 
@@ -483,9 +488,9 @@ export function EventModal({
             </p>
           )}
 
-          {!allDay && (
+          {!allDay && userTimezone && (
             <p className="text-xs text-muted-foreground -mt-2">
-              Timezone: {userTimezone}
+              Times in your local timezone ({userTimezone.replace(/_/g, " ")})
             </p>
           )}
 

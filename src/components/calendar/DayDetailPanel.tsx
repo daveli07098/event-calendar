@@ -159,7 +159,10 @@ export function DayDetailPanel({
                 {event.location && (
                   <div className="flex items-center gap-1 mt-1 flex-wrap">
                     <MapPin className="size-3 text-muted-foreground shrink-0" />
-                    <span className="text-xs text-muted-foreground truncate max-w-[140px]">
+                    <span
+                      className="text-xs text-muted-foreground truncate max-w-[140px]"
+                      title={event.location}
+                    >
                       {event.location.split(",")[0]}
                     </span>
                     {locationTag(event.location) && (

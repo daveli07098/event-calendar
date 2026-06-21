@@ -98,7 +98,7 @@ export function SearchDialog({ open, onOpenChange, onSelectEvent }: SearchDialog
               onClick={() => handleSelect(r.id)}
               onMouseEnter={() => setActiveIndex(i)}
               className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                i === activeIndex ? "bg-muted" : "hover:bg-muted/60"
+                i === activeIndex ? "bg-primary/10 ring-1 ring-inset ring-primary/30" : "hover:bg-muted/60"
               }`}
             >
               <div className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: r.calendarColor }} />
@@ -113,14 +113,12 @@ export function SearchDialog({ open, onOpenChange, onSelectEvent }: SearchDialog
           ))}
         </div>
 
-        {/* Footer hint */}
-        {results.length > 0 && (
-          <div className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground">
-            <span>↑↓ navigate</span>
-            <span>↵ open</span>
-            <span>esc close</span>
-          </div>
-        )}
+        {/* Footer hint — always shown so the shortcuts are discoverable */}
+        <div className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground">
+          <span>↑↓ navigate</span>
+          <span>↵ open</span>
+          <span>esc close</span>
+        </div>
       </DialogContent>
     </Dialog>
   );
