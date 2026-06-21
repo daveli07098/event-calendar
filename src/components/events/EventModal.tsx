@@ -483,9 +483,24 @@ export function EventModal({
           </div>
 
           {hasInvalidDateRange && (
-            <p className="text-xs text-destructive -mt-2">
-              End date and time must be the same as or after the start date and time.
-            </p>
+            <div className="-mt-2 flex items-center justify-between gap-2">
+              <p className="text-xs text-destructive">
+                End must be the same as or after the start.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 shrink-0 px-2 text-xs"
+                onClick={() => {
+                  // End is before start → swapping makes the order valid.
+                  setStartTime(endTime);
+                  setEndTime(startTime);
+                }}
+              >
+                Swap
+              </Button>
+            </div>
           )}
 
           {!allDay && userTimezone && (
@@ -750,8 +765,8 @@ export function EventModal({
               </div>
             </div>
           )}
-          <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
             {event && !readOnly && (
               <Button
                 type="button"
@@ -815,7 +830,7 @@ export function EventModal({
               </Button>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-2">
             <Button
               type="button"
               variant="outline"
