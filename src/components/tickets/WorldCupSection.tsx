@@ -273,19 +273,40 @@ function TournamentProgress({ events, now }: { events: EventType[]; now: number 
 
   const doneCount = items.filter((i) => i.status === "done").length;
   const liveIdx = items.findIndex((i) => i.status === "live");
-  const frac = Math.min(1, (doneCount + (liveIdx >= 0 ? 0.5 : 0)) / items.length);
+  const live = liveIdx >= 0 ? items[liveIdx] : null;
+
+  // How far through the in-progress stage is "today"? Measured in calendar days
+  // across the stage's fixture span, so the bar grows over the (~2-week) group
+  // stage and we can label "Day X of Y".
+  const startOfDay = (ms: number) => {
+    const d = new Date(ms);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  };
+  let dayInfo: { day: number; total: number } | null = null;
+  let stageFrac = live ? 0.5 : 0;
+  if (live && live.earliest !== null && live.latest !== null) {
+    const start = startOfDay(live.earliest);
+    const end = startOfDay(live.latest);
+    const total = Math.round((end - start) / 86_400_000) + 1;
+    const day = Math.min(total, Math.max(1, Math.round((startOfDay(now) - start) / 86_400_000) + 1));
+    if (total > 1) dayInfo = { day, total };
+    stageFrac = total > 0 ? day / total : 0.5;
+  }
+  const frac = Math.min(1, (doneCount + stageFrac) / items.length);
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-3">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">Tournament progress</span>
-        {liveIdx >= 0 && (
+        {live && (
           <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-primary">
             <span className="relative flex size-1.5">
               <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
               <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
             </span>
-            {items[liveIdx].label} in progress
+            {live.label}
+            {dayInfo ? ` · Day ${dayInfo.day} of ${dayInfo.total}` : " in progress"}
           </span>
         )}
       </div>
@@ -316,6 +337,11 @@ function TournamentProgress({ events, now }: { events: EventType[]; now: number 
             >
               {it.label}
             </span>
+            {it.status === "live" && dayInfo && (
+              <span className="text-[9px] font-medium leading-none text-primary">
+                Day {dayInfo.day}/{dayInfo.total}
+              </span>
+            )}
           </div>
         ))}
       </div>
