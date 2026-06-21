@@ -15,6 +15,7 @@
 - refactor(theme): rename the event theme label "Football" → "World Cup" (id stays `worldcup`, so no data/storage migration); sharpened description ([bacaba4])
 - chore(a11y): all new World Cup animations (pitch drift, match pulse, confetti) respect `prefers-reduced-motion` ([bacaba4])
 ### Fixed
+- feat(event-modal): a "Swap" button appears beside the end-before-start error to auto-correct the date order; the modal footer stacks on mobile (secondary actions wrap, primary Cancel/Save right-align) instead of overflowing one row ([e7b6bad])
 - fix(ux): keyboard focus ring on mini-calendar dates; full location on hover in the day panel; clearer active search-result highlight with always-visible ↑↓/↵/esc hints; event modal now shows the device's real timezone instead of a hardcoded "UTC" ([251fb81])
 
 ## [2026-06-20] — Session: World Cup best-thirds, candidate labels & mobile
