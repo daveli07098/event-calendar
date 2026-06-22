@@ -79,7 +79,7 @@ export default function LoginPage() {
               />
             </div>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading || googleLoading}>
               {loading && <Loader2 className="mr-2 size-4 animate-spin" />}
               Sign in
             </Button>
@@ -91,7 +91,7 @@ export default function LoginPage() {
             <Separator className="flex-1" />
           </div>
 
-          <Button variant="outline" className="w-full" onClick={handleGoogle} disabled={googleLoading}>
+          <Button variant="outline" className="w-full" onClick={handleGoogle} disabled={googleLoading || loading}>
             {googleLoading ? (
               <Loader2 className="mr-2 size-4 animate-spin" />
             ) : (

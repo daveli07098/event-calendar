@@ -6,6 +6,10 @@
 - feat(ui): subtle, consistent entrance animation (fade + slide/zoom) across the standalone pages — login, register, Google-connect steps, join, 404 and error boundary — gated by `prefers-reduced-motion`
 - feat(join): invite page now uses lucide icons (broken-link / check / spinner) instead of ad-hoc emoji, matching the rest of the app; join button shows a spinner while loading/joining
 - feat(meta): browser-tab titles via a layout `title.template` ("<Page> · Event Calendar"); added Settings metadata and aligned the tickets title to the template
+### Fixed
+- fix(auth): `PasswordInput` now honours `disabled` — the show/hide toggle greys out and stops responding in lockstep with the field instead of staying clickable
+- fix(auth): login's "Sign in" and "Continue with Google" buttons disable each other while either is pending, preventing a double auth attempt
+- fix(google-connect): show a "No calendars found on your Google account" message instead of a blank list when the account has none
 
 ## [2026-06-21] — Session: World Cup theme rename & match-day UI
 ### Added

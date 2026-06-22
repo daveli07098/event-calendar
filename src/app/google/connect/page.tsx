@@ -146,6 +146,10 @@ export default function GoogleConnectPage() {
               </div>
             ) : syncError ? (
               <p role="alert" className="text-sm text-destructive">{syncError}</p>
+            ) : calendars.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No calendars found on your Google account.
+              </p>
             ) : (
               <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
                 {calendars.map((cal) => (
