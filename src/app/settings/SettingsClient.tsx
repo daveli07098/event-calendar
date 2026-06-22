@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport";
@@ -82,22 +83,20 @@ function ChangePasswordSection() {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <p className="text-sm font-medium">Change Password</p>
-      <Input
-        type="password"
+      <PasswordInput
         placeholder="New password (min 8 chars)"
         value={newPassword}
         onChange={(e) => setNewPassword(e.target.value)}
         autoComplete="new-password"
       />
-      <Input
-        type="password"
+      <PasswordInput
         placeholder="Confirm new password"
         value={confirm}
         onChange={(e) => setConfirm(e.target.value)}
         autoComplete="new-password"
       />
       {msg && (
-        <p className={`text-sm ${msg.type === "ok" ? "text-green-500" : "text-destructive"}`}>
+        <p role="alert" className={`text-sm ${msg.type === "ok" ? "text-green-500" : "text-destructive"}`}>
           {msg.text}
         </p>
       )}

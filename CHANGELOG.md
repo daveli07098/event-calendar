@@ -1,7 +1,8 @@
 ## [2026-06-22] — Session: cross-page UI/UX polish
 ### Added
-- feat(auth): reusable `PasswordInput` with an inline show/hide toggle (aria-labelled, never submits the form) — wired into the login and register password fields; register also shows a live "Passwords match" hint
+- feat(auth): reusable `PasswordInput` with an inline show/hide toggle (aria-labelled, keyboard-reachable, never submits the form) — wired into login, register and the Settings "Change Password" fields; register also shows a live "Passwords match" hint
 ### Changed
+- a11y(forms): inline error/status messages on login, register, Settings, Google-connect and join are now `role="alert"` so screen readers announce them
 - feat(ui): subtle, consistent entrance animation (fade + slide/zoom) across the standalone pages — login, register, Google-connect steps, join, 404 and error boundary — gated by `prefers-reduced-motion`
 - feat(join): invite page now uses lucide icons (broken-link / check / spinner) instead of ad-hoc emoji, matching the rest of the app; join button shows a spinner while loading/joining
 - feat(meta): browser-tab titles via a layout `title.template` ("<Page> · Event Calendar"); added Settings metadata and aligned the tickets title to the template

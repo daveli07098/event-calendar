@@ -148,7 +148,7 @@ export default function RegisterPage() {
               )}
             </div>
 
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
 
             <Button type="submit" className="w-full mt-1" disabled={loading}>
               {loading && <Loader2 className="mr-2 size-4 animate-spin" />}

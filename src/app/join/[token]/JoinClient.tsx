@@ -118,7 +118,7 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
         ) : (
           <>
             {joinError && (
-              <p className="text-sm text-destructive text-center">{joinError}</p>
+              <p role="alert" className="text-sm text-destructive text-center">{joinError}</p>
             )}
             <Button
               className="w-full"

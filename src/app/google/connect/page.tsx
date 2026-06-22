@@ -145,7 +145,7 @@ export default function GoogleConnectPage() {
                 <Loader2 className="size-6 animate-spin text-muted-foreground" />
               </div>
             ) : syncError ? (
-              <p className="text-sm text-destructive">{syncError}</p>
+              <p role="alert" className="text-sm text-destructive">{syncError}</p>
             ) : (
               <div className="flex flex-col gap-2 max-h-72 overflow-y-auto pr-1">
                 {calendars.map((cal) => (
