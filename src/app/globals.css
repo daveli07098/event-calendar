@@ -389,6 +389,12 @@
   .ec-bunting-flag {
     animation: none;
   }
+
+  /* tw-animate-css entrance utilities (animate-in / fade-in / slide-in / zoom-in)
+     used on auth, join, 404 and error pages — disable for reduced-motion users. */
+  .animate-in {
+    animation: none !important;
+  }
 }
 
 .fc .fc-daygrid-day-number {

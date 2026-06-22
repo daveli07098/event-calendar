@@ -22,7 +22,7 @@ export default function Error({
   }, [error]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
       <AlertTriangle className="size-12 text-destructive" aria-hidden="true" />
       <div className="space-y-1">
         <h1 className="text-2xl font-bold">Something went wrong</h1>

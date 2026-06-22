@@ -7,8 +7,9 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
-import { Calendar, Loader2 } from "lucide-react";
+import { Calendar, Loader2, Check } from "lucide-react";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -69,7 +70,7 @@ export default function RegisterPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-sm">
+      <Card className="w-full max-w-sm duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-primary">
             <Calendar className="size-6 text-primary-foreground" />
@@ -107,9 +108,8 @@ export default function RegisterPage() {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 placeholder="Min. 8 characters"
                 autoComplete="new-password"
                 value={password}
@@ -120,15 +120,32 @@ export default function RegisterPage() {
 
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="confirm">Confirm password</Label>
-              <Input
+              <PasswordInput
                 id="confirm"
-                type="password"
                 placeholder="Repeat your password"
                 autoComplete="new-password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 required
               />
+              {confirm.length > 0 && (
+                <p
+                  className={
+                    confirm === password
+                      ? "flex items-center gap-1 text-xs text-green-600 dark:text-green-400"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {confirm === password ? (
+                    <>
+                      <Check className="size-3" />
+                      Passwords match
+                    </>
+                  ) : (
+                    "Passwords don't match yet"
+                  )}
+                </p>
+              )}
             </div>
 
             {error && <p className="text-sm text-destructive">{error}</p>}

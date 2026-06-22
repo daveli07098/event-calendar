@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
 import { useSession, signIn } from "next-auth/react";
+import { Link2Off, CheckCircle2, Loader2 } from "lucide-react";
 
 interface CalendarPreview {
   id: string;
@@ -30,8 +31,10 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
   if (error || !preview) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <div className="text-center max-w-sm">
-          <div className="text-5xl mb-4">🔗</div>
+        <div className="text-center max-w-sm duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
+          <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-full bg-muted">
+            <Link2Off className="size-7 text-muted-foreground" aria-hidden="true" />
+          </div>
           <h1 className="text-xl font-semibold mb-2">Invite link not found</h1>
           <p className="text-muted-foreground text-sm mb-6">
             This link may have expired or been revoked.
@@ -75,7 +78,7 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-lg p-8 flex flex-col items-center gap-5">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-lg p-8 flex flex-col items-center gap-5 duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
         {/* Calendar color circle */}
         <div
           className="size-16 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow"
@@ -108,10 +111,9 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
         </div>
 
         {joined ? (
-          <div className="text-center">
-            <p className="text-sm font-medium text-green-600 dark:text-green-400">
-              ✓ Joined! Redirecting…
-            </p>
+          <div className="flex items-center gap-2 text-sm font-medium text-green-600 dark:text-green-400">
+            <CheckCircle2 className="size-4" aria-hidden="true" />
+            Joined! Redirecting…
           </div>
         ) : (
           <>
@@ -121,8 +123,11 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
             <Button
               className="w-full"
               onClick={handleJoin}
-              disabled={joining}
+              disabled={joining || status === "loading"}
             >
+              {(status === "loading" || joining) && (
+                <Loader2 className="mr-2 size-4 animate-spin" />
+              )}
               {status === "loading"
                 ? "Loading…"
                 : status !== "authenticated"

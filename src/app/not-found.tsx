@@ -4,7 +4,7 @@ import { CalendarX2 } from "lucide-react";
 /** Friendly 404 shown for unmatched routes. */
 export default function NotFound() {
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground">
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center text-foreground duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
       <CalendarX2 className="size-12 text-muted-foreground" aria-hidden="true" />
       <div className="space-y-1">
         <h1 className="text-2xl font-bold">Page not found</h1>

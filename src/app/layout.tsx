@@ -39,7 +39,12 @@ const lato = Lato({
 });
 
 export const metadata: Metadata = {
-  title: "Event Calendar",
+  // `template` gives every child route a consistent "<Page> · Event Calendar"
+  // browser-tab title; routes without their own title fall back to `default`.
+  title: {
+    default: "Event Calendar",
+    template: "%s · Event Calendar",
+  },
   description: "A Google Calendar-like web app with multiple calendar support",
   // Enables iOS "Add to Home Screen" to launch full-screen with our title.
   appleWebApp: {
