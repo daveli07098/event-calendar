@@ -1,3 +1,11 @@
+## [2026-06-22] — Session: cross-page UI/UX polish
+### Added
+- feat(auth): reusable `PasswordInput` with an inline show/hide toggle (aria-labelled, never submits the form) — wired into the login and register password fields; register also shows a live "Passwords match" hint
+### Changed
+- feat(ui): subtle, consistent entrance animation (fade + slide/zoom) across the standalone pages — login, register, Google-connect steps, join, 404 and error boundary — gated by `prefers-reduced-motion`
+- feat(join): invite page now uses lucide icons (broken-link / check / spinner) instead of ad-hoc emoji, matching the rest of the app; join button shows a spinner while loading/joining
+- feat(meta): browser-tab titles via a layout `title.template` ("<Page> · Event Calendar"); added Settings metadata and aligned the tickets title to the template
+
 ## [2026-06-21] — Session: World Cup theme rename & match-day UI
 ### Added
 - feat(app): friendly 404 (`not-found.tsx`) and a root error boundary (`error.tsx`, Next 16 `unstable_retry`) with try-again / back-to-calendar actions ([0296e1c])
