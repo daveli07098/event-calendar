@@ -1,0 +1,15 @@
+---
+description: Obsidian vault routing — follow the single-source agent guide
+alwaysApply: true
+---
+
+## Knowledge Vault
+
+This repo shares the Obsidian vault at `~/git/obsidian-ai-collab-vault/`. Routing rules are defined once —
+read and follow the guide, do not duplicate the table here:
+
+→ `~/git/obsidian-ai-collab-vault/_integration/agent-guide.md`
+
+- Set `project:` frontmatter to this repo name.
+- Read `~/git/obsidian-ai-collab-vault/1-share/inbox/` for human context (respect `audience:`).
+- Confirm each save: "Saved to vault: `<relative-path>`".
