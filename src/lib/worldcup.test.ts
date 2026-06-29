@@ -117,6 +117,36 @@ describe("buildBracket", () => {
     // Final is centered
     expect(bracket.find((r) => r.round === "Final")!.matches[0].side).toBe("center");
   });
+
+  it("orders R32 by the real feeder tree and splits halves by semifinal subtree", () => {
+    // Official 2026 feeder structure (matches the zh-yue bracket).
+    const r16Feeders: Record<number, [number, number]> = {
+      89: [74, 77], 90: [73, 75], 91: [76, 78], 92: [79, 80],
+      93: [83, 84], 94: [81, 82], 95: [86, 88], 96: [85, 87],
+    };
+    const qfFeeders: Record<number, [number, number]> = { 97: [89, 90], 98: [93, 94], 99: [91, 92], 100: [95, 96] };
+    const sfFeeders: Record<number, [number, number]> = { 101: [97, 98], 102: [99, 100] };
+
+    const events: EventType[] = [];
+    for (let id = 73; id <= 88; id++)
+      events.push(ev({ title: `32強 | T${id} vs U${id}`, description: `x\nWorld Cup Match ID: ${id}` }));
+    for (const [id, [a, b]] of Object.entries(r16Feeders))
+      events.push(ev({ title: `16強 | M${a}勝者 vs M${b}勝者`, description: `x\nWorld Cup Match ID: ${id}` }));
+    for (const [id, [a, b]] of Object.entries(qfFeeders))
+      events.push(ev({ title: `8強 | M${a}勝者 vs M${b}勝者`, description: `x\nWorld Cup Match ID: ${id}` }));
+    for (const [id, [a, b]] of Object.entries(sfFeeders))
+      events.push(ev({ title: `4強 | M${a}勝者 vs M${b}勝者`, description: `x\nWorld Cup Match ID: ${id}` }));
+    events.push(ev({ title: "決賽 | M101勝者 vs M102勝者", description: "x\nWorld Cup Match ID: 104" }));
+
+    const bracket = buildBracket(events);
+    const r32 = bracket.find((r) => r.round === "R32")!;
+    const left = r32.matches.filter((m) => m.side === "left").map((m) => m.matchId);
+    const right = r32.matches.filter((m) => m.side === "right").map((m) => m.matchId);
+
+    // In-order traversal of the tree, NOT match-number order.
+    expect(left).toEqual([74, 77, 73, 75, 83, 84, 81, 82]);
+    expect(right).toEqual([76, 78, 79, 80, 86, 88, 85, 87]);
+  });
 });
 
 describe("computeStandings", () => {

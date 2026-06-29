@@ -179,34 +179,89 @@ export function buildGroups(events: EventType[]): GroupView[] {
  * side is assigned by splitting the round in half — that's the "which side"
  * grouping for the Road to Trophy view. The Final and Third-place are centered.
  */
+/** FIFA match numbers a knockout slot feeds from, e.g. "M73勝者"/"M101敗者" → 73/101. */
+function feederMatchIds(m: Pick<KnockoutMatch, "home" | "away">): number[] {
+  const out: number[] = [];
+  for (const s of [m.home, m.away]) {
+    const mm = s.match(/M(\d+)\s*(?:勝者|敗者)/);
+    if (mm) out.push(parseInt(mm[1], 10));
+  }
+  return out;
+}
+
 export function buildBracket(events: EventType[]): BracketRound[] {
-  const byRound = new Map<KnockoutRound, Omit<KnockoutMatch, "side">[]>();
+  const all: Omit<KnockoutMatch, "side">[] = [];
   for (const e of events) {
     const km = parseKnockoutMatch(e);
-    if (!km) continue;
-    const list = byRound.get(km.round) ?? [];
-    list.push(km);
-    byRound.set(km.round, list);
+    if (km) all.push(km);
   }
+  if (all.length === 0) return [];
+
+  const byId = new Map<number, Omit<KnockoutMatch, "side">>();
+  for (const m of all) if (m.matchId != null) byId.set(m.matchId, m);
+
+  // Derive a vertical order (rank) and half (side) from the actual bracket TREE
+  // rooted at the Final — parsed from the "M73勝者" feeder links — so matches that
+  // meet are adjacent and the two halves are the real semifinal sub-trees (not a
+  // naive split by match number). DFS gives leaves increasing ranks; an internal
+  // node sits at the mean of its children, so each round stacks top-to-bottom
+  // consistently. Falls back to match-number order when no tree is present.
+  const rank = new Map<number, number>();
+  const side = new Map<number, "left" | "right" | "center">();
+  const finalM = all.find((m) => m.round === "Final");
+  let treeOk = false;
+  if (finalM?.matchId != null) {
+    let counter = 0;
+    const visit = (id: number): number => {
+      const m = byId.get(id);
+      const fs = m ? feederMatchIds(m) : [];
+      if (fs.length === 0) {
+        const r = counter++;
+        rank.set(id, r);
+        return r;
+      }
+      const rs = fs.map(visit);
+      const r = rs.reduce((a, b) => a + b, 0) / rs.length;
+      rank.set(id, r);
+      return r;
+    };
+    const fs = feederMatchIds(finalM);
+    if (fs.length === 2) {
+      const mark = (id: number, s: "left" | "right") => {
+        side.set(id, s);
+        const m = byId.get(id);
+        if (m) for (const f of feederMatchIds(m)) mark(f, s);
+      };
+      mark(fs[0], "left");
+      mark(fs[1], "right");
+      treeOk = true;
+    }
+    side.set(finalM.matchId, "center");
+    visit(finalM.matchId);
+  }
+  const thirdM = all.find((m) => m.round === "ThirdPlace");
+  if (thirdM?.matchId != null) side.set(thirdM.matchId, "center");
 
   const rounds: BracketRound[] = [];
   for (const info of Object.values(ROUND_BY_LABEL)) {
     // ROUND_BY_LABEL has duplicate rounds (4強/準決賽) — only build each once.
     if (rounds.some((r) => r.round === info.round)) continue;
-    const raw = byRound.get(info.round);
-    if (!raw || raw.length === 0) continue;
+    const raw = all.filter((m) => m.round === info.round);
+    if (raw.length === 0) continue;
 
-    raw.sort((x, y) => {
-      if (x.matchId != null && y.matchId != null) return x.matchId - y.matchId;
-      return x.kickoff.localeCompare(y.kickoff);
-    });
+    const orderKey = (m: Omit<KnockoutMatch, "side">) =>
+      treeOk && m.matchId != null && rank.has(m.matchId) ? rank.get(m.matchId)! : (m.matchId ?? Number.MAX_SAFE_INTEGER);
+    raw.sort((x, y) => orderKey(x) - orderKey(y) || x.kickoff.localeCompare(y.kickoff));
 
     const centered = info.round === "Final" || info.round === "ThirdPlace";
     const half = Math.ceil(raw.length / 2);
-    const matches: KnockoutMatch[] = raw.map((mt, i) => ({
-      ...mt,
-      side: centered ? "center" : i < half ? "left" : "right",
-    }));
+    const matches: KnockoutMatch[] = raw.map((mt, i) => {
+      let s: "left" | "right" | "center";
+      if (centered) s = "center";
+      else if (treeOk && mt.matchId != null && side.has(mt.matchId)) s = side.get(mt.matchId)!;
+      else s = i < half ? "left" : "right";
+      return { ...mt, side: s };
+    });
 
     rounds.push({ round: info.round, label: ROUND_LABELS_EN[info.round], order: info.order, matches });
   }
