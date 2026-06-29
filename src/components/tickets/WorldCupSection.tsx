@@ -294,7 +294,22 @@ function TournamentProgress({ events, now }: { events: EventType[]; now: number 
     if (total > 1) dayInfo = { day, total };
     stageFrac = total > 0 ? day / total : 0.5;
   }
-  const frac = Math.min(1, (doneCount + stageFrac) / items.length);
+  // Align the fill with the stepper dots, which sit at each column's centre
+  // ((i + 0.5)/n). A live stage must fill THROUGH its own dot (then advance
+  // toward the next by stageFrac) — otherwise an in-progress stage shows the bar
+  // stuck before its dot (e.g. R32 live but the fill stops short of "R32").
+  const n = items.length;
+  let frac: number;
+  if (liveIdx >= 0) {
+    frac = (liveIdx + 0.5 + stageFrac) / n;
+  } else if (doneCount >= n) {
+    frac = 1; // whole tournament finished
+  } else if (doneCount > 0) {
+    frac = (doneCount - 0.5) / n; // between stages: rest on the last completed dot
+  } else {
+    frac = 0;
+  }
+  frac = Math.max(0, Math.min(1, frac));
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-3">

@@ -7,6 +7,9 @@
 - test(worldcup): cover the verified-override merge (verified beats AI, standings recompute) and the knockout winner/score helpers
 ### Changed
 - refactor(worldcup): the scores API merges verified results over the AI snapshot in both GET and POST via `mergeVerifiedGroups`
+### Fixed
+- fix(worldcup): correct four group J/K/L scorelines that were transcribed from the wrong AI snapshot — re-fetched from Wikipedia (K 剛果民主共和國 vs 烏茲別克 0-1 → 3-1, flipping the third-place qualifier from Uzbekistan to DR Congo; J 阿爾及利亞-奧地利 2-2 → 3-3; J 約旦-阿根廷 1-2 → 1-3; L 克羅地亞-加納 1-0 → 2-1)
+- fix(worldcup): tournament-progress bar fill now aligns with the stepper dots (`(liveIdx + 0.5 + stageFrac)/n`) so an in-progress stage fills through its own dot — previously the fill stopped short of the live "R32" dot
 
 ## [2026-06-22] — Session: cross-page UI/UX polish
 ### Added

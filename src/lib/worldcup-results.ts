@@ -27,8 +27,10 @@ export interface VerifiedGroupScore {
 
 /**
  * Final group-stage scorelines per group letter (A–L), in seed home/away order.
- * Groups J/K/L transcribed from the in-app screenshot (each table re-derived and
- * confirmed internally consistent). A–I transcribed from Wikipedia.
+ * All transcribed from Wikipedia per-group articles and each table re-derived to
+ * match the official standings (the AI snapshot had several wrong scorelines —
+ * e.g. K's 剛果民主共和國 vs 烏茲別克 was 0-1, actually 3-1, which flips the
+ * third-place qualifier from Uzbekistan to DR Congo).
  */
 export const VERIFIED_GROUP_SCORES: Record<string, VerifiedGroupScore[]> = {
   // ── Group A ──
@@ -118,8 +120,8 @@ export const VERIFIED_GROUP_SCORES: Record<string, VerifiedGroupScore[]> = {
     { home: "奧地利", away: "約旦", homeScore: 3, awayScore: 1 },
     { home: "阿根廷", away: "奧地利", homeScore: 2, awayScore: 0 },
     { home: "約旦", away: "阿爾及利亞", homeScore: 1, awayScore: 2 },
-    { home: "阿爾及利亞", away: "奧地利", homeScore: 2, awayScore: 2 },
-    { home: "約旦", away: "阿根廷", homeScore: 1, awayScore: 2 },
+    { home: "阿爾及利亞", away: "奧地利", homeScore: 3, awayScore: 3 },
+    { home: "約旦", away: "阿根廷", homeScore: 1, awayScore: 3 },
   ],
   // ── Group K ──
   K: [
@@ -128,7 +130,7 @@ export const VERIFIED_GROUP_SCORES: Record<string, VerifiedGroupScore[]> = {
     { home: "葡萄牙", away: "烏茲別克", homeScore: 5, awayScore: 0 },
     { home: "哥倫比亞", away: "剛果民主共和國", homeScore: 1, awayScore: 0 },
     { home: "哥倫比亞", away: "葡萄牙", homeScore: 0, awayScore: 0 },
-    { home: "剛果民主共和國", away: "烏茲別克", homeScore: 0, awayScore: 1 },
+    { home: "剛果民主共和國", away: "烏茲別克", homeScore: 3, awayScore: 1 },
   ],
   // ── Group L ──
   L: [
@@ -137,7 +139,7 @@ export const VERIFIED_GROUP_SCORES: Record<string, VerifiedGroupScore[]> = {
     { home: "英格蘭", away: "加納", homeScore: 0, awayScore: 0 },
     { home: "巴拿馬", away: "克羅地亞", homeScore: 0, awayScore: 1 },
     { home: "巴拿馬", away: "英格蘭", homeScore: 0, awayScore: 2 },
-    { home: "克羅地亞", away: "加納", homeScore: 1, awayScore: 0 },
+    { home: "克羅地亞", away: "加納", homeScore: 2, awayScore: 1 },
   ],
   // A–I are populated from verified Wikipedia data (see source links above).
 };
