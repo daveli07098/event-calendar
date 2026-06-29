@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   mergeVerifiedGroups,
   getKnockoutScore,
+  getKnockoutTeams,
   knockoutWinner,
   VERIFIED_GROUP_SCORES,
+  VERIFIED_KNOCKOUT_TEAMS,
 } from "./worldcup-results";
 import { computeStandings, type MatchScore } from "./worldcup";
 
@@ -63,5 +65,19 @@ describe("knockout helpers", () => {
   it("getKnockoutScore is null-safe for unknown / missing match ids", () => {
     expect(getKnockoutScore(null)).toBeUndefined();
     expect(getKnockoutScore(99999)).toBeUndefined();
+  });
+});
+
+describe("verified knockout teams (official R32 map)", () => {
+  it("covers all 16 Round-of-32 matches (73–88), no gaps or dupes", () => {
+    const ids = VERIFIED_KNOCKOUT_TEAMS.map((m) => m.matchId).sort((a, b) => a - b);
+    expect(ids).toEqual(Array.from({ length: 16 }, (_, i) => 73 + i));
+  });
+
+  it("resolves a match number to its official home/away teams", () => {
+    expect(getKnockoutTeams(74)).toMatchObject({ home: "巴西", away: "日本" });
+    expect(getKnockoutTeams(80)).toMatchObject({ home: "英格蘭", away: "剛果民主共和國" });
+    expect(getKnockoutTeams(null)).toBeUndefined();
+    expect(getKnockoutTeams(101)).toBeUndefined(); // not an R32 match
   });
 });

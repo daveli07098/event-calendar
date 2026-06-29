@@ -30,7 +30,7 @@ import {
   type ResolvedSlot,
   type GroupClinch,
 } from "@/lib/worldcup";
-import { getKnockoutScore, knockoutWinner } from "@/lib/worldcup-results";
+import { getKnockoutScore, knockoutWinner, getKnockoutTeams } from "@/lib/worldcup-results";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 interface GroupScores { standings: TeamStanding[]; matches: MatchScore[] }
@@ -899,6 +899,15 @@ function BracketMatch({
   snap?: { homeScore: number | null; awayScore: number | null; status?: string | null };
 }) {
   const accent = ROUND_COLOR[match.round]?.border ?? "border-l-border";
+  // Official R32 matchup (zh-yue bracket) overrides the dynamically-resolved
+  // slots — our seed's per-match-number mapping was off. Shown as confirmed.
+  const vt = getKnockoutTeams(match.matchId);
+  const homeSlot: ResolvedSlot | undefined = vt
+    ? { label: match.home, team: vt.home, confirmed: true, group: null, position: null, title: `${vt.home} · M${match.matchId}` }
+    : resolved?.home;
+  const awaySlot: ResolvedSlot | undefined = vt
+    ? { label: match.away, team: vt.away, confirmed: true, group: null, position: null, title: `${vt.away} · M${match.matchId}` }
+    : resolved?.away;
   // Knockout result (if this match has been played). Verified (A) takes
   // precedence over the AI snapshot (B). The loser is dimmed and the winner gets
   // a trophy, mirroring the group-stage fixture styling.
@@ -917,7 +926,7 @@ function BracketMatch({
 
       <div className="absolute right-1 top-1">
         <AddMatchButton
-          title={`${match.roundLabel}: ${resolved?.home?.team ?? match.home} vs ${resolved?.away?.team ?? match.away}`}
+          title={`${match.roundLabel}: ${homeSlot?.team ?? match.home} vs ${awaySlot?.team ?? match.away}`}
           startIso={match.kickoff}
           calendars={calendars}
         />
@@ -927,7 +936,7 @@ function BracketMatch({
       <div className="divide-y divide-white/15">
         <div className={cn("flex items-center gap-1 px-2.5 py-2 pr-8", played && winner === "away" && "opacity-45")}>
           <span className="min-w-0 flex-1">
-            <SlotName fallback={match.home} slot={resolved?.home} />
+            <SlotName fallback={match.home} slot={homeSlot} />
           </span>
           {winner === "home" && <Trophy className="size-3 shrink-0 text-amber-400" />}
           {played && (
@@ -939,7 +948,7 @@ function BracketMatch({
         <div className={cn("flex items-center gap-1 px-2.5 py-2 pr-8", played && winner === "home" && "opacity-45")}>
           <Goal className="size-2.5 shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">
-            <SlotName fallback={match.away} slot={resolved?.away} />
+            <SlotName fallback={match.away} slot={awaySlot} />
           </span>
           {winner === "away" && <Trophy className="size-3 shrink-0 text-amber-400" />}
           {played && (

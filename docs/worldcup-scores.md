@@ -13,6 +13,11 @@ come from two layers:
   (seed home/away orientation).
 - `VERIFIED_KNOCKOUT_SCORES` — knockout scores keyed by FIFA match number
   (`matchId`), with optional `winner` for penalty shootouts.
+- `VERIFIED_KNOCKOUT_TEAMS` — the official Round-of-32 matchups (from the zh-yue
+  bracket) keyed by match number. The seed's per-match slot mapping (built from
+  the EN article) numbered the pairings differently, so this overrides the
+  resolved R32 teams in the bracket display and in AI score lookups
+  (`getKnockoutTeams`). The R16→Final feeder tree was already correct.
 
 `mergeVerifiedGroups()` / `mergeVerifiedKnockout()` overlay these over whatever
 the AI produced — **verified always wins** — both at read time (GET) and on

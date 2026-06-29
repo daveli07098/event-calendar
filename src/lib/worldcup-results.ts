@@ -144,6 +144,40 @@ export const VERIFIED_GROUP_SCORES: Record<string, VerifiedGroupScore[]> = {
   // A–I are populated from verified Wikipedia data (see source links above).
 };
 
+/**
+ * Official Round-of-32 matchups, keyed by FIFA match number, per the Cantonese
+ * Wikipedia bracket (zh-yue). The seed's per-match slot mapping (and the EN
+ * article it was built from) used a different match numbering, which put the
+ * wrong pairing under each number — so this overrides the dynamically-resolved
+ * R32 teams for DISPLAY and for AI score lookups. `home` is the first/upper slot.
+ * The R16→Final tree (winner-of-match-N feeders) was already correct.
+ *
+ * Source: https://zh-yue.wikipedia.org/wiki/2026年FIFA世界盃淘汰賽
+ */
+export interface VerifiedKnockoutTeams {
+  matchId: number;
+  home: string;
+  away: string;
+}
+export const VERIFIED_KNOCKOUT_TEAMS: VerifiedKnockoutTeams[] = [
+  { matchId: 73, home: "南非", away: "加拿大" },
+  { matchId: 74, home: "巴西", away: "日本" },
+  { matchId: 75, home: "德國", away: "巴拉圭" },
+  { matchId: 76, home: "荷蘭", away: "摩洛哥" },
+  { matchId: 77, home: "科特迪瓦", away: "挪威" },
+  { matchId: 78, home: "法國", away: "瑞典" },
+  { matchId: 79, home: "墨西哥", away: "厄瓜多" },
+  { matchId: 80, home: "英格蘭", away: "剛果民主共和國" },
+  { matchId: 81, home: "比利時", away: "塞內加爾" },
+  { matchId: 82, home: "美國", away: "波赫" },
+  { matchId: 83, home: "西班牙", away: "奧地利" },
+  { matchId: 84, home: "葡萄牙", away: "克羅地亞" },
+  { matchId: 85, home: "瑞士", away: "阿爾及利亞" },
+  { matchId: 86, home: "澳洲", away: "埃及" },
+  { matchId: 87, home: "阿根廷", away: "佛得角" },
+  { matchId: 88, home: "哥倫比亞", away: "加納" },
+];
+
 export interface VerifiedKnockoutScore {
   matchId: number;
   homeScore: number;
@@ -169,6 +203,15 @@ for (const [group, list] of Object.entries(VERIFIED_GROUP_SCORES)) {
 const knockoutScoreMap = new Map<number, VerifiedKnockoutScore>(
   VERIFIED_KNOCKOUT_SCORES.map((k) => [k.matchId, k]),
 );
+const knockoutTeamsMap = new Map<number, VerifiedKnockoutTeams>(
+  VERIFIED_KNOCKOUT_TEAMS.map((k) => [k.matchId, k]),
+);
+
+/** Official resolved teams for a knockout match number, if known. */
+export function getKnockoutTeams(matchId: number | null | undefined): VerifiedKnockoutTeams | undefined {
+  if (matchId == null) return undefined;
+  return knockoutTeamsMap.get(matchId);
+}
 
 /** Verified knockout scoreline for a FIFA match number, if known. */
 export function getKnockoutScore(matchId: number | null | undefined): VerifiedKnockoutScore | undefined {

@@ -20,7 +20,7 @@ import {
   type MatchScore,
   type TeamStanding,
 } from "@/lib/worldcup";
-import { mergeVerifiedGroups, mergeVerifiedKnockout, getKnockoutScore } from "@/lib/worldcup-results";
+import { mergeVerifiedGroups, mergeVerifiedKnockout, getKnockoutScore, getKnockoutTeams } from "@/lib/worldcup-results";
 import type { EventType } from "@/types";
 
 export const SCORES_ID = "global"; // singleton row — scores are global facts
@@ -176,6 +176,14 @@ function resolveKnockoutFixtures(
   const out: FlatKnockout[] = [];
   for (const m of r32) {
     if (m.matchId == null) continue;
+    // The official R32 matchup (zh-yue) overrides the dynamically-resolved teams
+    // — the seed's per-match-number slot map was off, so resolveKnockout alone
+    // would ask the AI about the wrong pairing.
+    const vt = getKnockoutTeams(m.matchId);
+    if (vt) {
+      out.push({ matchId: m.matchId, home: vt.home, away: vt.away, kickoff: m.kickoff });
+      continue;
+    }
     const r = resolved[m.eventId];
     if (r?.home?.team && r?.away?.team && r.home.confirmed && r.away.confirmed) {
       out.push({ matchId: m.matchId, home: r.home.team, away: r.away.team, kickoff: m.kickoff });
