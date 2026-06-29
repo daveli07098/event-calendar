@@ -176,13 +176,41 @@ export function getKnockoutScore(matchId: number | null | undefined): VerifiedKn
   return knockoutScoreMap.get(matchId);
 }
 
-/** Winner of a knockout match ("home"/"away") from its verified score, or null. */
-export function knockoutWinner(s: VerifiedKnockoutScore | undefined): "home" | "away" | null {
+/** Winner of a knockout match ("home"/"away") from its score, or null. Accepts
+ *  either a verified entry or an AI-snapshot entry (winner field optional). */
+export function knockoutWinner(
+  s: { homeScore: number | null; awayScore: number | null; winner?: "home" | "away" } | undefined | null,
+): "home" | "away" | null {
   if (!s) return null;
   if (s.winner) return s.winner; // penalty decision
+  if (s.homeScore == null || s.awayScore == null) return null;
   if (s.homeScore > s.awayScore) return "home";
   if (s.awayScore > s.homeScore) return "away";
   return null;
+}
+
+/** Minimal shape of a knockout score row that can be verified-overridden. */
+export interface KnockoutScoreLike {
+  matchId: number;
+  homeScore: number | null;
+  awayScore: number | null;
+  status?: string | null;
+}
+
+/**
+ * Override AI/cache knockout scorelines with verified ones, keyed by FIFA match
+ * number. Verified always wins; rows we have no verified score for are left as-is.
+ * Mutates and returns the same array.
+ */
+export function mergeVerifiedKnockout<T extends KnockoutScoreLike>(list: T[]): T[] {
+  for (const m of list) {
+    const v = knockoutScoreMap.get(m.matchId);
+    if (!v) continue;
+    m.homeScore = v.homeScore;
+    m.awayScore = v.awayScore;
+    m.status = v.status ?? "FT";
+  }
+  return list;
 }
 
 interface GroupSnapshot { standings: TeamStanding[]; matches: MatchScore[] }

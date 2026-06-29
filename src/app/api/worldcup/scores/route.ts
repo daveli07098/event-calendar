@@ -9,8 +9,16 @@ import {
   remainingAiCalls,
   getResetAt,
 } from "@/lib/ai/quota";
-import { buildGroups, computeStandings, type MatchScore, type TeamStanding } from "@/lib/worldcup";
-import { mergeVerifiedGroups } from "@/lib/worldcup-results";
+import {
+  buildGroups,
+  buildBracket,
+  computeStandings,
+  resolveKnockout,
+  clinchedPositions,
+  type MatchScore,
+  type TeamStanding,
+} from "@/lib/worldcup";
+import { mergeVerifiedGroups, mergeVerifiedKnockout, getKnockoutScore } from "@/lib/worldcup-results";
 import type { EventType } from "@/types";
 
 const SCORES_ID = "global"; // singleton row — scores are global facts
@@ -20,8 +28,18 @@ interface GroupScores {
   standings: TeamStanding[];
   matches: MatchScore[];
 }
+/** A knockout scoreline keyed by FIFA match number (real resolved team names). */
+interface KnockoutMatchScore {
+  matchId: number;
+  home: string;
+  away: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  status: string | null;
+}
 interface ScoresSnapshot {
   groups: Record<string, GroupScores>;
+  knockout?: KnockoutMatchScore[];
   asOf: string; // ISO timestamp of the refresh
 }
 
@@ -38,6 +56,7 @@ export async function GET() {
     // corrected scorelines show immediately without waiting for a refresh.
     const data = row.data as unknown as ScoresSnapshot | null;
     if (data?.groups) mergeVerifiedGroups(data.groups);
+    if (data?.knockout) mergeVerifiedKnockout(data.knockout);
     return NextResponse.json({ data, fetchedAt: row.fetchedAt, provider: row.provider });
   } catch {
     // Table not migrated yet — degrade gracefully, the UI still renders structure.
@@ -134,6 +153,65 @@ function toInt(v: unknown): number | null {
   return null;
 }
 
+/** Cached knockout scorelines from the last snapshot, keyed by FIFA match number. */
+async function loadCachedKnockout(): Promise<Map<number, CachedScore>> {
+  const map = new Map<number, CachedScore>();
+  try {
+    const row = await prisma.worldCupScores.findUnique({ where: { id: SCORES_ID } });
+    const ko = (row?.data as ScoresSnapshot | undefined)?.knockout;
+    if (!ko) return map;
+    for (const m of ko) {
+      map.set(m.matchId, { homeScore: m.homeScore ?? null, awayScore: m.awayScore ?? null, status: m.status ?? null });
+    }
+  } catch {
+    // Table not migrated / malformed JSON — treat as no cache.
+  }
+  return map;
+}
+
+interface FlatKnockout { matchId: number; home: string; away: string; kickoff: string }
+
+/**
+ * Resolve Round-of-32 fixtures to REAL team names from the (cached + verified)
+ * group standings, so the AI can be asked for their scores by team name. Only
+ * confirmed slots with both real teams are returned. Deeper rounds (M-prefixed
+ * "winner of match N") aren't resolvable until earlier results propagate, so
+ * they're scored only via the verified file (A).
+ */
+function resolveKnockoutFixtures(
+  groups: ReturnType<typeof buildGroups>,
+  events: EventType[],
+  prior: Map<string, CachedScore>,
+): FlatKnockout[] {
+  const perGroupSnap: Record<string, { standings: TeamStanding[]; matches: MatchScore[] }> = {};
+  for (const g of groups) {
+    const matches: MatchScore[] = g.matches.map((m) => {
+      const c = prior.get(`${g.group}|${m.home}|${m.away}`);
+      return { home: m.home, away: m.away, homeScore: c?.homeScore ?? null, awayScore: c?.awayScore ?? null };
+    });
+    perGroupSnap[g.group] = { matches, standings: computeStandings(g.teams, matches) };
+  }
+  mergeVerifiedGroups(perGroupSnap); // verified group results → correct standings
+  const perGroup: Record<string, TeamStanding[]> = {};
+  for (const [k, v] of Object.entries(perGroupSnap)) perGroup[k] = v.standings;
+  const clinch: Record<string, { first: string | null; second: string | null }> = {};
+  for (const g of groups) {
+    const c = clinchedPositions(g.teams, g.matches.map((m) => ({ home: m.home, away: m.away })), perGroupSnap[g.group].matches);
+    clinch[g.group] = { first: c.first, second: c.second };
+  }
+  const r32 = buildBracket(events).find((r) => r.round === "R32")?.matches ?? [];
+  const resolved = resolveKnockout(r32, perGroup, clinch);
+  const out: FlatKnockout[] = [];
+  for (const m of r32) {
+    if (m.matchId == null) continue;
+    const r = resolved[m.eventId];
+    if (r?.home?.team && r?.away?.team && r.home.confirmed && r.away.confirmed) {
+      out.push({ matchId: m.matchId, home: r.home.team, away: r.away.team, kickoff: m.kickoff });
+    }
+  }
+  return out;
+}
+
 // ── POST: refresh scores via grounded Gemini, compute standings, cache them ──
 export async function POST() {
   const session = await auth();
@@ -177,10 +255,28 @@ export async function POST() {
     return !locked;
   });
 
+  // ── Knockout (B): resolve R32 to real teams and fetch their scores too ──
+  const flatKO = resolveKnockoutFixtures(groups, events, prior);
+  const priorKO = await loadCachedKnockout();
+  const neededKO = flatKO.filter((k) => {
+    const day = k.kickoff.slice(0, 10);
+    if (day > today) return false;
+    if (getKnockoutScore(k.matchId)) return false; // verified (A) wins — skip AI
+    const cached = priorKO.get(k.matchId);
+    const locked = cached && cached.homeScore != null && cached.awayScore != null && day < today;
+    return !locked;
+  });
+  // KO fixtures are numbered 1000+matchId so they never collide with group
+  // fixture numbers and map straight back to a matchId.
+  const sendList: FlatFixture[] = [
+    ...needed,
+    ...neededKO.map((k) => ({ n: 1000 + k.matchId, group: `KO M${k.matchId}`, home: k.home, away: k.away, kickoff: k.kickoff })),
+  ];
+
   const byNum = new Map<number, { homeScore: number | null; awayScore: number | null; status: string | null }>();
   let provider = "";
 
-  if (needed.length === 0) {
+  if (sendList.length === 0) {
     // Nothing new to fetch (pre-tournament, or every kicked-off match already
     // cached). Rebuild from cache without spending AI quota.
     provider = (await prisma.worldCupScores.findUnique({ where: { id: SCORES_ID } }).then((r) => r?.provider).catch(() => null)) || "cache";
@@ -193,10 +289,10 @@ export async function POST() {
         { status: 429 },
       );
     }
-    const prompt = buildPrompt(needed);
+    const prompt = buildPrompt(sendList);
     // Size the output budget to the (now small) fixture count instead of a flat
     // 8192 — fewer matches → less to write back → cheaper, faster call.
-    const maxOut = Math.min(8192, Math.max(1024, needed.length * 48));
+    const maxOut = Math.min(8192, Math.max(1024, sendList.length * 48));
 
     // Try each grounding-capable model. A model that answers but returns an empty
     // results array is a soft miss — fall through to the next, keeping the empty
@@ -249,7 +345,7 @@ export async function POST() {
 
     const scoredCount = [...byNum.values()].filter((v) => v.homeScore != null && v.awayScore != null).length;
     console.log(
-      `[worldcup/scores] provider=${provider} sent=${needed.length}/${flat.length} results=${byNum.size} scored=${scoredCount} (${prior.size} reused from cache)`,
+      `[worldcup/scores] provider=${provider} sent=${sendList.length} (groups=${needed.length}/${flat.length}, ko=${neededKO.length}/${flatKO.length}) results=${byNum.size} scored=${scoredCount} (${prior.size} cached groups, ${priorKO.size} cached ko)`,
     );
   }
 
@@ -277,6 +373,23 @@ export async function POST() {
 
   // Verified results always win over the AI scorelines we just fetched.
   mergeVerifiedGroups(snapshot.groups);
+
+  // Knockout snapshot: fresh AI (by matchId) → prior cache → null; verified wins.
+  const koSnapshot: KnockoutMatchScore[] = flatKO.map((k) => {
+    const ai = byNum.get(1000 + k.matchId);
+    const cached = priorKO.get(k.matchId);
+    const src = ai ?? cached ?? null;
+    return {
+      matchId: k.matchId,
+      home: k.home,
+      away: k.away,
+      homeScore: src?.homeScore ?? null,
+      awayScore: src?.awayScore ?? null,
+      status: src?.status ?? null,
+    };
+  });
+  mergeVerifiedKnockout(koSnapshot);
+  snapshot.knockout = koSnapshot;
 
   // Persist (best-effort — feature still works if the table isn't migrated yet).
   try {

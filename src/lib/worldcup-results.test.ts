@@ -49,12 +49,14 @@ describe("mergeVerifiedGroups", () => {
 
 describe("knockout helpers", () => {
   it("returns the winning side from a verified knockout score", () => {
-    expect(knockoutWinner({ matchId: 1, homeScore: 2, awayScore: 1 })).toBe("home");
-    expect(knockoutWinner({ matchId: 1, homeScore: 0, awayScore: 3 })).toBe("away");
+    expect(knockoutWinner({ homeScore: 2, awayScore: 1 })).toBe("home");
+    expect(knockoutWinner({ homeScore: 0, awayScore: 3 })).toBe("away");
     // Level after AET → decided by the explicit penalty winner.
-    expect(knockoutWinner({ matchId: 1, homeScore: 1, awayScore: 1, winner: "away" })).toBe("away");
+    expect(knockoutWinner({ homeScore: 1, awayScore: 1, winner: "away" })).toBe("away");
     // Level with no penalty winner → no winner.
-    expect(knockoutWinner({ matchId: 1, homeScore: 1, awayScore: 1 })).toBeNull();
+    expect(knockoutWinner({ homeScore: 1, awayScore: 1 })).toBeNull();
+    // null scores (not played) → no winner.
+    expect(knockoutWinner({ homeScore: null, awayScore: null })).toBeNull();
     expect(knockoutWinner(undefined)).toBeNull();
   });
 

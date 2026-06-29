@@ -34,7 +34,8 @@ import { getKnockoutScore, knockoutWinner } from "@/lib/worldcup-results";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 interface GroupScores { standings: TeamStanding[]; matches: MatchScore[] }
-interface ScoresSnapshot { groups: Record<string, GroupScores>; asOf: string }
+interface KnockoutMatchScore { matchId: number; home: string; away: string; homeScore: number | null; awayScore: number | null; status: string | null }
+interface ScoresSnapshot { groups: Record<string, GroupScores>; knockout?: KnockoutMatchScore[]; asOf: string }
 
 // Tournament window — wide enough to cover the whole 2026 schedule.
 const TOURNAMENT_START = "2026-06-01T00:00:00.000Z";
@@ -619,7 +620,13 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
           {bracket.length === 0 ? (
             <p className="text-sm text-muted-foreground">No knockout fixtures found yet.</p>
           ) : (
-            <Bracket bracket={bracket} calendars={calendars} tz={tz} resolved={resolved} />
+            <Bracket
+              bracket={bracket}
+              calendars={calendars}
+              tz={tz}
+              resolved={resolved}
+              koScores={Object.fromEntries((snapshot?.knockout ?? []).map((k) => [k.matchId, k]))}
+            />
           )}
         </TabsContent>
       </Tabs>
@@ -882,17 +889,20 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
 }
 
 function BracketMatch({
-  match, calendars, tz, resolved,
+  match, calendars, tz, resolved, snap,
 }: {
   match: KnockoutMatch;
   calendars: CalendarType[];
   tz: string;
   resolved?: { home: ResolvedSlot; away: ResolvedSlot };
+  /** AI-refreshed knockout score from the snapshot (B); verified (A) wins over it. */
+  snap?: { homeScore: number | null; awayScore: number | null; status?: string | null };
 }) {
   const accent = ROUND_COLOR[match.round]?.border ?? "border-l-border";
-  // Verified knockout result (if this match has been played). The loser is dimmed
-  // and the winner gets a trophy, mirroring the group-stage fixture styling.
-  const score = getKnockoutScore(match.matchId);
+  // Knockout result (if this match has been played). Verified (A) takes
+  // precedence over the AI snapshot (B). The loser is dimmed and the winner gets
+  // a trophy, mirroring the group-stage fixture styling.
+  const score = getKnockoutScore(match.matchId) ?? snap;
   const played = !!score && score.homeScore != null && score.awayScore != null;
   const winner = knockoutWinner(score);
   return (
@@ -951,12 +961,13 @@ function BracketMatch({
 /** Two-sided knockout bracket: left half flows inward, right half mirrors it,
  *  meeting at the centre Final — like a printed tournament bracket. */
 function Bracket({
-  bracket, calendars, tz, resolved,
+  bracket, calendars, tz, resolved, koScores,
 }: {
   bracket: ReturnType<typeof buildBracket>;
   calendars: CalendarType[];
   tz: string;
   resolved: Record<string, { home: ResolvedSlot; away: ResolvedSlot }>;
+  koScores: Record<number, { homeScore: number | null; awayScore: number | null; status: string | null }>;
 }) {
   const rounds = bracket.filter((r) => r.round !== "Final" && r.round !== "ThirdPlace");
   const final = bracket.find((r) => r.round === "Final");
@@ -1029,7 +1040,7 @@ function Bracket({
         {ROUND_LABELS_EN[round]}
       </p>
       <div className="flex flex-1 flex-col justify-around gap-6">
-        {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />)}
+        {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} />)}
       </div>
     </div>
   );
@@ -1073,13 +1084,13 @@ function Bracket({
               <p className="text-center text-sm font-semibold">🏆 Final</p>
               {final?.matches.map((m) => (
                 <div key={m.eventId} className="w-full rounded-lg border-2 border-primary/60 bg-primary/5 p-1">
-                  <BracketMatch match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />
+                  <BracketMatch match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} />
                 </div>
               ))}
               {third && third.matches.length > 0 && (
                 <div className="w-full space-y-1">
                   <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground/70">Third place</p>
-                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} />)}
+                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} />)}
                 </div>
               )}
             </div>
