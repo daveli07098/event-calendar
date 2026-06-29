@@ -3,6 +3,7 @@
 - feat(worldcup): verified results source-of-truth (`src/lib/worldcup-results.ts`) — transcribed group A–L scorelines that ALWAYS override AI-grounded scores, both on refresh (POST) and at read time (GET). Fixes wrong AI scores; corrected standings flow through `resolveKnockout`, so the Round-of-32 schedule now auto-resolves to the real qualified teams (e.g. Germany vs Paraguay, Portugal vs Croatia)
 - feat(worldcup): knockout bracket now shows scores and dims the losing side (winner gets the trophy + bold score, loser fades) — `getKnockoutScore`/`knockoutWinner` keyed by FIFA match number, with penalty-winner support; empty until matches are played (no fabricated scores)
 - chore(worldcup): reusable `.claude/workflows/worldcup-2026-results.js` — a multi-agent fetch→adversarial-verify→synthesize workflow that pulls group + knockout results from Wikipedia (re-run on later matchdays to refresh)
+- chore(worldcup): `scripts/apply-worldcup-knockout-teams.ts` — rewrites knockout calendar-event titles from placeholder slots to the real qualified teams (derived from verified standings + `resolveKnockout`); idempotent, dry-run by default (`--apply` to write, `--email` to target a user)
 - test(worldcup): cover the verified-override merge (verified beats AI, standings recompute) and the knockout winner/score helpers
 ### Changed
 - refactor(worldcup): the scores API merges verified results over the AI snapshot in both GET and POST via `mergeVerifiedGroups`
