@@ -1,3 +1,12 @@
+## [2026-06-29] — Session: verified World Cup results & knockout scoring
+### Added
+- feat(worldcup): verified results source-of-truth (`src/lib/worldcup-results.ts`) — transcribed group A–L scorelines that ALWAYS override AI-grounded scores, both on refresh (POST) and at read time (GET). Fixes wrong AI scores; corrected standings flow through `resolveKnockout`, so the Round-of-32 schedule now auto-resolves to the real qualified teams (e.g. Germany vs Paraguay, Portugal vs Croatia)
+- feat(worldcup): knockout bracket now shows scores and dims the losing side (winner gets the trophy + bold score, loser fades) — `getKnockoutScore`/`knockoutWinner` keyed by FIFA match number, with penalty-winner support; empty until matches are played (no fabricated scores)
+- chore(worldcup): reusable `.claude/workflows/worldcup-2026-results.js` — a multi-agent fetch→adversarial-verify→synthesize workflow that pulls group + knockout results from Wikipedia (re-run on later matchdays to refresh)
+- test(worldcup): cover the verified-override merge (verified beats AI, standings recompute) and the knockout winner/score helpers
+### Changed
+- refactor(worldcup): the scores API merges verified results over the AI snapshot in both GET and POST via `mergeVerifiedGroups`
+
 ## [2026-06-22] — Session: cross-page UI/UX polish
 ### Added
 - feat(auth): reusable `PasswordInput` with an inline show/hide toggle (aria-labelled, keyboard-reachable, never submits the form) — wired into login, register and the Settings "Change Password" fields; register also shows a live "Passwords match" hint

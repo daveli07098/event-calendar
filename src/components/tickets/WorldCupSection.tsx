@@ -30,6 +30,7 @@ import {
   type ResolvedSlot,
   type GroupClinch,
 } from "@/lib/worldcup";
+import { getKnockoutScore, knockoutWinner } from "@/lib/worldcup-results";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 interface GroupScores { standings: TeamStanding[]; matches: MatchScore[] }
@@ -874,6 +875,11 @@ function BracketMatch({
   resolved?: { home: ResolvedSlot; away: ResolvedSlot };
 }) {
   const accent = ROUND_COLOR[match.round]?.border ?? "border-l-border";
+  // Verified knockout result (if this match has been played). The loser is dimmed
+  // and the winner gets a trophy, mirroring the group-stage fixture styling.
+  const score = getKnockoutScore(match.matchId);
+  const played = !!score && score.homeScore != null && score.awayScore != null;
+  const winner = knockoutWinner(score);
   return (
     <div className={cn("relative rounded-md border border-border border-l-2 bg-card text-xs", accent)}>
       {/* White connector stub pointing toward the centre (Final) */}
@@ -894,17 +900,34 @@ function BracketMatch({
 
       {/* Two team slots, clearly separated by a white divider */}
       <div className="divide-y divide-white/15">
-        <div className="px-2.5 py-2 pr-8">
-          <SlotName fallback={match.home} slot={resolved?.home} />
+        <div className={cn("flex items-center gap-1 px-2.5 py-2 pr-8", played && winner === "away" && "opacity-45")}>
+          <span className="min-w-0 flex-1">
+            <SlotName fallback={match.home} slot={resolved?.home} />
+          </span>
+          {winner === "home" && <Trophy className="size-3 shrink-0 text-amber-400" />}
+          {played && (
+            <span className={cn("shrink-0 tabular-nums", winner === "home" ? "font-bold text-foreground" : "text-muted-foreground")}>
+              {score!.homeScore}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-1 px-2.5 py-2 pr-8">
+        <div className={cn("flex items-center gap-1 px-2.5 py-2 pr-8", played && winner === "home" && "opacity-45")}>
           <Goal className="size-2.5 shrink-0 text-muted-foreground" />
-          <SlotName fallback={match.away} slot={resolved?.away} />
+          <span className="min-w-0 flex-1">
+            <SlotName fallback={match.away} slot={resolved?.away} />
+          </span>
+          {winner === "away" && <Trophy className="size-3 shrink-0 text-amber-400" />}
+          {played && (
+            <span className={cn("shrink-0 tabular-nums", winner === "away" ? "font-bold text-foreground" : "text-muted-foreground")}>
+              {score!.awayScore}
+            </span>
+          )}
         </div>
       </div>
       <p className="border-t border-white/10 px-2.5 py-1 text-[9px] text-muted-foreground/60">
         {fmtKickoff(match.kickoff, tz)}
         {match.matchId != null && ` · M${match.matchId}`}
+        {played && score!.status && score!.status !== "FT" && ` · ${score!.status}`}
       </p>
     </div>
   );

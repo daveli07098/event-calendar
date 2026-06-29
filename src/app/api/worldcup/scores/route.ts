@@ -10,6 +10,7 @@ import {
   getResetAt,
 } from "@/lib/ai/quota";
 import { buildGroups, computeStandings, type MatchScore, type TeamStanding } from "@/lib/worldcup";
+import { mergeVerifiedGroups } from "@/lib/worldcup-results";
 import type { EventType } from "@/types";
 
 const SCORES_ID = "global"; // singleton row — scores are global facts
@@ -33,7 +34,11 @@ export async function GET() {
   try {
     const row = await prisma.worldCupScores.findUnique({ where: { id: SCORES_ID } });
     if (!row) return NextResponse.json({ data: null, fetchedAt: null, provider: null });
-    return NextResponse.json({ data: row.data, fetchedAt: row.fetchedAt, provider: row.provider });
+    // Overlay verified results on top of the cached AI snapshot at read time, so
+    // corrected scorelines show immediately without waiting for a refresh.
+    const data = row.data as unknown as ScoresSnapshot | null;
+    if (data?.groups) mergeVerifiedGroups(data.groups);
+    return NextResponse.json({ data, fetchedAt: row.fetchedAt, provider: row.provider });
   } catch {
     // Table not migrated yet — degrade gracefully, the UI still renders structure.
     return NextResponse.json({ data: null, fetchedAt: null, provider: null });
@@ -269,6 +274,9 @@ export async function POST() {
       standings: computeStandings(g.teams, scores),
     };
   }
+
+  // Verified results always win over the AI scorelines we just fetched.
+  mergeVerifiedGroups(snapshot.groups);
 
   // Persist (best-effort — feature still works if the table isn't migrated yet).
   try {
