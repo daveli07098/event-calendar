@@ -6,7 +6,7 @@
 - feat(worldcup): daily background score refresh (layer A) — `GET /api/worldcup/cron` runs the shared refresh engine server-side and writes the snapshot straight to the DB (live, no redeploy), scheduled 07:00 UTC = 15:00 HKT via `vercel.json`. Guarded by `CRON_SECRET`; target account via `WORLDCUP_CRON_USER_EMAIL`. Verified results still override the AI scores. Docs: `docs/worldcup-scores.md`
 - refactor(worldcup): extract the refresh pipeline into `src/lib/worldcup-refresh.ts` (`refreshWorldCupScores(uid)`) so the manual POST and the cron share one code path
 - chore(worldcup): reusable `.claude/workflows/worldcup-2026-results.js` — a multi-agent fetch→adversarial-verify→synthesize workflow that pulls group + knockout results from Wikipedia (re-run on later matchdays to refresh)
-- chore(worldcup): `scripts/apply-worldcup-knockout-teams.ts` — rewrites knockout calendar-event titles from placeholder slots to the real qualified teams (derived from verified standings + `resolveKnockout`); idempotent, dry-run by default (`--apply` to write, `--email` to target a user)
+- chore(worldcup): `scripts/apply-worldcup-knockout-teams.ts` — rewrites R32 knockout calendar-event titles from placeholder slots to the real teams from `VERIFIED_KNOCKOUT_TEAMS` (so the calendar/search match the bracket); idempotent, dry-run by default (`--apply` to write, `--email` to target a user). Later rounds keep their "M73勝者" placeholders
 - test(worldcup): cover the verified-override merge (verified beats AI, standings recompute) and the knockout winner/score helpers
 ### Changed
 - refactor(worldcup): the scores API merges verified results over the AI snapshot in both GET and POST via `mergeVerifiedGroups`

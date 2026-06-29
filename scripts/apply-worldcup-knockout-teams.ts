@@ -1,14 +1,13 @@
 /**
- * Rewrite knockout-stage event titles/descriptions from placeholder slots
- * ("32強 | A組亞軍 vs B組亞軍") to the REAL qualified teams, derived from the
- * verified group standings — so the calendar month/list views match the
- * "Road to Trophy" bracket (which already resolves teams on the fly).
+ * Rewrite knockout-stage calendar event titles/descriptions from placeholder
+ * slots ("32強 | A組亞軍 vs B組亞軍") to the REAL qualified teams, so the calendar
+ * month/list/search views match the "Road to Trophy" bracket.
  *
- * Source of truth: src/lib/worldcup-results.ts (verified group scorelines) +
- * resolveKnockout() in src/lib/worldcup.ts. Only Round-of-32 slots that are
- * mathematically CONFIRMED are rewritten; later rounds ("M73勝者") and any
- * still-provisional slot are left untouched. Idempotent — re-running changes
- * nothing once applied.
+ * Source of truth: VERIFIED_KNOCKOUT_TEAMS in src/lib/worldcup-results.ts — the
+ * official Round-of-32 matchups (zh-yue bracket) keyed by FIFA match number.
+ * Only R32 matches (73–88) are rewritten; later rounds keep their "M73勝者"
+ * placeholders until winners are known (no winner-propagation yet). Idempotent —
+ * re-running changes nothing once applied.
  *
  * SAFE BY DEFAULT: dry run (prints planned changes) unless you pass --apply.
  *
@@ -19,17 +18,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as dotenv from "dotenv";
-import {
-  buildGroups,
-  buildBracket,
-  computeStandings,
-  resolveKnockout,
-  clinchedPositions,
-  type MatchScore,
-  type TeamStanding,
-} from "../src/lib/worldcup";
-import { mergeVerifiedGroups } from "../src/lib/worldcup-results";
-import type { EventType } from "../src/types";
+import { getKnockoutTeams } from "../src/lib/worldcup-results";
 
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env" });
@@ -67,77 +56,34 @@ async function main() {
   const cals = await prisma.calendar.findMany({ where: { userId: user.id }, select: { id: true } });
   const calIds = cals.map((c) => c.id);
   const rows = await prisma.event.findMany({
-    where: { calendarId: { in: calIds }, description: { contains: "FIFA 世界盃" } },
+    where: { calendarId: { in: calIds }, description: { contains: "World Cup Match ID:" } },
     orderBy: { startTime: "asc" },
   });
-  // Adapt DB rows to the EventType shape the parsers read.
-  const events: EventType[] = rows.map((r) => ({
-    id: r.id,
-    calendarId: r.calendarId,
-    title: r.title,
-    description: r.description,
-    location: r.location,
-    startTime: r.startTime.toISOString(),
-    endTime: r.endTime.toISOString(),
-    allDay: r.allDay,
-    recurrenceRule: r.recurrenceRule,
-    googleEventId: r.googleEventId,
-    category: r.category as EventType["category"],
-    createdAt: r.createdAt.toISOString(),
-    updatedAt: r.updatedAt.toISOString(),
-  }));
-  console.log(`Loaded ${events.length} World Cup events`);
-
-  // Build group standings with verified scores layered on top.
-  const groups = buildGroups(events);
-  const perGroupSnap: Record<string, { standings: TeamStanding[]; matches: MatchScore[] }> = {};
-  for (const g of groups) {
-    const matches: MatchScore[] = g.matches.map((m) => ({
-      home: m.home, away: m.away, homeScore: null, awayScore: null,
-    }));
-    perGroupSnap[g.group] = { matches, standings: computeStandings(g.teams, matches) };
-  }
-  mergeVerifiedGroups(perGroupSnap);
-  const perGroup: Record<string, TeamStanding[]> = {};
-  for (const [g, v] of Object.entries(perGroupSnap)) perGroup[g] = v.standings;
-
-  // Early-clinch per group (lets confirmed winners/runners-up resolve).
-  const clinch: Record<string, { first: string | null; second: string | null }> = {};
-  for (const g of groups) {
-    const fixtures = g.matches.map((m) => ({ home: m.home, away: m.away }));
-    const c = clinchedPositions(g.teams, fixtures, perGroupSnap[g.group].matches);
-    clinch[g.group] = { first: c.first, second: c.second };
-  }
-
-  const r32 = buildBracket(events).find((r) => r.round === "R32")?.matches ?? [];
-  const resolved = resolveKnockout(r32, perGroup, clinch);
+  console.log(`Loaded ${rows.length} knockout events`);
 
   let planned = 0, skipped = 0, unchanged = 0;
-  for (const match of r32) {
-    const slots = resolved[match.eventId];
-    const home = slots?.home, away = slots?.away;
-    // Only rewrite when BOTH sides are resolved AND confirmed (locked).
-    if (!home?.team || !away?.team || !home.confirmed || !away.confirmed) {
-      skipped++;
-      console.log(`  · skip M${match.matchId} (${match.home} vs ${match.away}) — not confirmed yet`);
+  for (const ev of rows) {
+    const matchId = Number(ev.description?.match(/World Cup Match ID:\s*(\d+)/)?.[1]);
+    const teams = Number.isFinite(matchId) ? getKnockoutTeams(matchId) : undefined;
+    if (!teams) {
+      skipped++; // later-round placeholder (M73勝者…) or no verified matchup
       continue;
     }
-    const ev = events.find((e) => e.id === match.eventId)!;
-    const newTitle = buildUpdatedTitle(ev.title, home.team, away.team);
-    const newDesc = buildUpdatedDescription(ev.description ?? "", home.team, away.team);
+    const newTitle = buildUpdatedTitle(ev.title, teams.home, teams.away);
+    const newDesc = buildUpdatedDescription(ev.description ?? "", teams.home, teams.away);
     if (newTitle === ev.title && newDesc === (ev.description ?? "")) {
       unchanged++;
       continue;
     }
     planned++;
-    console.log(`  ✎ M${match.matchId}: "${ev.title}"  →  "${newTitle}"`);
+    console.log(`  ✎ M${matchId}: "${ev.title}"  →  "${newTitle}"`);
     if (APPLY) {
       await prisma.event.update({ where: { id: ev.id }, data: { title: newTitle, description: newDesc } });
     }
   }
 
   console.log(
-    `\n${APPLY ? "Applied" : "Would apply"} ${planned} rewrite(s); ${unchanged} already correct; ${skipped} not yet confirmed.`,
+    `\n${APPLY ? "Applied" : "Would apply"} ${planned} rewrite(s); ${unchanged} already correct; ${skipped} later-round placeholders left as-is.`,
   );
   if (!APPLY && planned > 0) console.log("Re-run with --apply to write these changes.");
 }
