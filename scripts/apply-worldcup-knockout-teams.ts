@@ -1,13 +1,13 @@
 /**
- * Rewrite knockout-stage calendar event titles/descriptions from placeholder
- * slots ("32強 | A組亞軍 vs B組亞軍") to the REAL qualified teams, so the calendar
- * month/list/search views match the "Road to Trophy" bracket.
+ * Fix the knockout-stage calendar events to match the official bracket:
+ *   • rename placeholder titles ("32強 | A組亞軍 vs B組亞軍") to the REAL teams
+ *   • correct the kickoff TIME and VENUE (the seed's were tied to the old
+ *     match-number mapping, so they no longer matched the real matchup)
  *
- * Source of truth: VERIFIED_KNOCKOUT_TEAMS in src/lib/worldcup-results.ts — the
- * official Round-of-32 matchups (zh-yue bracket) keyed by FIFA match number.
- * Only R32 matches (73–88) are rewritten; later rounds keep their "M73勝者"
- * placeholders until winners are known (no winner-propagation yet). Idempotent —
- * re-running changes nothing once applied.
+ * Sources of truth in src/lib/worldcup-results.ts: VERIFIED_KNOCKOUT_TEAMS (zh-yue
+ * R32 matchups) + VERIFIED_KNOCKOUT_SCHEDULE (UTC kickoff + venue). Only R32
+ * matches (73–88) are covered; later rounds keep their "M73勝者" placeholders
+ * until winners are known. Idempotent — re-running changes nothing once applied.
  *
  * SAFE BY DEFAULT: dry run (prints planned changes) unless you pass --apply.
  *
@@ -18,7 +18,9 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as dotenv from "dotenv";
-import { getKnockoutTeams } from "../src/lib/worldcup-results";
+import { getKnockoutTeams, VERIFIED_KNOCKOUT_SCHEDULE } from "../src/lib/worldcup-results";
+
+const TWO_HOURS = 2 * 60 * 60 * 1000;
 
 dotenv.config({ path: ".env.local" });
 dotenv.config({ path: ".env" });
@@ -64,26 +66,43 @@ async function main() {
   let planned = 0, skipped = 0, unchanged = 0;
   for (const ev of rows) {
     const matchId = Number(ev.description?.match(/World Cup Match ID:\s*(\d+)/)?.[1]);
-    const teams = Number.isFinite(matchId) ? getKnockoutTeams(matchId) : undefined;
-    if (!teams) {
-      skipped++; // later-round placeholder (M73勝者…) or no verified matchup
+    if (!Number.isFinite(matchId)) { skipped++; continue; }
+    const teams = getKnockoutTeams(matchId);
+    const sched = VERIFIED_KNOCKOUT_SCHEDULE[matchId];
+    if (!teams && !sched) {
+      skipped++; // later-round placeholder (M73勝者…) with no verified matchup/schedule
       continue;
     }
-    const newTitle = buildUpdatedTitle(ev.title, teams.home, teams.away);
-    const newDesc = buildUpdatedDescription(ev.description ?? "", teams.home, teams.away);
-    if (newTitle === ev.title && newDesc === (ev.description ?? "")) {
-      unchanged++;
-      continue;
+
+    const data: { title?: string; description?: string; startTime?: Date; endTime?: Date; location?: string } = {};
+    const changes: string[] = [];
+
+    if (teams) {
+      const newTitle = buildUpdatedTitle(ev.title, teams.home, teams.away);
+      const newDesc = buildUpdatedDescription(ev.description ?? "", teams.home, teams.away);
+      if (newTitle !== ev.title) { data.title = newTitle; changes.push(`name "${ev.title}" → "${newTitle}"`); }
+      if (newDesc !== (ev.description ?? "")) data.description = newDesc;
     }
+    if (sched) {
+      const start = new Date(sched.utcStart);
+      if (ev.startTime.getTime() !== start.getTime()) {
+        data.startTime = start;
+        data.endTime = new Date(start.getTime() + TWO_HOURS);
+        changes.push(`time → ${sched.utcStart}`);
+      }
+      if ((ev.location ?? "") !== sched.venue) { data.location = sched.venue; changes.push(`venue → ${sched.venue}`); }
+    }
+
+    if (Object.keys(data).length === 0) { unchanged++; continue; }
     planned++;
-    console.log(`  ✎ M${matchId}: "${ev.title}"  →  "${newTitle}"`);
+    console.log(`  ✎ M${matchId}: ${changes.join("; ")}`);
     if (APPLY) {
-      await prisma.event.update({ where: { id: ev.id }, data: { title: newTitle, description: newDesc } });
+      await prisma.event.update({ where: { id: ev.id }, data });
     }
   }
 
   console.log(
-    `\n${APPLY ? "Applied" : "Would apply"} ${planned} rewrite(s); ${unchanged} already correct; ${skipped} later-round placeholders left as-is.`,
+    `\n${APPLY ? "Applied" : "Would apply"} ${planned} update(s); ${unchanged} already correct; ${skipped} later-round placeholders left as-is.`,
   );
   if (!APPLY && planned > 0) console.log("Re-run with --apply to write these changes.");
 }

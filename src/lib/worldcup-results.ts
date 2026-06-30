@@ -178,6 +178,38 @@ export const VERIFIED_KNOCKOUT_TEAMS: VerifiedKnockoutTeams[] = [
   { matchId: 88, home: "哥倫比亞", away: "加納" },
 ];
 
+/**
+ * Verified Round-of-32 kickoff (UTC) + venue, keyed by FIFA match number. The
+ * seed's times/venues were attached to the OLD match-number mapping, so they no
+ * longer match the real matchup under each number — these correct them (applied
+ * to the calendar events by scripts/apply-worldcup-knockout-teams.ts).
+ *
+ * Source: SI "Every Round of 32 Match" schedule (kickoffs in ET = EDT/UTC-4 in
+ * late June/early July 2026; converted to UTC here).
+ */
+export interface VerifiedKnockoutSchedule {
+  utcStart: string;
+  venue: string;
+}
+export const VERIFIED_KNOCKOUT_SCHEDULE: Record<number, VerifiedKnockoutSchedule> = {
+  73: { utcStart: "2026-06-28T19:00:00Z", venue: "SoFi Stadium, 英格爾伍德" },        // 南非 vs 加拿大 · 3pm ET
+  74: { utcStart: "2026-06-29T17:00:00Z", venue: "NRG Stadium, 休斯頓" },             // 巴西 vs 日本 · 1pm ET
+  75: { utcStart: "2026-06-29T20:30:00Z", venue: "Gillette Stadium, 福克斯伯勒" },    // 德國 vs 巴拉圭 · 4:30pm ET
+  76: { utcStart: "2026-06-30T01:00:00Z", venue: "Estadio BBVA, 蒙特雷" },            // 荷蘭 vs 摩洛哥 · 9pm ET (29th)
+  77: { utcStart: "2026-06-30T17:00:00Z", venue: "AT&T Stadium, 阿靈頓" },            // 科特迪瓦 vs 挪威 · 1pm ET
+  78: { utcStart: "2026-06-30T21:00:00Z", venue: "MetLife Stadium, 東盧瑟福" },       // 法國 vs 瑞典 · 5pm ET
+  79: { utcStart: "2026-07-01T01:00:00Z", venue: "Estadio Azteca, 墨西哥城" },        // 墨西哥 vs 厄瓜多 · 9pm ET (30th)
+  80: { utcStart: "2026-07-01T16:00:00Z", venue: "Mercedes-Benz Stadium, 亞特蘭大" }, // 英格蘭 vs 剛果民主共和國 · 12pm ET
+  81: { utcStart: "2026-07-01T20:00:00Z", venue: "Lumen Field, 西雅圖" },             // 比利時 vs 塞內加爾 · 4pm ET
+  82: { utcStart: "2026-07-02T00:00:00Z", venue: "Levi's Stadium, 聖克拉拉" },        // 美國 vs 波赫 · 8pm ET (1st)
+  83: { utcStart: "2026-07-02T19:00:00Z", venue: "SoFi Stadium, 英格爾伍德" },        // 西班牙 vs 奧地利 · 3pm ET
+  84: { utcStart: "2026-07-02T23:00:00Z", venue: "BMO Field, 多倫多" },              // 葡萄牙 vs 克羅地亞 · 7pm ET
+  85: { utcStart: "2026-07-03T03:00:00Z", venue: "BC Place, 溫哥華" },               // 瑞士 vs 阿爾及利亞 · 11pm ET (2nd)
+  86: { utcStart: "2026-07-03T18:00:00Z", venue: "AT&T Stadium, 阿靈頓" },            // 澳洲 vs 埃及 · 2pm ET
+  87: { utcStart: "2026-07-03T22:00:00Z", venue: "Hard Rock Stadium, 邁阿密花園" },   // 阿根廷 vs 佛得角 · 6pm ET
+  88: { utcStart: "2026-07-04T01:30:00Z", venue: "Arrowhead Stadium, 堪薩斯城" },     // 哥倫比亞 vs 加納 · 9:30pm ET (3rd)
+};
+
 export interface VerifiedKnockoutScore {
   matchId: number;
   homeScore: number;
@@ -244,6 +276,7 @@ export interface KnockoutScoreLike {
   homeScore: number | null;
   awayScore: number | null;
   status?: string | null;
+  winner?: "home" | "away";
 }
 
 /**
@@ -258,6 +291,7 @@ export function mergeVerifiedKnockout<T extends KnockoutScoreLike>(list: T[]): T
     m.homeScore = v.homeScore;
     m.awayScore = v.awayScore;
     m.status = v.status ?? "FT";
+    m.winner = v.winner; // penalty winner (or undefined)
   }
   return list;
 }
