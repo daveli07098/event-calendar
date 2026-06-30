@@ -9,9 +9,11 @@ import {
   computeStandings,
   rankThirds,
   resolveKnockout,
+  propagateKnockout,
   clinchedPositions,
   type TeamStanding,
   type KnockoutMatch,
+  type BracketRound,
 } from "@/lib/worldcup";
 
 // Minimal EventType factory — only the fields the parser reads matter.
@@ -146,6 +148,35 @@ describe("buildBracket", () => {
     // In-order traversal of the tree, NOT match-number order.
     expect(left).toEqual([74, 77, 73, 75, 83, 84, 81, 82]);
     expect(right).toEqual([76, 78, 79, 80, 86, 88, 85, 87]);
+  });
+});
+
+describe("propagateKnockout", () => {
+  const km = (matchId: number, home: string, away: string, round: KnockoutMatch["round"]): KnockoutMatch =>
+    ({ eventId: `e${matchId}`, round, roundLabel: "", matchId, home, away, kickoff: "2026-07-01T00:00:00Z", side: "left" });
+  const rounds: BracketRound[] = [
+    { round: "R32", label: "", order: 1, matches: [km(73, "A組亞軍", "B組亞軍", "R32"), km(75, "F組冠軍", "C組亞軍", "R32")] },
+    { round: "R16", label: "", order: 2, matches: [km(90, "M73勝者", "M75勝者", "R16")] },
+  ];
+  const base = (id: number) =>
+    id === 73 ? { home: "南非", away: "加拿大" } : id === 75 ? { home: "德國", away: "巴拉圭" } : undefined;
+
+  it("propagates winners up the tree to fill later-round slots", () => {
+    const r = propagateKnockout(rounds, base, (id) =>
+      id === 73 ? { homeScore: 0, awayScore: 1 } : id === 75 ? { homeScore: 2, awayScore: 1 } : undefined);
+    expect(r.get(73)).toEqual({ home: "南非", away: "加拿大" });
+    expect(r.get(90)).toEqual({ home: "加拿大", away: "德國" }); // M73 winner vs M75 winner
+  });
+
+  it("leaves a slot null until its feeder is decided", () => {
+    const r = propagateKnockout(rounds, base, (id) => (id === 73 ? { homeScore: 0, awayScore: 1 } : undefined));
+    expect(r.get(90)).toEqual({ home: "加拿大", away: null }); // M75 not played yet
+  });
+
+  it("uses an explicit penalty winner when the score is level", () => {
+    const r = propagateKnockout(rounds, base, (id) =>
+      id === 73 ? { homeScore: 1, awayScore: 1, winner: "home" } : undefined);
+    expect(r.get(90)?.home).toBe("南非");
   });
 });
 

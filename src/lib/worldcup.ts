@@ -269,6 +269,61 @@ export function buildBracket(events: EventType[]): BracketRound[] {
   return rounds.sort((a, b) => a.order - b.order);
 }
 
+export interface KnockoutResolvedTeams {
+  home: string | null;
+  away: string | null;
+}
+
+/**
+ * Propagate knockout results up the bracket tree. Given the resolved Round-of-32
+ * matchups (`baseTeams`, by FIFA match number) and the known scorelines
+ * (`scoreOf`), fill in every later-round slot ("M73勝者"/"M101敗者") with the team
+ * that actually advanced. Rounds are processed in order (R32 → Final) so each
+ * match's feeders are resolved before it. A slot stays null until its feeder is
+ * decided. `scoreOf` may carry an explicit `winner` for penalty shootouts; if
+ * absent the winner is taken from the scoreline (drawn → unresolved).
+ */
+export function propagateKnockout(
+  rounds: BracketRound[],
+  baseTeams: (matchId: number) => { home: string; away: string } | undefined,
+  scoreOf: (matchId: number) => { homeScore: number | null; awayScore: number | null; winner?: "home" | "away" } | undefined,
+): Map<number, KnockoutResolvedTeams> {
+  const resolved = new Map<number, KnockoutResolvedTeams>();
+  const winnerTeam = new Map<number, string>();
+  const loserTeam = new Map<number, string>();
+
+  const slot = (label: string): string | null => {
+    const w = label.match(/M(\d+)\s*勝者/);
+    if (w) return winnerTeam.get(parseInt(w[1], 10)) ?? null;
+    const l = label.match(/M(\d+)\s*敗者/);
+    if (l) return loserTeam.get(parseInt(l[1], 10)) ?? null;
+    return null;
+  };
+
+  const ordered = [...rounds].sort((a, b) => a.order - b.order).flatMap((r) => r.matches);
+  for (const m of ordered) {
+    if (m.matchId == null) continue;
+    const base = baseTeams(m.matchId);
+    const home = base ? base.home : slot(m.home);
+    const away = base ? base.away : slot(m.away);
+    resolved.set(m.matchId, { home, away });
+
+    const sc = scoreOf(m.matchId);
+    if (home && away && sc) {
+      let side: "home" | "away" | null = sc.winner ?? null;
+      if (!side && sc.homeScore != null && sc.awayScore != null) {
+        if (sc.homeScore > sc.awayScore) side = "home";
+        else if (sc.awayScore > sc.homeScore) side = "away";
+      }
+      if (side) {
+        winnerTeam.set(m.matchId, side === "home" ? home : away);
+        loserTeam.set(m.matchId, side === "home" ? away : home);
+      }
+    }
+  }
+  return resolved;
+}
+
 /**
  * Compute a group table from the fixtures and any known results. Win = 3 pts,
  * draw = 1. Only matches with both scores present count toward played/points.

@@ -15,8 +15,7 @@ import {
   buildGroups,
   buildBracket,
   computeStandings,
-  resolveKnockout,
-  clinchedPositions,
+  propagateKnockout,
   type MatchScore,
   type TeamStanding,
 } from "@/lib/worldcup";
@@ -145,48 +144,26 @@ function toInt(v: unknown): number | null {
 interface FlatKnockout { matchId: number; home: string; away: string; kickoff: string }
 
 /**
- * Resolve Round-of-32 fixtures to REAL team names from the (cached + verified)
- * group standings, so the AI can be asked for their scores by team name. Only
- * confirmed slots with both real teams are returned. Deeper rounds (M-prefixed)
- * aren't resolvable until earlier results propagate — they score via verified only.
+ * Resolve knockout fixtures to REAL team names so the AI can be asked for their
+ * scores by team name. Round-of-32 teams come from the official `VERIFIED_
+ * KNOCKOUT_TEAMS` map; later rounds are filled by propagating the winners of
+ * already-scored matches (from the prior snapshot) up the bracket tree. So each
+ * refresh advances the graph one round further as results land. Only matches
+ * with BOTH teams resolved are returned.
  */
-function resolveKnockoutFixtures(
-  groups: ReturnType<typeof buildGroups>,
-  events: EventType[],
-  prior: Map<string, CachedScore>,
-): FlatKnockout[] {
-  const perGroupSnap: Record<string, { standings: TeamStanding[]; matches: MatchScore[] }> = {};
-  for (const g of groups) {
-    const matches: MatchScore[] = g.matches.map((m) => {
-      const c = prior.get(`${g.group}|${m.home}|${m.away}`);
-      return { home: m.home, away: m.away, homeScore: c?.homeScore ?? null, awayScore: c?.awayScore ?? null };
-    });
-    perGroupSnap[g.group] = { matches, standings: computeStandings(g.teams, matches) };
-  }
-  mergeVerifiedGroups(perGroupSnap); // verified group results → correct standings
-  const perGroup: Record<string, TeamStanding[]> = {};
-  for (const [k, v] of Object.entries(perGroupSnap)) perGroup[k] = v.standings;
-  const clinch: Record<string, { first: string | null; second: string | null }> = {};
-  for (const g of groups) {
-    const c = clinchedPositions(g.teams, g.matches.map((m) => ({ home: m.home, away: m.away })), perGroupSnap[g.group].matches);
-    clinch[g.group] = { first: c.first, second: c.second };
-  }
-  const r32 = buildBracket(events).find((r) => r.round === "R32")?.matches ?? [];
-  const resolved = resolveKnockout(r32, perGroup, clinch);
+function resolveKnockoutFixtures(events: EventType[], priorKO: Map<number, CachedScore>): FlatKnockout[] {
+  const rounds = buildBracket(events);
+  const resolved = propagateKnockout(
+    rounds,
+    (id) => getKnockoutTeams(id),
+    (id) => getKnockoutScore(id) ?? priorKO.get(id),
+  );
   const out: FlatKnockout[] = [];
-  for (const m of r32) {
-    if (m.matchId == null) continue;
-    // The official R32 matchup (zh-yue) overrides the dynamically-resolved teams
-    // — the seed's per-match-number slot map was off, so resolveKnockout alone
-    // would ask the AI about the wrong pairing.
-    const vt = getKnockoutTeams(m.matchId);
-    if (vt) {
-      out.push({ matchId: m.matchId, home: vt.home, away: vt.away, kickoff: m.kickoff });
-      continue;
-    }
-    const r = resolved[m.eventId];
-    if (r?.home?.team && r?.away?.team && r.home.confirmed && r.away.confirmed) {
-      out.push({ matchId: m.matchId, home: r.home.team, away: r.away.team, kickoff: m.kickoff });
+  for (const r of rounds) {
+    for (const m of r.matches) {
+      if (m.matchId == null) continue;
+      const t = resolved.get(m.matchId);
+      if (t?.home && t?.away) out.push({ matchId: m.matchId, home: t.home, away: t.away, kickoff: m.kickoff });
     }
   }
   return out;
@@ -226,9 +203,9 @@ export async function refreshWorldCupScores(uid: string): Promise<RefreshOutcome
     return !locked;
   });
 
-  // ── Knockout (B): resolve R32 to real teams and fetch their scores too ──
-  const flatKO = resolveKnockoutFixtures(groups, events, prior);
+  // ── Knockout (B): resolve fixtures (R32 + propagated winners) and fetch scores ──
   const priorKO = await loadCachedKnockout();
+  const flatKO = resolveKnockoutFixtures(events, priorKO);
   const neededKO = flatKO.filter((k) => {
     const day = k.kickoff.slice(0, 10);
     if (day > today) return false;

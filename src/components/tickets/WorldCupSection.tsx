@@ -20,6 +20,7 @@ import {
   buildBracket,
   computeStandings,
   resolveKnockout,
+  propagateKnockout,
   rankThirds,
   clinchedPositions,
   groupOdds,
@@ -508,6 +509,19 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     return out;
   }, [bracket, snapshot, groups, clinchByGroup]);
 
+  // AI/verified knockout scores keyed by match number (drives the bracket scores).
+  const koScoreMap = useMemo(
+    () => Object.fromEntries((snapshot?.knockout ?? []).map((k) => [k.matchId, k] as const)),
+    [snapshot],
+  );
+
+  // Resolve every knockout match's teams: R32 from the official map, later rounds
+  // by propagating the winners of scored matches up the tree (verified wins).
+  const koTeams = useMemo(
+    () => propagateKnockout(bracket, (id) => getKnockoutTeams(id), (id) => getKnockoutScore(id) ?? koScoreMap[id]),
+    [bracket, koScoreMap],
+  );
+
   async function refreshScores() {
     setRefreshing(true);
     setRefreshError(null);
@@ -625,7 +639,8 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
               calendars={calendars}
               tz={tz}
               resolved={resolved}
-              koScores={Object.fromEntries((snapshot?.knockout ?? []).map((k) => [k.matchId, k]))}
+              koScores={koScoreMap}
+              koTeams={koTeams}
             />
           )}
         </TabsContent>
@@ -889,7 +904,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
 }
 
 function BracketMatch({
-  match, calendars, tz, resolved, snap,
+  match, calendars, tz, resolved, snap, teams,
 }: {
   match: KnockoutMatch;
   calendars: CalendarType[];
@@ -897,16 +912,18 @@ function BracketMatch({
   resolved?: { home: ResolvedSlot; away: ResolvedSlot };
   /** AI-refreshed knockout score from the snapshot (B); verified (A) wins over it. */
   snap?: { homeScore: number | null; awayScore: number | null; status?: string | null };
+  /** Resolved teams: R32 from the official map, later rounds propagated from winners. */
+  teams?: { home: string | null; away: string | null };
 }) {
   const accent = ROUND_COLOR[match.round]?.border ?? "border-l-border";
-  // Official R32 matchup (zh-yue bracket) overrides the dynamically-resolved
-  // slots — our seed's per-match-number mapping was off. Shown as confirmed.
-  const vt = getKnockoutTeams(match.matchId);
-  const homeSlot: ResolvedSlot | undefined = vt
-    ? { label: match.home, team: vt.home, confirmed: true, group: null, position: null, title: `${vt.home} · M${match.matchId}` }
+  // Resolved knockout teams override the dynamically-resolved slots: R32 from the
+  // official zh-yue map, later rounds filled by propagating winners up the tree.
+  // A side stays as its group/placeholder slot until its feeder is decided.
+  const homeSlot: ResolvedSlot | undefined = teams?.home
+    ? { label: match.home, team: teams.home, confirmed: true, group: null, position: null, title: `${teams.home} · M${match.matchId}` }
     : resolved?.home;
-  const awaySlot: ResolvedSlot | undefined = vt
-    ? { label: match.away, team: vt.away, confirmed: true, group: null, position: null, title: `${vt.away} · M${match.matchId}` }
+  const awaySlot: ResolvedSlot | undefined = teams?.away
+    ? { label: match.away, team: teams.away, confirmed: true, group: null, position: null, title: `${teams.away} · M${match.matchId}` }
     : resolved?.away;
   // Knockout result (if this match has been played). Verified (A) takes
   // precedence over the AI snapshot (B). The loser is dimmed and the winner gets
@@ -970,13 +987,14 @@ function BracketMatch({
 /** Two-sided knockout bracket: left half flows inward, right half mirrors it,
  *  meeting at the centre Final — like a printed tournament bracket. */
 function Bracket({
-  bracket, calendars, tz, resolved, koScores,
+  bracket, calendars, tz, resolved, koScores, koTeams,
 }: {
   bracket: ReturnType<typeof buildBracket>;
   calendars: CalendarType[];
   tz: string;
   resolved: Record<string, { home: ResolvedSlot; away: ResolvedSlot }>;
   koScores: Record<number, { homeScore: number | null; awayScore: number | null; status: string | null }>;
+  koTeams: Map<number, { home: string | null; away: string | null }>;
 }) {
   const rounds = bracket.filter((r) => r.round !== "Final" && r.round !== "ThirdPlace");
   const final = bracket.find((r) => r.round === "Final");
@@ -1049,7 +1067,7 @@ function Bracket({
         {ROUND_LABELS_EN[round]}
       </p>
       <div className="flex flex-1 flex-col justify-around gap-6">
-        {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} />)}
+        {matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} teams={m.matchId != null ? koTeams.get(m.matchId) : undefined} />)}
       </div>
     </div>
   );
@@ -1093,13 +1111,13 @@ function Bracket({
               <p className="text-center text-sm font-semibold">🏆 Final</p>
               {final?.matches.map((m) => (
                 <div key={m.eventId} className="w-full rounded-lg border-2 border-primary/60 bg-primary/5 p-1">
-                  <BracketMatch match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} />
+                  <BracketMatch match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} teams={m.matchId != null ? koTeams.get(m.matchId) : undefined} />
                 </div>
               ))}
               {third && third.matches.length > 0 && (
                 <div className="w-full space-y-1">
                   <p className="text-center text-[10px] uppercase tracking-wide text-muted-foreground/70">Third place</p>
-                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} />)}
+                  {third.matches.map((m) => <BracketMatch key={m.eventId} match={m} calendars={calendars} tz={tz} resolved={resolved[m.eventId]} snap={m.matchId != null ? koScores[m.matchId] : undefined} teams={m.matchId != null ? koTeams.get(m.matchId) : undefined} />)}
                 </div>
               )}
             </div>
