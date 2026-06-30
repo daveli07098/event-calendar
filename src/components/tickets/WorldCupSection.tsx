@@ -377,7 +377,9 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
   const [snapshot, setSnapshot] = useState<ScoresSnapshot | null>(null);
   const [provider, setProvider] = useState<string | null>(null);
   const [fetchedAt, setFetchedAt] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+  // Which stage is currently refreshing (null = idle). Group and knockout have
+  // separate buttons but share one in-flight lock to avoid concurrent writes.
+  const [refreshing, setRefreshing] = useState<null | "group" | "knockout" | "all">(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [now, setNow] = useState(0); // clock read on mount (avoids impure Date.now() in render)
 
@@ -522,11 +524,12 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     [bracket, koScoreMap],
   );
 
-  async function refreshScores() {
-    setRefreshing(true);
+  async function refreshScores(scope: "group" | "knockout" | "all" = "all") {
+    setRefreshing(scope);
     setRefreshError(null);
     try {
-      const res = await fetch("/api/worldcup/scores", { method: "POST" });
+      const qs = scope === "all" ? "" : `?scope=${scope}`;
+      const res = await fetch(`/api/worldcup/scores${qs}`, { method: "POST" });
       const json = await res.json();
       if (!res.ok) {
         setRefreshError(json.error ?? `HTTP ${res.status}`);
@@ -539,7 +542,7 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
     } catch {
       setRefreshError("Network error");
     } finally {
-      setRefreshing(false);
+      setRefreshing(null);
     }
   }
 
@@ -587,9 +590,9 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
         {/* ── Group stage ── */}
         <TabsContent value="groups" className="space-y-4 pt-4">
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={refreshScores} disabled={refreshing} size="sm" className="gap-1.5">
-              {refreshing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-              {refreshing ? "Checking scores…" : "Refresh scores (AI)"}
+            <Button onClick={() => refreshScores("group")} disabled={refreshing !== null} size="sm" className="gap-1.5">
+              {refreshing === "group" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              {refreshing === "group" ? "Checking scores…" : "Refresh group scores (AI)"}
             </Button>
             <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
               <Clock className="size-3" /> Updated {fmtAgo(fetchedAt, tz)}
@@ -630,7 +633,21 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
         </TabsContent>
 
         {/* ── Knockout bracket — converges on the centre Final ── */}
-        <TabsContent value="bracket" className="pt-4">
+        <TabsContent value="bracket" className="space-y-4 pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={() => refreshScores("knockout")} disabled={refreshing !== null} size="sm" className="gap-1.5">
+              {refreshing === "knockout" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+              {refreshing === "knockout" ? "Checking results…" : "Refresh knockout scores (AI)"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Fetches played knockout results, advances winners, and updates fixture names.
+            </span>
+          </div>
+          {refreshError && (
+            <p className="text-sm text-destructive inline-flex items-center gap-1.5">
+              <AlertCircle className="size-4" /> {refreshError}
+            </p>
+          )}
           {bracket.length === 0 ? (
             <p className="text-sm text-muted-foreground">No knockout fixtures found yet.</p>
           ) : (

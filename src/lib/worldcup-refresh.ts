@@ -141,6 +141,19 @@ function toInt(v: unknown): number | null {
   return null;
 }
 
+// Rewrite a knockout event title/description from placeholder slots to real team
+// names, keeping the round prefix ("32強 | …"). Same format the seed/sync use.
+function rewriteTitle(currentTitle: string, home: string, away: string): string {
+  const pipeIdx = currentTitle.indexOf("|");
+  if (pipeIdx === -1) return currentTitle;
+  return `${currentTitle.slice(0, pipeIdx + 1).trim()} ${home} vs ${away}`;
+}
+function rewriteDescription(currentDescription: string, home: string, away: string): string {
+  const lines = currentDescription.split("\n");
+  if (lines.length >= 2) lines[1] = `${home} vs ${away}`;
+  return lines.join("\n");
+}
+
 interface FlatKnockout { matchId: number; home: string; away: string; kickoff: string }
 
 /**
@@ -179,7 +192,9 @@ export type RefreshOutcome =
  * persist it. Returns a discriminated outcome so both the session route and the
  * cron route can map it to the right HTTP status.
  */
-export async function refreshWorldCupScores(uid: string): Promise<RefreshOutcome> {
+export type RefreshScope = "all" | "group" | "knockout";
+
+export async function refreshWorldCupScores(uid: string, scope: RefreshScope = "all"): Promise<RefreshOutcome> {
   if (!hasAiProvider() || !process.env.GEMINI_API_KEY) {
     return { ok: false, status: 503, error: "Score refresh requires a configured Gemini API key (GEMINI_API_KEY)" };
   }
@@ -195,7 +210,10 @@ export async function refreshWorldCupScores(uid: string): Promise<RefreshOutcome
   const keyOf = (group: string, home: string, away: string) => `${group}|${home}|${away}`;
   const today = new Date().toISOString().slice(0, 10);
 
-  const needed = flat.filter((f) => {
+  // Scope limits which fixtures we ask the AI about (group vs knockout). Both
+  // sections of the snapshot are still rebuilt from cache + verified, so a scoped
+  // refresh never drops the other section's data.
+  const needed = scope === "knockout" ? [] : flat.filter((f) => {
     const day = f.kickoff.slice(0, 10);
     if (day > today) return false; // future match — no score to find yet
     const cached = prior.get(keyOf(f.group, f.home, f.away));
@@ -206,7 +224,7 @@ export async function refreshWorldCupScores(uid: string): Promise<RefreshOutcome
   // ── Knockout (B): resolve fixtures (R32 + propagated winners) and fetch scores ──
   const priorKO = await loadCachedKnockout();
   const flatKO = resolveKnockoutFixtures(events, priorKO);
-  const neededKO = flatKO.filter((k) => {
+  const neededKO = scope === "group" ? [] : flatKO.filter((k) => {
     const day = k.kickoff.slice(0, 10);
     if (day > today) return false;
     if (getKnockoutScore(k.matchId)) return false; // verified (A) wins — skip AI
@@ -328,6 +346,33 @@ export async function refreshWorldCupScores(uid: string): Promise<RefreshOutcome
     });
   } catch (e) {
     console.warn(`[worldcup/refresh] could not persist (table missing?): ${(e as Error).message}`);
+  }
+
+  // Persist resolved knockout team names onto the calendar events themselves, so
+  // the schedule/search show real teams instead of "C組冠軍"/"M73勝者" placeholders.
+  // R32 resolve from the official map immediately; later rounds fill in as winners
+  // are confirmed. Only when the knockout was in scope. Idempotent.
+  if (scope !== "group" && flatKO.length > 0) {
+    const evByMatch = new Map<number, { id: string; title: string; description: string | null }>();
+    for (const e of events) {
+      const mid = Number(e.description?.match(/World Cup Match ID:\s*(\d+)/)?.[1]);
+      if (Number.isFinite(mid)) evByMatch.set(mid, { id: e.id, title: e.title, description: e.description });
+    }
+    let renamed = 0;
+    for (const k of flatKO) {
+      const e = evByMatch.get(k.matchId);
+      if (!e) continue;
+      const newTitle = rewriteTitle(e.title, k.home, k.away);
+      const newDesc = rewriteDescription(e.description ?? "", k.home, k.away);
+      if (newTitle === e.title && newDesc === (e.description ?? "")) continue;
+      try {
+        await prisma.event.update({ where: { id: e.id }, data: { title: newTitle, description: newDesc } });
+        renamed++;
+      } catch (err) {
+        console.warn(`[worldcup/refresh] could not rename M${k.matchId}: ${(err as Error).message}`);
+      }
+    }
+    if (renamed > 0) console.log(`[worldcup/refresh] renamed ${renamed} knockout event(s) to real teams`);
   }
 
   return { ok: true, snapshot, provider, usedAi };

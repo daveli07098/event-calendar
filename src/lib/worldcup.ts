@@ -179,14 +179,44 @@ export function buildGroups(events: EventType[]): GroupView[] {
  * side is assigned by splitting the round in half — that's the "which side"
  * grouping for the Road to Trophy view. The Final and Third-place are centered.
  */
-/** FIFA match numbers a knockout slot feeds from, e.g. "M73勝者"/"M101敗者" → 73/101. */
-function feederMatchIds(m: Pick<KnockoutMatch, "home" | "away">): number[] {
+/**
+ * 2026 knockout feeder structure: the two earlier matches that feed each match,
+ * and whether its WINNER ("W") or LOSER ("L") advances (third-place takes the SF
+ * losers). This is the authoritative bracket tree — used as a fallback so event
+ * titles can be renamed from "M73勝者" placeholders to real team names without
+ * losing the structure the bracket/propagation depend on.
+ */
+export const KNOCKOUT_FEEDERS: Record<number, [{ m: number; r: "W" | "L" }, { m: number; r: "W" | "L" }]> = {
+  89: [{ m: 74, r: "W" }, { m: 77, r: "W" }], 90: [{ m: 73, r: "W" }, { m: 75, r: "W" }],
+  91: [{ m: 76, r: "W" }, { m: 78, r: "W" }], 92: [{ m: 79, r: "W" }, { m: 80, r: "W" }],
+  93: [{ m: 83, r: "W" }, { m: 84, r: "W" }], 94: [{ m: 81, r: "W" }, { m: 82, r: "W" }],
+  95: [{ m: 86, r: "W" }, { m: 88, r: "W" }], 96: [{ m: 85, r: "W" }, { m: 87, r: "W" }],
+  97: [{ m: 89, r: "W" }, { m: 90, r: "W" }], 98: [{ m: 93, r: "W" }, { m: 94, r: "W" }],
+  99: [{ m: 91, r: "W" }, { m: 92, r: "W" }], 100: [{ m: 95, r: "W" }, { m: 96, r: "W" }],
+  101: [{ m: 97, r: "W" }, { m: 98, r: "W" }], 102: [{ m: 99, r: "W" }, { m: 100, r: "W" }],
+  103: [{ m: 101, r: "L" }, { m: 102, r: "L" }], 104: [{ m: 101, r: "W" }, { m: 102, r: "W" }],
+};
+
+/** Parse a knockout slot label into its feeder match + result, e.g. "M101敗者" → {m:101,r:"L"}. */
+function parseFeederSlot(label: string): { m: number; r: "W" | "L" } | null {
+  const w = label.match(/M(\d+)\s*勝者/);
+  if (w) return { m: parseInt(w[1], 10), r: "W" };
+  const l = label.match(/M(\d+)\s*敗者/);
+  if (l) return { m: parseInt(l[1], 10), r: "L" };
+  return null;
+}
+
+/** FIFA match numbers a knockout match feeds from — from the title, or the
+ *  fixed feeder map when the title has been renamed to real team names. */
+function feederMatchIds(m: Pick<KnockoutMatch, "home" | "away" | "matchId">): number[] {
   const out: number[] = [];
   for (const s of [m.home, m.away]) {
-    const mm = s.match(/M(\d+)\s*(?:勝者|敗者)/);
-    if (mm) out.push(parseInt(mm[1], 10));
+    const f = parseFeederSlot(s);
+    if (f) out.push(f.m);
   }
-  return out;
+  if (out.length) return out;
+  const fb = m.matchId != null ? KNOCKOUT_FEEDERS[m.matchId] : undefined;
+  return fb ? fb.map((f) => f.m) : [];
 }
 
 export function buildBracket(events: EventType[]): BracketRound[] {
@@ -292,20 +322,18 @@ export function propagateKnockout(
   const winnerTeam = new Map<number, string>();
   const loserTeam = new Map<number, string>();
 
-  const slot = (label: string): string | null => {
-    const w = label.match(/M(\d+)\s*勝者/);
-    if (w) return winnerTeam.get(parseInt(w[1], 10)) ?? null;
-    const l = label.match(/M(\d+)\s*敗者/);
-    if (l) return loserTeam.get(parseInt(l[1], 10)) ?? null;
-    return null;
-  };
+  const teamFor = (f: { m: number; r: "W" | "L" } | null): string | null =>
+    f ? (f.r === "W" ? winnerTeam : loserTeam).get(f.m) ?? null : null;
 
   const ordered = [...rounds].sort((a, b) => a.order - b.order).flatMap((r) => r.matches);
   for (const m of ordered) {
     if (m.matchId == null) continue;
     const base = baseTeams(m.matchId);
-    const home = base ? base.home : slot(m.home);
-    const away = base ? base.away : slot(m.away);
+    // Feeder slots come from the title labels, falling back to the fixed feeder
+    // map when the title has been renamed to real team names.
+    const fb = KNOCKOUT_FEEDERS[m.matchId];
+    const home = base ? base.home : teamFor(parseFeederSlot(m.home) ?? fb?.[0] ?? null);
+    const away = base ? base.away : teamFor(parseFeederSlot(m.away) ?? fb?.[1] ?? null);
     resolved.set(m.matchId, { home, away });
 
     const sc = scoreOf(m.matchId);

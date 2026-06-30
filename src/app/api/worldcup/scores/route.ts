@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { AI_DAILY_LIMIT, remainingAiCalls, getResetAt } from "@/lib/ai/quota";
 import { mergeVerifiedGroups, mergeVerifiedKnockout } from "@/lib/worldcup-results";
-import { refreshWorldCupScores, SCORES_ID, type ScoresSnapshot } from "@/lib/worldcup-refresh";
+import { refreshWorldCupScores, SCORES_ID, type ScoresSnapshot, type RefreshScope } from "@/lib/worldcup-refresh";
 
 // ── GET: return the cached snapshot (or null if never refreshed / table absent) ──
 export async function GET() {
@@ -27,14 +27,18 @@ export async function GET() {
 }
 
 // ── POST: refresh scores for the signed-in user via the shared refresh engine ──
-export async function POST() {
+// `?scope=group|knockout` limits which stage is refreshed (default: all).
+export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const uid = session.user.id;
 
-  const result = await refreshWorldCupScores(uid);
+  const scopeParam = new URL(req.url).searchParams.get("scope");
+  const scope: RefreshScope = scopeParam === "group" || scopeParam === "knockout" ? scopeParam : "all";
+
+  const result = await refreshWorldCupScores(uid, scope);
   if (!result.ok) {
     return NextResponse.json(
       result.resetAt ? { error: result.error, resetAt: result.resetAt } : { error: result.error },
