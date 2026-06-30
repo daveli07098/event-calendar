@@ -35,7 +35,7 @@ import { getKnockoutScore, knockoutWinner, getKnockoutTeams } from "@/lib/worldc
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 interface GroupScores { standings: TeamStanding[]; matches: MatchScore[] }
-interface KnockoutMatchScore { matchId: number; home: string; away: string; homeScore: number | null; awayScore: number | null; status: string | null }
+interface KnockoutMatchScore { matchId: number; home: string; away: string; homeScore: number | null; awayScore: number | null; status: string | null; winner?: "home" | "away" }
 interface ScoresSnapshot { groups: Record<string, GroupScores>; knockout?: KnockoutMatchScore[]; asOf: string }
 
 // Tournament window — wide enough to cover the whole 2026 schedule.
@@ -928,7 +928,7 @@ function BracketMatch({
   tz: string;
   resolved?: { home: ResolvedSlot; away: ResolvedSlot };
   /** AI-refreshed knockout score from the snapshot (B); verified (A) wins over it. */
-  snap?: { homeScore: number | null; awayScore: number | null; status?: string | null };
+  snap?: { homeScore: number | null; awayScore: number | null; status?: string | null; winner?: "home" | "away" };
   /** Resolved teams: R32 from the official map, later rounds propagated from winners. */
   teams?: { home: string | null; away: string | null };
 }) {
@@ -1010,7 +1010,7 @@ function Bracket({
   calendars: CalendarType[];
   tz: string;
   resolved: Record<string, { home: ResolvedSlot; away: ResolvedSlot }>;
-  koScores: Record<number, { homeScore: number | null; awayScore: number | null; status: string | null }>;
+  koScores: Record<number, { homeScore: number | null; awayScore: number | null; status: string | null; winner?: "home" | "away" }>;
   koTeams: Map<number, { home: string | null; away: string | null }>;
 }) {
   const rounds = bracket.filter((r) => r.round !== "Final" && r.round !== "ThirdPlace");

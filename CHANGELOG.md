@@ -12,6 +12,7 @@
 - chore(worldcup): `scripts/apply-worldcup-knockout-teams.ts` — rewrites R32 knockout calendar-event titles from placeholder slots to the real teams from `VERIFIED_KNOCKOUT_TEAMS` (so the calendar/search match the bracket); idempotent, dry-run by default (`--apply` to write, `--email` to target a user). Later rounds keep their "M73勝者" placeholders
 - test(worldcup): cover the verified-override merge (verified beats AI, standings recompute) and the knockout winner/score helpers
 ### Changed
+- feat(worldcup): sharper AI score prompt — explicitly handles knockout ("KO M<n>") matches and asks for the penalty-shootout `winner` after a draw; the refresh now captures that `winner` into the snapshot so AI-sourced knockout results propagate winners up the bracket (not just verified ones)
 - refactor(worldcup): the scores API merges verified results over the AI snapshot in both GET and POST via `mergeVerifiedGroups`
 ### Fixed
 - fix(worldcup): correct the Round-of-32 calendar schedule — kickoff times + venues were attached to the old match-number mapping (e.g. 科特迪瓦/挪威 and 法國/瑞典 had their times & venues swapped). New `VERIFIED_KNOCKOUT_SCHEDULE` (UTC kickoff + venue per match, from the SI schedule) is applied to the events by `apply-worldcup-knockout-teams.ts` (now also sets startTime/endTime/location). Not wired to the refresh button, per request

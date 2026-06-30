@@ -37,6 +37,8 @@ export interface KnockoutMatchScore {
   homeScore: number | null;
   awayScore: number | null;
   status: string | null;
+  /** Set only when decided after a draw (penalties), so winners still propagate. */
+  winner?: "home" | "away";
 }
 export interface ScoresSnapshot {
   groups: Record<string, GroupScores>;
@@ -70,8 +72,9 @@ async function loadGroupEvents(uid: string): Promise<EventType[]> {
   }));
 }
 
-/** A previously-fetched scoreline, keyed for cheap reuse. */
-type CachedScore = { homeScore: number | null; awayScore: number | null; status: string | null };
+/** A previously-fetched scoreline, keyed for cheap reuse. `winner` is set only
+ *  for knockout matches decided after a draw (penalties). */
+type CachedScore = { homeScore: number | null; awayScore: number | null; status: string | null; winner?: "home" | "away" };
 
 async function loadCachedScores(): Promise<Map<string, CachedScore>> {
   const map = new Map<string, CachedScore>();
@@ -101,7 +104,7 @@ async function loadCachedKnockout(): Promise<Map<number, CachedScore>> {
     const ko = (row?.data as ScoresSnapshot | undefined)?.knockout;
     if (!ko) return map;
     for (const m of ko) {
-      map.set(m.matchId, { homeScore: m.homeScore ?? null, awayScore: m.awayScore ?? null, status: m.status ?? null });
+      map.set(m.matchId, { homeScore: m.homeScore ?? null, awayScore: m.awayScore ?? null, status: m.status ?? null, winner: m.winner });
     }
   } catch {
     // Table not migrated / malformed JSON — treat as no cache.
@@ -125,14 +128,21 @@ function flattenFixtures(groups: ReturnType<typeof buildGroups>): FlatFixture[] 
 }
 
 function buildPrompt(flat: FlatFixture[]): string {
+  // The label in [...] is the group letter for group games, or "KO M<n>" for a
+  // knockout match — telling the model which stage/round it is and its date.
   const lines = flat
     .map((f) => `${f.n}. ${f.home} vs ${f.away} [${f.group}, ${f.kickoff.slice(0, 10)}]`)
     .join("\n");
-  return `Use Google Search to find the final/current score of each 2026 FIFA World Cup match below. homeScore = first team, awayScore = second team. If a match has not been played yet or no real score is found, use null for both (never guess).
+  return `Use Google Search to find the final score of each 2026 FIFA World Cup match below — both group-stage games and knockout (KO) matches. homeScore = the FIRST team, awayScore = the SECOND team.
+
+Rules:
+- If a match has not kicked off yet, or you cannot find a real score, use null for BOTH scores. Never guess.
+- A "KO M<n>" label is a knockout match (Round of 32 onward); search by the two team names and the date.
+- For a knockout match decided after a draw, put the score at the end of normal/extra time in homeScore/awayScore, note it in "status" (e.g. "AET" or "4-3 pens"), and set "winner" to "home" or "away" — the team that ADVANCED. For an outright result, omit "winner".
 
 ${lines}
 
-Return ONLY this JSON (no prose): {"results":[{"n":1,"homeScore":2,"awayScore":1,"status":"FT"}]}. Integers only. Include every number above.`;
+Return ONLY this JSON (no prose): {"results":[{"n":1,"homeScore":2,"awayScore":1,"status":"FT"},{"n":1075,"homeScore":1,"awayScore":1,"status":"4-3 pens","winner":"home"}]}. Scores are integers. Include every number above.`;
 }
 
 function toInt(v: unknown): number | null {
@@ -292,6 +302,7 @@ export async function refreshWorldCupScores(uid: string, scope: RefreshScope = "
         homeScore: toInt(r.homeScore),
         awayScore: toInt(r.awayScore),
         status: typeof r.status === "string" ? r.status : null,
+        winner: r.winner === "home" || r.winner === "away" ? r.winner : undefined,
       });
     }
 
@@ -332,6 +343,7 @@ export async function refreshWorldCupScores(uid: string, scope: RefreshScope = "
       homeScore: src?.homeScore ?? null,
       awayScore: src?.awayScore ?? null,
       status: src?.status ?? null,
+      winner: src?.winner,
     };
   });
   mergeVerifiedKnockout(koSnapshot);
