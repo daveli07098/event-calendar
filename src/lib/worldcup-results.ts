@@ -193,7 +193,13 @@ export interface VerifiedKnockoutScore {
  * order (home = the first/upper slot of the bracket match). Empty until the
  * knockout stage produces results.
  */
-export const VERIFIED_KNOCKOUT_SCORES: VerifiedKnockoutScore[] = [];
+export const VERIFIED_KNOCKOUT_SCORES: VerifiedKnockoutScore[] = [
+  // ── Round of 32 (played so far; home = first slot of VERIFIED_KNOCKOUT_TEAMS) ──
+  { matchId: 73, homeScore: 0, awayScore: 1, status: "FT" }, // 南非 0–1 加拿大
+  { matchId: 74, homeScore: 2, awayScore: 1, status: "FT" }, // 巴西 2–1 日本
+  { matchId: 75, homeScore: 1, awayScore: 1, status: "4-3 pens", winner: "home" }, // 德國 1–1 巴拉圭 (德國 win on pens)
+  { matchId: 76, homeScore: 1, awayScore: 1, status: "3-2 pens", winner: "home" }, // 荷蘭 1–1 摩洛哥 (荷蘭 win on pens)
+];
 
 // ── Lookup maps (built once) ───────────────────────────────────────────────
 const groupScoreMap = new Map<string, VerifiedGroupScore>();
