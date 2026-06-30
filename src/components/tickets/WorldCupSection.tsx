@@ -639,10 +639,16 @@ export function WorldCupSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: AiQuota
               {refreshing === "knockout" ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {refreshing === "knockout" ? "Checking results…" : "Refresh knockout scores (AI)"}
             </Button>
-            <span className="text-xs text-muted-foreground">
-              Fetches played knockout results, advances winners, and updates fixture names.
+            <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+              <Clock className="size-3" /> Updated {fmtAgo(fetchedAt, tz)}
             </span>
+            {provider && (
+              <Badge variant="secondary" className="font-mono text-[10px]">via {provider}</Badge>
+            )}
           </div>
+          <p className="text-xs text-muted-foreground">
+            Fetches played knockout results, advances winners, and updates fixture names.
+          </p>
           {refreshError && (
             <p className="text-sm text-destructive inline-flex items-center gap-1.5">
               <AlertCircle className="size-4" /> {refreshError}

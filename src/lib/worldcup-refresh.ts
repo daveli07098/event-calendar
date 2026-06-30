@@ -135,6 +135,8 @@ function buildPrompt(flat: FlatFixture[]): string {
     .join("\n");
   return `Use Google Search to find the final score of each 2026 FIFA World Cup match below — both group-stage games and knockout (KO) matches. homeScore = the FIRST team, awayScore = the SECOND team.
 
+For knockout ("KO M<n>") matches, prefer the official results table at https://zh-yue.wikipedia.org/wiki/2026年FIFA世界盃淘汰賽 (the 2026 World Cup knockout-stage page); cross-check the English Wikipedia if needed.
+
 Rules:
 - If a match has not kicked off yet, or you cannot find a real score, use null for BOTH scores. Never guess.
 - A "KO M<n>" label is a knockout match (Round of 32 onward); search by the two team names and the date.
