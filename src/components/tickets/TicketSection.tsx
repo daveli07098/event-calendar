@@ -186,6 +186,8 @@ export function TicketSection() {
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [addedCalendarName, setAddedCalendarName] = useState("");
+  // First created event of the add — "View calendar" deep-links to it (?event=&date=)
+  const [addedEvent, setAddedEvent] = useState<{ id: string; start: string } | null>(null);
   const [quota, setQuota] = useState<AiQuota | null>(null);
   const [extractMethod, setExtractMethod] = useState<"auto" | "og-meta">("auto");
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
@@ -501,6 +503,7 @@ export function TicketSection() {
             return;
           }
           calName = data.calendarName ?? calName;
+          if (i === 0 && data.eventId) setAddedEvent({ id: data.eventId, start: data.start });
         }
         setAddedCalendarName(calName);
         setStatus("done");
@@ -519,6 +522,7 @@ export function TicketSection() {
             return;
           }
           calName = data.calendarName ?? calName;
+          if (i === 0 && data.eventId) setAddedEvent({ id: data.eventId, start: data.start });
         }
         setAddedCalendarName(calName);
         setStatus("done");
@@ -532,6 +536,7 @@ export function TicketSection() {
           setStatus("scraped");
           return;
         }
+        if (data.eventId) setAddedEvent({ id: data.eventId, start: data.start });
         setAddedCalendarName(data.calendarName ?? "event-reminders");
         setStatus("done");
         toast.success(`Event added to "${data.calendarName}"!`);
@@ -585,6 +590,7 @@ export function TicketSection() {
     setSelectedFields(new Set());
     setErrorMsg("");
     setAddedCalendarName("");
+    setAddedEvent(null);
     setEditTitle("");
     setEditDate("");
     setEditTime("");
@@ -1629,8 +1635,12 @@ export function TicketSection() {
                 Saved to <span className="font-semibold">{addedCalendarName}</span>
               </div>
               <div className="flex gap-2">
-                {/* Hard reload so new event-reminders / sale-ticket calendars appear in sidebar */}
-                <a href="/" className="flex-1">
+                {/* Hard reload so new event-reminders / sale-ticket calendars appear in sidebar.
+                    Deep-links to the created event: opens its modal with the calendar on its month. */}
+                <a
+                  href={addedEvent ? `/?event=${addedEvent.id}&date=${addedEvent.start.slice(0, 10)}` : "/"}
+                  className="flex-1"
+                >
                   <Button variant="outline" className="w-full">View calendar</Button>
                 </a>
                 <Button variant="outline" onClick={handleReset}>Add another</Button>

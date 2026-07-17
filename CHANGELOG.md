@@ -10,6 +10,7 @@
 - fix(tickets): multi-day date ranges (venue runs, multi-night runs) now end at 23:59 of the last day in the source timezone instead of a default noon UTC — the calendar banner always covers the full range
 - fix(bookmarks): the "Bookmarked" sidebar section now always shows (with a how-to hint when empty) instead of being hidden until the first bookmark — it was undiscoverable
 ### Changed
+- feat(tickets): "View calendar" after adding a ticket now deep-links to the created event (`/?event=<id>&date=…`) — the calendar opens on the event's month with its detail modal up, instead of landing on today
 - feat(bookmarks): moved the bookmark list from the sidebar to an always-visible 🔖 button in the calendar header (next to the theme switcher, mobile too) — opens a popover with the upcoming count on the badge; clicking an entry jumps to and opens the event. Replaces the sidebar section
 - feat(bookmarks): quick 🔖 toggle on each day-panel event row — bookmark/unbookmark straight from the day popup without opening the event modal
 - feat(bookmarks): per-user event bookmarks — new `EventBookmark` join table (a join table rather than a flag on Event, so bookmarking an event on a shared calendar never affects other members), with migration `20260717000000_add_event_bookmark`
