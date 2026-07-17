@@ -181,6 +181,18 @@
   white-space: nowrap;
 }
 
+.ec-allday-event .ec-event-loc {
+  font-size: 0.68rem;
+  font-weight: 400;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: 6px;
+}
+
 /* Timed event in month grid: dot · title · time */
 .ec-timed-event {
   display: flex;

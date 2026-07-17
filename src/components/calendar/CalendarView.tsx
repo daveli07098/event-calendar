@@ -453,12 +453,19 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     const catEmoji = !wcMatch && ev?.category ? CATEGORY_EMOJI[ev.category] : null;
     const titleText = wcTitle ?? (catEmoji ? `${catEmoji} ${event.title}` : event.title);
 
+    // Short location — first comma-segment (the venue), so same-titled tour
+    // stops (e.g. six "Bruno Mars" venue runs) are tellable apart on the grid.
+    const locShort = ev?.location?.split(",")[0]?.trim() || null;
+
     // List view — title + optional region badge; FC handles dot + time columns
     if (viewType.startsWith("list")) {
       return (
         <span className="text-sm flex items-center gap-1.5 flex-wrap">
           {wcToday && <span title="Match today" aria-label="Match today">🔴</span>}
           <span>{titleText}</span>
+          {locShort && (
+            <span className="text-xs text-muted-foreground truncate max-w-[180px]">📍 {locShort}</span>
+          )}
           {region && (
             <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 leading-tight shrink-0">
               {region}
@@ -473,6 +480,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       return (
         <div className="ec-allday-event">
           <span className="ec-event-title">{titleText}</span>
+          {locShort && <span className="ec-event-loc">📍{locShort}</span>}
           {region && (
             <span className="inline-flex items-center rounded px-1 text-[9px] font-medium bg-white/20 leading-tight shrink-0 ml-1">
               {region}
@@ -517,6 +525,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             {region}
           </span>
         )}
+        {locShort && <span className="ec-event-time">📍 {locShort}</span>}
         {timeText && <span className="ec-event-time">{timeText}</span>}
       </div>
     );
