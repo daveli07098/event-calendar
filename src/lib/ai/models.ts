@@ -34,7 +34,6 @@ export interface GeminiModelSpec {
 export const GEMINI_POOL: readonly GeminiModelSpec[] = [
   { id: "gemini-3.5-flash",      rpm: 5,  grounding: true,  lite: false },
   { id: "gemini-3.1-flash-lite", rpm: 15, grounding: true,  lite: true  },
-  { id: "gemini-3-flash",        rpm: 5,  grounding: true,  lite: false },
   { id: "gemini-2.5-flash",      rpm: 5,  grounding: true,  lite: false },
   { id: "gemini-2.5-flash-lite", rpm: 10, grounding: true,  lite: true  },
   { id: "gemma-4-31b-it",        rpm: 15, grounding: false, lite: false },
