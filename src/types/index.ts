@@ -82,6 +82,17 @@ export interface EventType {
   calendar?: CalendarType;
 }
 
+/** Compact shape returned by GET /api/events/bookmarks for the sidebar list. */
+export interface BookmarkedEvent {
+  id: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  allDay: boolean;
+  calendarName: string;
+  calendarColor: string;
+}
+
 export interface EventFormData {
   title: string;
   description?: string;

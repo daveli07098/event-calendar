@@ -1,3 +1,10 @@
+## [2026-07-17] — Session: event bookmarks
+### Added
+- feat(bookmarks): per-user event bookmarks — new `EventBookmark` join table (a join table rather than a flag on Event, so bookmarking an event on a shared calendar never affects other members), with migration `20260717000000_add_event_bookmark`
+- feat(bookmarks): bookmark toggle in the event modal header (🔖 next to the title) — available to read-only viewers of shared calendars too, since a bookmark is per-user and doesn't modify the event; optimistic UI with revert on API failure
+- feat(bookmarks): "Bookmarked" sidebar section on the homepage listing bookmarked events across ALL calendars (not just the visible month) — upcoming events first with their date, past events sink to the bottom crossed out with an "Ended" badge; clicking an entry opens the event modal and navigates the calendar to its date
+- feat(bookmarks): API — `PUT /api/events/[id]/bookmark` (idempotent set/unset, read-access required) and `GET /api/events/bookmarks` (compact list with calendar name/color; hides bookmarks on calendars the user has since left)
+
 ## [2026-06-29] — Session: verified World Cup results & knockout scoring
 ### Added
 - feat(worldcup): verified results source-of-truth (`src/lib/worldcup-results.ts`) — transcribed group A–L scorelines that ALWAYS override AI-grounded scores, both on refresh (POST) and at read time (GET). Fixes wrong AI scores; corrected standings flow through `resolveKnockout`, so the Round-of-32 schedule now auto-resolves to the real qualified teams (e.g. Germany vs Paraguay, Portugal vs Croatia)

@@ -9,7 +9,7 @@ import { SiteBanner } from "@/components/banner/SiteBanner";
 import { FootballMascot } from "@/components/theme/FootballMascot";
 import { TeamPicker } from "@/components/theme/TeamPicker";
 import { FlagBunting, WorldCupTabFlair } from "@/components/theme/WorldCupFlair";
-import type { CalendarType, EventType, EventCategory } from "@/types";
+import type { CalendarType, EventType, EventCategory, BookmarkedEvent } from "@/types";
 
 interface CalendarPageClientProps {
   initialCalendars: CalendarType[];
@@ -32,6 +32,7 @@ export function CalendarPageClient({
   const [locationFilter, setLocationFilter] = useState<string | null>(null);
   const [filtersLoaded, setFiltersLoaded] = useState(false);
   const [locationCounts, setLocationCounts] = useState<Record<string, number>>({});
+  const [bookmarks, setBookmarks] = useState<BookmarkedEvent[]>([]);
   // Ref to CalendarView's gotoDate function (set by CalendarView via callback)
   const gotoDateRef = useRef<((date: Date) => void) | null>(null);
 
@@ -76,6 +77,26 @@ export function CalendarPageClient({
       .then((d) => { if (d.counts) setLocationCounts(d.counts); })
       .catch(() => null);
   }, []);
+
+  // Bookmarked events (across all calendars) for the sidebar section
+  const refreshBookmarks = useCallback(() => {
+    fetch("/api/events/bookmarks")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (Array.isArray(d)) setBookmarks(d); })
+      .catch(() => null);
+  }, []);
+  useEffect(() => { refreshBookmarks(); }, [refreshBookmarks]);
+
+  // Toggle a bookmark from the event modal; refresh the sidebar list after.
+  const handleBookmarkToggle = useCallback(async (eventId: string, bookmarked: boolean) => {
+    const res = await fetch(`/api/events/${eventId}/bookmark`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookmarked }),
+    });
+    if (!res.ok) throw new Error("Bookmark update failed");
+    refreshBookmarks();
+  }, [refreshBookmarks]);
 
   // Write ?event=id&date=YYYY-MM-DD into the URL (no page reload)
   const handleEventOpen = useCallback((id: string, startTime: string) => {
@@ -148,6 +169,11 @@ export function CalendarPageClient({
           onLocationFilter={setLocationFilter}
           locationCounts={locationCounts}
           onMiniDateClick={(date) => gotoDateRef.current?.(date)}
+          bookmarks={bookmarks}
+          onBookmarkSelect={(id) => {
+            setOpenEventId(id);
+            setMobileSidebarOpen(false);
+          }}
         />
         <CalendarView
           calendars={calendars}
@@ -161,6 +187,8 @@ export function CalendarPageClient({
           categoryFilter={categoryFilter}
           locationFilter={locationFilter}
           onGotoDateReady={(fn) => { gotoDateRef.current = fn; }}
+          bookmarkedIds={bookmarks.map((b) => b.id)}
+          onBookmarkToggle={handleBookmarkToggle}
         />
       </div>
       <AddCalendarDialog

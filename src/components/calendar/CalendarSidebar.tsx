@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
-import { Plus, ChevronLeft, ChevronRight, ChevronDown, Settings, Users, Megaphone, Ticket, X } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, Settings, Users, Megaphone, Ticket, X, Bookmark } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
-import type { CalendarType, EventCategory } from "@/types";
+import type { CalendarType, EventCategory, BookmarkedEvent } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 
 interface CalendarSidebarProps {
@@ -26,6 +26,10 @@ interface CalendarSidebarProps {
   locationCounts?: Record<string, number>;
   /** Called when user clicks a date on the mini calendar */
   onMiniDateClick?: (date: Date) => void;
+  /** Bookmarked events across all calendars (upcoming + past) */
+  bookmarks?: BookmarkedEvent[];
+  /** Called when user clicks a bookmarked event — opens its detail modal */
+  onBookmarkSelect?: (eventId: string) => void;
 }
 
 /** Collapsible sidebar section with a chevron header, optional header action,
@@ -145,12 +149,15 @@ export function CalendarSidebar({
   onLocationFilter,
   locationCounts,
   onMiniDateClick,
+  bookmarks = [],
+  onBookmarkSelect,
 }: CalendarSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   // Per-section expand/collapse — persisted so the layout survives reloads.
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
     calendars: true,
+    bookmarks: true,
     location: true,
     category: true,
   });
@@ -391,6 +398,75 @@ export function CalendarSidebar({
           </>
         )}
         </SidebarSection>
+
+        {/* Bookmarked events — pinned across all calendars; ended ones crossed out.
+            Only rendered once something is bookmarked (empty section is noise). */}
+        {bookmarks.length > 0 && (
+          <SidebarSection
+            id="bookmarks"
+            label="Bookmarked"
+            open={openSections.bookmarks}
+            onToggle={() => toggleSection("bookmarks")}
+          >
+            <div className="flex flex-col gap-0.5">
+              {(() => {
+                // `today` is set client-side after mount (same pattern as the mini
+                // calendar); until then nothing is treated as ended — the bookmark
+                // list is fetched client-side too, so this never flashes wrong.
+                const now = today?.getTime() ?? -Infinity;
+                const ended = (b: BookmarkedEvent) => new Date(b.endTime).getTime() < now;
+                // Upcoming first (soonest on top), ended ones sink to the bottom
+                // most-recent-first — the API already sorts by startTime asc.
+                const sorted = [
+                  ...bookmarks.filter((b) => !ended(b)),
+                  ...bookmarks.filter(ended).reverse(),
+                ];
+                return sorted.map((b) => {
+                  const isPast = ended(b);
+                  const date = new Date(b.startTime).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  });
+                  return (
+                    <button
+                      key={b.id}
+                      type="button"
+                      onClick={() => onBookmarkSelect?.(b.id)}
+                      title={`${b.title} — ${b.calendarName}`}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent text-left w-full group"
+                    >
+                      <Bookmark
+                        className={`size-3 shrink-0 ${isPast ? "text-muted-foreground/50" : "text-primary"}`}
+                        fill="currentColor"
+                      />
+                      <span
+                        className={`text-sm flex-1 truncate ${
+                          isPast ? "line-through text-muted-foreground" : ""
+                        }`}
+                      >
+                        {b.title}
+                      </span>
+                      {isPast ? (
+                        <span className="text-[10px] text-muted-foreground border border-border rounded px-1 py-0 leading-tight shrink-0">
+                          Ended
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                          {date}
+                        </span>
+                      )}
+                      <div
+                        className="size-2 rounded-full shrink-0"
+                        style={{ backgroundColor: b.calendarColor }}
+                        title={b.calendarName}
+                      />
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </SidebarSection>
+        )}
 
         {/* Filter group — anchored to the sidebar bottom when content is short,
             scrolls naturally with the rest when content overflows. */}

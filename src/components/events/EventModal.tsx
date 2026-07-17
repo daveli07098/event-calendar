@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon } from "lucide-react";
+import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon, Bookmark } from "lucide-react";
 import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 
@@ -50,6 +50,10 @@ interface EventModalProps {
   onSynced?: (updatedEvent: EventType) => void;
   onEventSelect?: (eventId: string, startTime: string) => void;
   readOnly?: boolean;
+  /** Whether the current user has bookmarked this event */
+  bookmarked?: boolean;
+  /** Toggle the bookmark; should reject on failure so the UI can revert */
+  onBookmarkToggle?: (eventId: string, bookmarked: boolean) => Promise<void>;
 }
 
 export function EventModal({
@@ -66,6 +70,8 @@ export function EventModal({
   onSynced,
   onEventSelect,
   readOnly = false,
+  bookmarked = false,
+  onBookmarkToggle,
 }: EventModalProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -77,6 +83,13 @@ export function EventModal({
   const [category, setCategory] = useState<EventCategory | null>(null);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // Optimistic bookmark state — flips immediately on click, reverts if the API fails
+  const [isBookmarked, setIsBookmarked] = useState(bookmarked);
+  const [bookmarkBusy, setBookmarkBusy] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resync when a different event opens
+    setIsBookmarked(bookmarked);
+  }, [bookmarked, event?.id, open]);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncingTeams, setSyncingTeams] = useState(false);
   const [syncTeamsError, setSyncTeamsError] = useState<string | null>(null);
@@ -237,6 +250,21 @@ export function EventModal({
 
     return () => clearTimeout(timeoutId);
   }, [open, event, initialData, initialRange, defaultCalendarId]);
+
+  // Bookmark toggle — allowed even on read-only calendars (per-user, doesn't edit the event)
+  const handleBookmarkToggle = async () => {
+    if (!event || !onBookmarkToggle || bookmarkBusy) return;
+    const next = !isBookmarked;
+    setIsBookmarked(next);
+    setBookmarkBusy(true);
+    try {
+      await onBookmarkToggle(event.id, next);
+    } catch {
+      setIsBookmarked(!next); // revert on failure
+    } finally {
+      setBookmarkBusy(false);
+    }
+  };
 
   // Update Teams: fetch current team names from Wikipedia via AI and update the event
   const handleSyncTeams = async () => {
@@ -403,7 +431,26 @@ export function EventModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[480px] flex flex-col max-h-[90vh]">
         <DialogHeader>
-          <DialogTitle>{readOnly ? "View Event" : event ? "Edit Event" : "New Event"}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {readOnly ? "View Event" : event ? "Edit Event" : "New Event"}
+            {/* Bookmark — existing events only; per-user so read-only viewers can use it too */}
+            {event && onBookmarkToggle && (
+              <button
+                type="button"
+                onClick={handleBookmarkToggle}
+                disabled={bookmarkBusy}
+                aria-pressed={isBookmarked}
+                aria-label={isBookmarked ? "Remove bookmark" : "Bookmark this event"}
+                title={isBookmarked ? "Remove bookmark" : "Bookmark this event"}
+                className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+              >
+                <Bookmark
+                  className={`size-4 ${isBookmarked ? "text-primary" : ""}`}
+                  fill={isBookmarked ? "currentColor" : "none"}
+                />
+              </button>
+            )}
+          </DialogTitle>
         </DialogHeader>
         {readOnly && (
           <p className="text-xs text-amber-500/90 bg-amber-500/10 border border-amber-500/20 rounded-md px-3 py-1.5 -mt-1">

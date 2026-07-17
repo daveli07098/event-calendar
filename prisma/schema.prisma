@@ -51,6 +51,7 @@ model User {
   sessions       Session[]
   calendars      Calendar[]
   calendarMemberships CalendarMember[]
+  eventBookmarks EventBookmark[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -114,10 +115,27 @@ model Event {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  calendar Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  calendar  Calendar        @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  bookmarks EventBookmark[]
 
   @@index([calendarId])
   @@index([startTime, endTime])
+}
+
+// Per-user event bookmarks. A join table (not a flag on Event) because
+// calendars are shared — one member bookmarking an event must not
+// bookmark it for every other member.
+model EventBookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  eventId   String
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId])
+  @@index([eventId])
 }
 
 // Community venue directory — referenced when importing ticket events

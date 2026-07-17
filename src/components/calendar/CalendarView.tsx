@@ -83,9 +83,13 @@ interface CalendarViewProps {
   locationFilter?: string | null;
   /** Called on mount with a gotoDate function so parent can navigate the calendar */
   onGotoDateReady?: (fn: (date: Date) => void) => void;
+  /** Event ids the user has bookmarked — powers the modal's bookmark button */
+  bookmarkedIds?: string[];
+  /** Toggle a bookmark; rejects on API failure so the modal can revert */
+  onBookmarkToggle?: (eventId: string, bookmarked: boolean) => Promise<void>;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarkedIds, onBookmarkToggle }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -721,6 +725,8 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           }
         }}
         readOnly={selectedEventReadOnly}
+        bookmarked={selectedEvent ? (bookmarkedIds ?? []).includes(selectedEvent.id) : false}
+        onBookmarkToggle={onBookmarkToggle}
       />
     </>
   );
