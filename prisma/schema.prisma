@@ -112,6 +112,7 @@ model Event {
   recurrenceRule String?
   googleEventId  String?
   category       String?  // e.g. "concert", "exhibition", "theatre", "sports", "festival", "anime", "popup", "comedy", "film", "food", "other"
+  artist         String?  // main performer/artist/group (e.g. "Bruno Mars") — extracted from ticket pages
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

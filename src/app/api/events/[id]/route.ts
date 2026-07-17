@@ -52,7 +52,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { title, description, location, startTime, endTime, allDay, calendarId, category } = body;
+  const { title, description, location, startTime, endTime, allDay, calendarId, category, artist } = body;
 
   const access = await canAccessEvent(id, session.user.id);
   if (!access) {
@@ -80,6 +80,7 @@ export async function PUT(
       ...(allDay !== undefined && { allDay }),
       ...(calendarId !== undefined && { calendarId }),
       ...(category !== undefined && { category: category || null }),
+      ...(artist !== undefined && { artist: artist || null }),
     },
     include: { calendar: true },
   });

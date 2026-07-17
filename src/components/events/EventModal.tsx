@@ -81,6 +81,7 @@ export function EventModal({
   const [allDay, setAllDay] = useState(false);
   const [calendarId, setCalendarId] = useState(defaultCalendarId);
   const [category, setCategory] = useState<EventCategory | null>(null);
+  const [artist, setArtist] = useState("");
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   // Optimistic bookmark state — flips immediately on click, reverts if the API fails
@@ -191,6 +192,7 @@ export function EventModal({
         setEndTime(event.allDay ? toLocalDateInput(event.endTime) : toLocalDateTimeInput(event.endTime));
         setCalendarId(event.calendarId || defaultCalendarId);
         setCategory(event.category ?? null);
+        setArtist(event.artist ?? "");
         setSeatingPlanUrl(seating);
         setSyncError(null);
         setSyncPreview(null);
@@ -208,6 +210,7 @@ export function EventModal({
         setEndTime(initialData.allDay ? toLocalDateInput(initialData.endTime) : toLocalDateTimeInput(initialData.endTime));
         setCalendarId(initialData.calendarId || defaultCalendarId);
         setCategory(initialData.category ?? null);
+        setArtist(initialData.artist ?? "");
         setSeatingPlanUrl(seating);
         setSyncError(null);
         setSyncPreview(null);
@@ -229,6 +232,7 @@ export function EventModal({
         setEndTime(end);
         setCalendarId(defaultCalendarId);
         setCategory(null);
+        setArtist("");
         setSeatingPlanUrl("");
         setSyncError(null);
         setSyncPreview(null);
@@ -243,6 +247,7 @@ export function EventModal({
       setEndTime(oneHourLaterLocal);
       setCalendarId(defaultCalendarId);
       setCategory(null);
+      setArtist("");
       setSeatingPlanUrl("");
       setSyncError(null);
       setSyncPreview(null);
@@ -412,6 +417,7 @@ export function EventModal({
         allDay,
         calendarId,
         category: category ?? null,
+        artist: artist.trim() || null,
       });
     } finally {
       setSaving(false);
@@ -472,6 +478,21 @@ export function EventModal({
               className={readOnly ? "cursor-default select-text" : ""}
             />
           </div>
+
+          {/* Artist — hidden entirely when empty in read-only mode */}
+          {(!readOnly || artist) && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="artist">Artist 演出者</Label>
+              <Input
+                id="artist"
+                placeholder="e.g. Bruno Mars (optional)"
+                value={artist}
+                onChange={(e) => setArtist(e.target.value)}
+                readOnly={readOnly}
+                className={readOnly ? "cursor-default select-text" : ""}
+              />
+            </div>
+          )}
 
           <div className="flex items-center gap-2">
             <Switch
@@ -840,6 +861,8 @@ export function EventModal({
                     endTime: new Date(endTime).toISOString(),
                     allDay,
                     calendarId,
+                    category: category ?? null,
+                    artist: artist.trim() || null,
                   })
                 }
                 disabled={saving || syncing}

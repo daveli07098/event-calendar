@@ -57,6 +57,7 @@ interface ScrapedTicket {
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   category?: string | null;
   country?: string | null;
+  artist?: string | null;
   slots?: EventSlot[];
   venueRuns?: VenueRun[] | null;
   duplicateCandidates?: Array<{ id: string; title: string; startTime: string; location: string | null; similarityScore: number }>;
@@ -195,6 +196,7 @@ export function TicketSection() {
   const [editEndDate, setEditEndDate] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
   const [editVenue, setEditVenue] = useState("");
+  const [editArtist, setEditArtist] = useState("");
   const [editCategory, setEditCategory] = useState<EventCategory | "">("" );
   // Multi-slot picker
   const [slots, setSlots] = useState<EventSlot[]>([]);
@@ -295,6 +297,7 @@ export function TicketSection() {
       setEditTime(data.time ?? "");
       setEditEndDate(data.endDate ?? "");
       setEditEndTime(data.endTime ?? "");      setEditVenue(data.venue ?? data.location ?? "");
+      setEditArtist(data.artist ?? "");
       setEditCategory((data.category as EventCategory) ?? "");
       // Multi-slot picker — pre-select all slots
       const dataSlots: EventSlot[] = data.slots ?? [];
@@ -465,9 +468,10 @@ export function TicketSection() {
         }
       }
       const resolvedCategory = editCategory || ticket.category || null;
+      const resolvedArtist = editArtist.trim() || ticket.artist || null;
       const ticketPayload = omitSales
-        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: resolvedVenue, location: resolvedLocation, category: resolvedCategory, saleDates: null, saleDate: null, saleFirstDate: null }
-        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: resolvedVenue, location: resolvedLocation, category: resolvedCategory };
+        ? { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: resolvedVenue, location: resolvedLocation, category: resolvedCategory, artist: resolvedArtist, saleDates: null, saleDate: null, saleFirstDate: null }
+        : { ...ticket, title: baseTitle, date: resolvedDate, time: resolvedTime, endDate: resolvedEndDate, endTime: resolvedEndTime, venue: resolvedVenue, location: resolvedLocation, category: resolvedCategory, artist: resolvedArtist };
       return fetch("/api/tickets/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -587,6 +591,7 @@ export function TicketSection() {
     setEditEndDate("");
     setEditEndTime("");
     setEditVenue("");
+    setEditArtist("");
     setEditCategory("");
     setSlots([]);
     setSelectedSlots(new Set());
@@ -1429,6 +1434,15 @@ export function TicketSection() {
                     value={editVenue}
                     onChange={(e) => setEditVenue(e.target.value)}
                     placeholder="Venue name"
+                    disabled={status === "adding"}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Artist 演出者</label>
+                  <Input
+                    value={editArtist}
+                    onChange={(e) => setEditArtist(e.target.value)}
+                    placeholder="e.g. Bruno Mars (optional)"
                     disabled={status === "adding"}
                   />
                 </div>

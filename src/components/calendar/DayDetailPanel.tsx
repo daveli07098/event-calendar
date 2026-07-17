@@ -4,6 +4,7 @@ import { X, Plus, Clock, MapPin, CalendarDays } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CalendarType, EventType } from "@/types";
+import { CATEGORY_EMOJI } from "@/types";
 
 interface DayDetailPanelProps {
   date: string; // "YYYY-MM-DD"
@@ -153,6 +154,7 @@ export function DayDetailPanel({
               />
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate leading-tight">
+                  {event.category ? `${CATEGORY_EMOJI[event.category]} ` : ""}
                   {event.title}
                 </p>
                 {event.allDay ? (

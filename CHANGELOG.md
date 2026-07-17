@@ -1,5 +1,10 @@
 ## [2026-07-17] — Session: event bookmarks
 ### Added
+- feat(tickets): `artist` field end-to-end — the AI scrape now extracts the headlining performer/group (e.g. "Bruno Mars", not the tour name), shown as an editable "Artist 演出者" field in the ticket import UI, stored in a new `Event.artist` column (migration `20260717000001_add_event_artist`), and editable in the event modal
+- feat(calendar): category emoji prepended to event titles on the calendar grid, list view and day panel (reuses the CATEGORY_LABELS emoji via `CATEGORY_EMOJI`) — events on the one-color ticket calendar are now tellable apart at a glance (🎵 concert vs 🖼️ exhibition …); World Cup matches keep their own ⚽/🔴 marker
+### Fixed
+- fix(tickets): multi-day date ranges (venue runs, multi-night runs) now end at 23:59 of the last day in the source timezone instead of a default noon UTC — the calendar banner always covers the full range
+- fix(bookmarks): the "Bookmarked" sidebar section now always shows (with a how-to hint when empty) instead of being hidden until the first bookmark — it was undiscoverable
 - feat(bookmarks): per-user event bookmarks — new `EventBookmark` join table (a join table rather than a flag on Event, so bookmarking an event on a shared calendar never affects other members), with migration `20260717000000_add_event_bookmark`
 - feat(bookmarks): bookmark toggle in the event modal header (🔖 next to the title) — available to read-only viewers of shared calendars too, since a bookmark is per-user and doesn't modify the event; optimistic UI with revert on API failure
 - feat(bookmarks): "Bookmarked" sidebar section on the homepage listing bookmarked events across ALL calendars (not just the visible month) — upcoming events first with their date, past events sink to the bottom crossed out with an "Ended" badge; clicking an entry opens the event modal and navigates the calendar to its date

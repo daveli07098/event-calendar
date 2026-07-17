@@ -38,6 +38,7 @@ interface TicketData {
   category: string | null;          // AI-detected category: concert|exhibition|theatre|sports|festival|anime|popup|comedy|film|food|other
   country: string | null;           // detected country: domain-based primary, AI fallback
   venueRuns: VenueRun[] | null;     // multi-venue tour runs (null when single venue)
+  artist: string | null;            // main performer/artist/group (e.g. "Bruno Mars"), null when not applicable
 }
 
 /** A single ticket-sale window with a date, optional time, and a human label. */
@@ -965,7 +966,7 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
-{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"ONE natural sentence summarising the event (who/what/where/when), written in the same language as the title — write it yourself from the facts; NEVER a comma-separated keyword/tag list","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"venueRuns":[{"venue":"venue name","location":"city or null","date":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|kuji|crane|comedy|film|food|other"}
+{"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"ONE natural sentence summarising the event (who/what/where/when), written in the same language as the title — write it yourself from the facts; NEVER a comma-separated keyword/tag list","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD","time":"HH:MM or null","label":"exact label from page"}],"venueRuns":[{"venue":"venue name","location":"city or null","date":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|kuji|crane|comedy|film|food|other","artist":"main performer/artist/group/team headlining the event (e.g. Bruno Mars, 五月天) — the act itself, NOT the tour name; null for events without a performer (exhibitions, pop-ups)"}
 
 CRITICAL — performance date vs sale dates:
   • "date" = the day the show/concert/match PHYSICALLY HAPPENS at the venue. NEVER a sale/presale date.
@@ -1597,6 +1598,11 @@ export async function POST(req: NextRequest) {
     country: detectCountry(url) ?? ((aiResult as Partial<TicketData> & { country?: string | null }).country ?? null),
     // venueRuns: populated below after validation
     venueRuns: null,
+    // artist: AI-extracted main performer/group; only from the AI (no meta source)
+    artist: (() => {
+      const a = (aiResult as Partial<TicketData>).artist;
+      return typeof a === "string" && a.trim() ? a.trim() : null;
+    })(),
   };
 
   // --- Venue runs: multi-venue tour detection ---

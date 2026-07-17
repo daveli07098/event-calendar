@@ -34,6 +34,12 @@ export const CATEGORY_LABELS: Record<EventCategory, string> = {
   other:      "📅 Other",
 };
 
+/** Just the emoji of each category label — reused for compact indicators
+ *  (e.g. prepended to event titles on the calendar grid). */
+export const CATEGORY_EMOJI: Record<EventCategory, string> = Object.fromEntries(
+  EVENT_CATEGORIES.map((cat) => [cat, CATEGORY_LABELS[cat].split(" ")[0]])
+) as Record<EventCategory, string>;
+
 export interface CalendarMemberType {
   id: string;
   calendarId: string;
@@ -77,6 +83,7 @@ export interface EventType {
   recurrenceRule: string | null;
   googleEventId: string | null;
   category: EventCategory | null;
+  artist?: string | null;
   createdAt: string;
   updatedAt: string;
   calendar?: CalendarType;
@@ -102,4 +109,5 @@ export interface EventFormData {
   allDay: boolean;
   calendarId: string;
   category?: EventCategory | null;
+  artist?: string | null;
 }

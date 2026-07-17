@@ -22,7 +22,7 @@ import type {
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
-import { CATEGORY_LABELS } from "@/types";
+import { CATEGORY_LABELS, CATEGORY_EMOJI } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
 import { EventReminder } from "@/components/calendar/EventReminder";
@@ -443,12 +443,19 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     const wcToday = wcMatch ? isTodayLocal(wcMatch.kickoff) : false;
     const wcTitle = wcMatch ? `${wcMatch.home} vs ${wcMatch.away}` : null;
 
+    // Category indicator — the category's emoji prepended to the title so the
+    // event type is readable at a glance (all events on the ticket calendar
+    // share one color, so color alone can't tell a concert from an exhibition).
+    // World Cup matches keep their own ⚽/🔴 marker instead of doubling up.
+    const catEmoji = !wcMatch && ev?.category ? CATEGORY_EMOJI[ev.category] : null;
+    const titleText = wcTitle ?? (catEmoji ? `${catEmoji} ${event.title}` : event.title);
+
     // List view — title + optional region badge; FC handles dot + time columns
     if (viewType.startsWith("list")) {
       return (
         <span className="text-sm flex items-center gap-1.5 flex-wrap">
           {wcToday && <span title="Match today" aria-label="Match today">🔴</span>}
-          <span>{wcTitle ?? event.title}</span>
+          <span>{titleText}</span>
           {region && (
             <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 leading-tight shrink-0">
               {region}
@@ -462,7 +469,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       // All-day: solid fill pill (background set by FC), title only
       return (
         <div className="ec-allday-event">
-          <span className="ec-event-title">{event.title}</span>
+          <span className="ec-event-title">{titleText}</span>
           {region && (
             <span className="inline-flex items-center rounded px-1 text-[9px] font-medium bg-white/20 leading-tight shrink-0 ml-1">
               {region}
@@ -482,7 +489,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           ) : (
             <span className="ec-event-dot" style={{ backgroundColor: color }} />
           )}
-          <span className="ec-event-title">{wcTitle ?? event.title}</span>
+          <span className="ec-event-title">{titleText}</span>
           {timeText && (
             <span className="ec-event-time">{timeText}</span>
           )}
@@ -500,7 +507,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       <div className="ec-timegrid-event">
         <span className="ec-event-title">
           {wcMatch && <span aria-hidden="true">{wcToday ? "🔴 " : "⚽ "}</span>}
-          {wcTitle ?? event.title}
+          {titleText}
         </span>
         {region && (
           <span className="inline-flex items-center rounded px-1 py-0 text-[9px] font-medium bg-white/20 leading-tight mt-0.5 self-start">

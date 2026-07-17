@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { title, description, location, startTime, endTime, allDay, calendarId, category } = body;
+  const { title, description, location, startTime, endTime, allDay, calendarId, category, artist } = body;
 
   if (!title || typeof title !== "string" || title.trim().length === 0) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
       endTime: new Date(endTime),
       allDay: allDay || false,
       ...(category !== undefined && { category: category || null }),
+      ...(artist !== undefined && { artist: artist || null }),
     },
     include: { calendar: true },
   });

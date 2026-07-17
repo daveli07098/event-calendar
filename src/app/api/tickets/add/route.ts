@@ -31,6 +31,7 @@ interface TicketData {
   sourceTimezone?: string | null;  // ±HH:MM offset from scrape route (e.g. "+08:00" for HKT)
   category?: string | null;        // AI-detected event category
   country?: string | null;         // detected country (domain-based + AI fallback)
+  artist?: string | null;          // main performer/artist/group (e.g. "Bruno Mars")
 }
 
 /** Parse a single date+time into a UTC Date.
@@ -84,10 +85,15 @@ function parseEventTime(
 
   let end: Date;
   if (endDate || endTime) {
+    // A true multi-day range (endDate after start date) with no explicit end
+    // time ends at 23:59 of the last day in the source timezone — so the event
+    // spans the FULL range on the calendar instead of stopping at a default
+    // noon on the last day (which could clip the final day in some timezones).
+    const isMultiDayRange = Boolean(endDate && date && endDate > date);
     // End date defaults to same day as start if only endTime given
     end = parseSingleDateTime(
       endDate ?? date,
-      endTime ?? null,
+      endTime ?? (isMultiDayRange ? "23:59" : null),
       sourceTimezone,
       tzOffsetMinutes,
       new Date(start.getTime() + 2 * 3600000),
@@ -203,6 +209,7 @@ export async function POST(req: NextRequest) {
     startTime: start,
     endTime: end,
     location: enrichLocationWithCountry(rawLocation, ticket.sourceUrl, ticket.country),
+    ...(ticket.artist?.trim() ? { artist: ticket.artist.trim() } : {}),
   };
 
   const event = await prisma.event.create({
