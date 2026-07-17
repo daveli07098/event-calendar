@@ -78,6 +78,29 @@ function mergeSameLabelSaleWindows(windows: SaleWindow[]): SaleWindow[] {
   return merged.sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/**
+ * Repair AI-guessed years on sale dates. JP ticket pages usually print sale
+ * windows WITHOUT a year ("6月29日(月) 12:00〜7月11日(金) 23:59"); the AI then
+ * invents one (typically its training-data year), yielding a sale date absurdly
+ * in the past for a future event. Deterministic fix: while the date is more
+ * than ~60 days in the past AND adding a year keeps it before the event date,
+ * bump the year. Returns null for garbage years (e.g. a 0570-… service phone
+ * number parsed as year 570) so callers drop the date entirely.
+ */
+function repairSaleDateYear(value: string, eventDate: string | null, now: Date): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  if (!m) return value;
+  let year = Number(m[1]);
+  if (year < 2000 || year > now.getFullYear() + 5) return null; // garbage year
+  if (!eventDate) return value;
+  const eventT = new Date(`${eventDate}T00:00:00Z`).getTime();
+  if (Number.isNaN(eventT)) return value;
+  const graceMs = 60 * 24 * 3600 * 1000; // recently-passed sales are legitimate
+  const dayT = (y: number) => Date.UTC(y, Number(m[2]) - 1, Number(m[3]));
+  while (dayT(year) < now.getTime() - graceMs && dayT(year + 1) < eventT) year++;
+  return year === Number(m[1]) ? value : `${year}${value.slice(4)}`;
+}
+
 // ---------------------------------------------------------------------------
 // HTML text extraction (strips tags, keeps meaningful text for AI)
 // ---------------------------------------------------------------------------
@@ -1013,6 +1036,7 @@ CRITICAL — extract ALL sale windows into saleDates (one entry per distinct dat
     • General public on-sale     (公開發售, General Sale, Public Sale)
   Each type is a separate saleDates entry with its own date and label.
   Order saleDates chronologically (earliest first). Also set saleFirstDate = saleDates[0].date and saleDate = saleDates[last].date.
+  If the page shows a sale date WITHOUT a year (e.g. "6月29日(月) 12:00〜"), infer it: sales open weeks-to-months before the event, never years before. For a Jan 2027 event, a June sale = June 2026.
 
 CRITICAL — venueRuns: when the SAME event tours MULTIPLE venues with DIFFERENT date ranges (exhibition, collab café tour, etc.), list each venue separately. Example: Tokyo venue Mar 14–29, Osaka venue Apr 25–May 10 → two entries. "date"/"endDate" at top level = overall first/last date. Set venueRuns=null for single-venue events or when venues share the same dates.
 
@@ -1703,6 +1727,24 @@ export async function POST(req: NextRequest) {
       ticket.saleFirstDate ??= merged[0]!.date;
       ticket.saleDate ??= merged[merged.length - 1]!.date;
     }
+  }
+
+  // Repair AI-guessed years on all sale dates (and drop garbage ones) BEFORE
+  // merging, so open/close pairing sorts on the corrected dates.
+  {
+    const nowD = new Date();
+    if (ticket.saleDates?.length) {
+      const repaired: SaleWindow[] = [];
+      for (const w of ticket.saleDates) {
+        const fixed = repairSaleDateYear(w.date, ticket.date, nowD);
+        if (fixed === null) continue; // garbage date — drop the window
+        const fixedEnd = w.endDate ? repairSaleDateYear(w.endDate, ticket.date, nowD) : null;
+        repaired.push({ ...w, date: fixed, endDate: fixedEnd });
+      }
+      ticket.saleDates = repaired.length ? repaired : null;
+    }
+    if (ticket.saleDate) ticket.saleDate = repairSaleDateYear(ticket.saleDate, ticket.date, nowD);
+    if (ticket.saleFirstDate) ticket.saleFirstDate = repairSaleDateYear(ticket.saleFirstDate, ticket.date, nowD);
   }
 
   // Collapse open/close rows that share one label into a single ranged window
