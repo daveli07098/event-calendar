@@ -21,10 +21,11 @@ import type {
 } from "@fullcalendar/interaction";
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
-import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
-import { CATEGORY_LABELS, CATEGORY_EMOJI } from "@/types";
+import type { CalendarType, EventType, EventFormData, EventCategory, BookmarkedEvent } from "@/types";
+import { CATEGORY_EMOJI } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
+import { BookmarkPopover } from "@/components/calendar/BookmarkPopover";
 import { EventReminder } from "@/components/calendar/EventReminder";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import { useTheme } from "@/context/ThemeContext";
@@ -83,13 +84,15 @@ interface CalendarViewProps {
   locationFilter?: string | null;
   /** Called on mount with a gotoDate function so parent can navigate the calendar */
   onGotoDateReady?: (fn: (date: Date) => void) => void;
-  /** Event ids the user has bookmarked — powers the modal's bookmark button */
-  bookmarkedIds?: string[];
+  /** Bookmarked events (all calendars) — shown in the header 🔖 popover */
+  bookmarks?: BookmarkedEvent[];
+  /** Open a bookmarked event from the popover */
+  onBookmarkSelect?: (eventId: string) => void;
   /** Toggle a bookmark; rejects on API failure so the modal can revert */
   onBookmarkToggle?: (eventId: string, bookmarked: boolean) => Promise<void>;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarkedIds, onBookmarkToggle }: CalendarViewProps) {
+export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -546,6 +549,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             ) : (
               <div className="flex-1" />
             )}
+            {/* Bookmarked events — always one click away, on mobile too */}
+            {onBookmarkSelect && (
+              <BookmarkPopover bookmarks={bookmarks ?? []} onSelect={onBookmarkSelect} />
+            )}
             <ThemeSwitcher />
           </div>
           {/* Empty-state hint — guides new users / explains filtered-out views */}
@@ -732,7 +739,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           }
         }}
         readOnly={selectedEventReadOnly}
-        bookmarked={selectedEvent ? (bookmarkedIds ?? []).includes(selectedEvent.id) : false}
+        bookmarked={selectedEvent ? (bookmarks ?? []).some((b) => b.id === selectedEvent.id) : false}
         onBookmarkToggle={onBookmarkToggle}
       />
     </>

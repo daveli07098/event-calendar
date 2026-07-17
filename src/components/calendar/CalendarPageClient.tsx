@@ -169,11 +169,6 @@ export function CalendarPageClient({
           onLocationFilter={setLocationFilter}
           locationCounts={locationCounts}
           onMiniDateClick={(date) => gotoDateRef.current?.(date)}
-          bookmarks={bookmarks}
-          onBookmarkSelect={(id) => {
-            setOpenEventId(id);
-            setMobileSidebarOpen(false);
-          }}
         />
         <CalendarView
           calendars={calendars}
@@ -187,7 +182,8 @@ export function CalendarPageClient({
           categoryFilter={categoryFilter}
           locationFilter={locationFilter}
           onGotoDateReady={(fn) => { gotoDateRef.current = fn; }}
-          bookmarkedIds={bookmarks.map((b) => b.id)}
+          bookmarks={bookmarks}
+          onBookmarkSelect={(id) => setOpenEventId(id)}
           onBookmarkToggle={handleBookmarkToggle}
         />
       </div>
