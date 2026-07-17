@@ -46,6 +46,36 @@ interface SaleWindow {
   date: string;         // YYYY-MM-DD
   time: string | null;  // HH:MM 24h or null
   label: string;        // e.g. "Fan Presale", "Public Sale", "Priority Sale"
+  endDate?: string | null; // YYYY-MM-DD close of an application window (lottery entry etc.)
+  endTime?: string | null; // HH:MM close time
+}
+
+/**
+ * Merge sale windows that share the SAME label into one ranged window: pages
+ * often list an application window's open AND close as two rows under one
+ * heading (e.g. オフィシャル1次抽選先行 6-29 12:00 … 7-11 23:59) — that's one
+ * window from open to close, not two separate sales.
+ */
+function mergeSameLabelSaleWindows(windows: SaleWindow[]): SaleWindow[] {
+  const byLabel = new Map<string, SaleWindow[]>();
+  for (const w of windows) {
+    const list = byLabel.get(w.label) ?? [];
+    list.push(w);
+    byLabel.set(w.label, list);
+  }
+  const merged: SaleWindow[] = [];
+  for (const list of byLabel.values()) {
+    if (list.length < 2) {
+      merged.push(list[0]);
+      continue;
+    }
+    const sorted = [...list].sort((a, b) =>
+      `${a.date} ${a.time ?? ""}`.localeCompare(`${b.date} ${b.time ?? ""}`));
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    merged.push({ ...first, endDate: last.date, endTime: last.time });
+  }
+  return merged.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 // ---------------------------------------------------------------------------
@@ -1673,6 +1703,12 @@ export async function POST(req: NextRequest) {
       ticket.saleFirstDate ??= merged[0]!.date;
       ticket.saleDate ??= merged[merged.length - 1]!.date;
     }
+  }
+
+  // Collapse open/close rows that share one label into a single ranged window
+  // (must run AFTER the sanitize/rescue steps so nothing re-splits them).
+  if (ticket.saleDates?.length) {
+    ticket.saleDates = mergeSameLabelSaleWindows(ticket.saleDates);
   }
 
   // Debug: log the fully merged ticket before returning

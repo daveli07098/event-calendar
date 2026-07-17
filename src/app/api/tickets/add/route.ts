@@ -27,7 +27,7 @@ interface TicketData {
   ticketPlatforms: string[] | null;
   saleDate: string | null;
   saleFirstDate: string | null;
-  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  saleDates: Array<{ date: string; time: string | null; label: string; endDate?: string | null; endTime?: string | null }> | null;
   sourceTimezone?: string | null;  // ±HH:MM offset from scrape route (e.g. "+08:00" for HKT)
   category?: string | null;        // AI-detected event category
   country?: string | null;         // detected country (domain-based + AI fallback)
@@ -194,7 +194,7 @@ export async function POST(req: NextRequest) {
   if (ticket.saleDate) descParts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
   if (ticket.saleFirstDate) descParts.push(`First Sale Date: ${ticket.saleFirstDate}`);
   if (ticket.saleDates?.length) {
-    descParts.push(`Sale Windows:\n${ticket.saleDates.map(w => `  ${w.label}: ${w.date}${w.time ? " " + w.time : ""}`).join("\n")}`);
+    descParts.push(`Sale Windows:\n${ticket.saleDates.map(w => `  ${w.label}: ${w.date}${w.time ? " " + w.time : ""}${w.endDate ? ` – ${w.endDate}${w.endTime ? " " + w.endTime : ""}` : ""}`).join("\n")}`);
   }
   if (ticket.venue) descParts.push(`Venue: ${ticket.venue}`);
   if (ticket.location) descParts.push(`Location: ${ticket.location}`);
@@ -227,7 +227,7 @@ export async function POST(req: NextRequest) {
 
   // Build the list of windows to create events for:
   // prefer saleDates[] if available, otherwise fall back to legacy saleDate/saleFirstDate
-  const saleWindows: Array<{ date: string; time: string | null; label: string }> = ticket.saleDates?.length
+  const saleWindows: Array<{ date: string; time: string | null; label: string; endDate?: string | null; endTime?: string | null }> = ticket.saleDates?.length
     ? ticket.saleDates
     : [
         ...(ticket.saleFirstDate ? [{ date: ticket.saleFirstDate, time: null, label: "Fan Presale" }] : []),
@@ -245,7 +245,11 @@ export async function POST(req: NextRequest) {
     const saleIsCollaborative = saleResolved?.isCollaborative ?? false;
 
     for (const window of saleWindows) {
-      const { start: wStart, end: wEnd } = parseEventTime(window.date, window.time ?? null, tz, tzOffsetMinutes);
+      // Ranged windows (application open → close) span the whole period on the calendar
+      const { start: wStart, end: wEnd } = parseEventTime(
+        window.date, window.time ?? null, tz, tzOffsetMinutes,
+        window.endDate ?? null, window.endTime ?? null,
+      );
       const isPublic = window.label.toLowerCase().includes("public") || window.label.toLowerCase().includes("公開");
       const emoji = isPublic ? "🎫" : "⭐";
       const wDesc = [

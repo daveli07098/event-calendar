@@ -54,7 +54,7 @@ interface ScrapedTicket {
   endTime: string | null;
   saleDate: string | null;
   saleFirstDate: string | null;
-  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  saleDates: Array<{ date: string; time: string | null; label: string; endDate?: string | null; endTime?: string | null }> | null;
   category?: string | null;
   country?: string | null;
   artist?: string | null;
@@ -1512,12 +1512,15 @@ export function TicketSection() {
               {(ticket.saleDates?.length ? ticket.saleDates : [
                 ...(ticket.saleFirstDate ? [{ date: ticket.saleFirstDate, time: null, label: "Fan Presale 會員優先購票" }] : []),
                 ...(ticket.saleDate ? [{ date: ticket.saleDate, time: null, label: "Public Sale 公開發售" }] : []),
-              ]).map((w, i) => (
+              ] as NonNullable<ScrapedTicket["saleDates"]>).map((w, i) => (
                 <div key={i}>
                   <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">
                     {w.label}
                   </p>
-                  <p className="text-sm">{w.date}{w.time ? " " + w.time : ""}</p>
+                  <p className="text-sm">
+                    {w.date}{w.time ? " " + w.time : ""}
+                    {w.endDate ? ` – ${w.endDate}${w.endTime ? " " + w.endTime : ""}` : ""}
+                  </p>
                 </div>
               ))}
 

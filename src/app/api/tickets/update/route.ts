@@ -14,7 +14,7 @@ interface ScrapedTicket {
   ticketPlatforms: string[] | null;
   saleDate: string | null;
   saleFirstDate: string | null;
-  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  saleDates: Array<{ date: string; time: string | null; label: string; endDate?: string | null; endTime?: string | null }> | null;
   sourceUrl: string;
   category?: string | null;
   country?: string | null;
@@ -29,7 +29,7 @@ function buildDescription(ticket: ScrapedTicket): string {
   if (ticket.ticketPrices?.length) parts.push(`門票票價 Ticket Prices: ${ticket.ticketPrices.join(" / ")}`);
   if (ticket.ticketPlatforms?.length) parts.push(`售票平台 Platforms: ${ticket.ticketPlatforms.join(", ")}`);
   if (ticket.saleDates?.length) {
-    parts.push(`Sale Windows:\n${ticket.saleDates.map(w => `  ${w.label}: ${w.date}${w.time ? " " + w.time : ""}`).join("\n")}`);
+    parts.push(`Sale Windows:\n${ticket.saleDates.map(w => `  ${w.label}: ${w.date}${w.time ? " " + w.time : ""}${w.endDate ? ` – ${w.endDate}${w.endTime ? " " + w.endTime : ""}` : ""}`).join("\n")}`);
   } else {
     if (ticket.saleDate) parts.push(`開售日期 Sale Date: ${ticket.saleDate}`);
     if (ticket.saleFirstDate) parts.push(`First Sale Date: ${ticket.saleFirstDate}`);
