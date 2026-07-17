@@ -5,9 +5,9 @@
  *     match-number mapping, so they no longer matched the real matchup)
  *
  * Sources of truth in src/lib/worldcup-results.ts: VERIFIED_KNOCKOUT_TEAMS (zh-yue
- * R32 matchups) + VERIFIED_KNOCKOUT_SCHEDULE (UTC kickoff + venue). Only R32
- * matches (73–88) are covered; later rounds keep their "M73勝者" placeholders
- * until winners are known. Idempotent — re-running changes nothing once applied.
+ * matchups, now R32→Final) + VERIFIED_KNOCKOUT_SCHEDULE (UTC kickoff + venue,
+ * R32 only). Every match with verified teams is renamed; R32 also gets the
+ * corrected time/venue. Idempotent — re-running changes nothing once applied.
  *
  * SAFE BY DEFAULT: dry run (prints planned changes) unless you pass --apply.
  *
@@ -59,6 +59,9 @@ async function main() {
   const calIds = cals.map((c) => c.id);
   const rows = await prisma.event.findMany({
     where: { calendarId: { in: calIds }, description: { contains: "World Cup Match ID:" } },
+    // Select only what we touch — avoids failing on schema-drift columns (e.g. a
+    // schema `artist` field not yet migrated into this DB).
+    select: { id: true, title: true, description: true, startTime: true, endTime: true, location: true },
     orderBy: { startTime: "asc" },
   });
   console.log(`Loaded ${rows.length} knockout events`);
@@ -97,7 +100,8 @@ async function main() {
     planned++;
     console.log(`  ✎ M${matchId}: ${changes.join("; ")}`);
     if (APPLY) {
-      await prisma.event.update({ where: { id: ev.id }, data });
+      // select:{id} keeps the UPDATE ... RETURNING clause off the missing column.
+      await prisma.event.update({ where: { id: ev.id }, data, select: { id: true } });
     }
   }
 
