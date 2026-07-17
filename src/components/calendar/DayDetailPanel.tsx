@@ -1,6 +1,6 @@
 "use client";
 
-import { X, Plus, Clock, MapPin, CalendarDays } from "lucide-react";
+import { X, Plus, Clock, MapPin, CalendarDays, Bookmark } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CalendarType, EventType } from "@/types";
@@ -15,6 +15,9 @@ interface DayDetailPanelProps {
   onEditEvent: (event: EventType) => void;
   /** When true the panel renders as a bottom-sheet modal (mobile) */
   modal?: boolean;
+  /** Ids of the user's bookmarked events — shows a quick 🔖 toggle per row */
+  bookmarkedIds?: Set<string>;
+  onBookmarkToggle?: (eventId: string, bookmarked: boolean) => void;
 }
 
 // Explicit locale — keeps dates/times consistent with the rest of the
@@ -60,6 +63,8 @@ export function DayDetailPanel({
   onCreateEvent,
   onEditEvent,
   modal = false,
+  bookmarkedIds,
+  onBookmarkToggle,
 }: DayDetailPanelProps) {
   const dayEvents = events
     .filter((e) => {
@@ -143,10 +148,13 @@ export function DayDetailPanel({
           </div>
         ) : (
           dayEvents.map((event) => (
-            <button
+            <div
               key={event.id}
+              className="rounded-lg hover:bg-muted transition-colors flex items-start"
+            >
+            <button
               onClick={() => onEditEvent(event)}
-              className="w-full text-left rounded-lg px-3 py-2 hover:bg-muted transition-colors flex items-start gap-2.5"
+              className="flex-1 min-w-0 text-left px-3 py-2 flex items-start gap-2.5"
             >
               <span
                 className="mt-1 size-2.5 rounded-full shrink-0"
@@ -184,6 +192,25 @@ export function DayDetailPanel({
                 )}
               </div>
             </button>
+            {/* Quick bookmark toggle — no need to open the event */}
+            {onBookmarkToggle && (() => {
+              const isBookmarked = bookmarkedIds?.has(event.id) ?? false;
+              return (
+                <button
+                  onClick={() => onBookmarkToggle(event.id, !isBookmarked)}
+                  aria-pressed={isBookmarked}
+                  aria-label={isBookmarked ? "Remove bookmark" : "Bookmark this event"}
+                  title={isBookmarked ? "Remove bookmark" : "Bookmark this event"}
+                  className="p-2 mt-1.5 mr-1 shrink-0 text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <Bookmark
+                    className={`size-4 ${isBookmarked ? "text-primary" : ""}`}
+                    fill={isBookmarked ? "currentColor" : "none"}
+                  />
+                </button>
+              );
+            })()}
+            </div>
           ))
         )}
       </div>

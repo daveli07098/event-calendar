@@ -656,6 +656,16 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             events={filteredEvents}
             calendars={calendars}
             modal={isMobile}
+            bookmarkedIds={new Set((bookmarks ?? []).map((b) => b.id))}
+            onBookmarkToggle={
+              onBookmarkToggle
+                ? (id, next) => {
+                    onBookmarkToggle(id, next).catch(() =>
+                      toast.error("Couldn't update bookmark — please try again"),
+                    );
+                  }
+                : undefined
+            }
             onClose={() => setDayPanelDate(null)}
             onCreateEvent={(date) => {
               setSelectedEvent(null);

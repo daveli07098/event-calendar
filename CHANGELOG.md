@@ -10,6 +10,7 @@
 - fix(bookmarks): the "Bookmarked" sidebar section now always shows (with a how-to hint when empty) instead of being hidden until the first bookmark — it was undiscoverable
 ### Changed
 - feat(bookmarks): moved the bookmark list from the sidebar to an always-visible 🔖 button in the calendar header (next to the theme switcher, mobile too) — opens a popover with the upcoming count on the badge; clicking an entry jumps to and opens the event. Replaces the sidebar section
+- feat(bookmarks): quick 🔖 toggle on each day-panel event row — bookmark/unbookmark straight from the day popup without opening the event modal
 - feat(bookmarks): per-user event bookmarks — new `EventBookmark` join table (a join table rather than a flag on Event, so bookmarking an event on a shared calendar never affects other members), with migration `20260717000000_add_event_bookmark`
 - feat(bookmarks): bookmark toggle in the event modal header (🔖 next to the title) — available to read-only viewers of shared calendars too, since a bookmark is per-user and doesn't modify the event; optimistic UI with revert on API failure
 - feat(bookmarks): "Bookmarked" sidebar section on the homepage listing bookmarked events across ALL calendars (not just the visible month) — upcoming events first with their date, past events sink to the bottom crossed out with an "Ended" badge; clicking an entry opens the event modal and navigates the calendar to its date
