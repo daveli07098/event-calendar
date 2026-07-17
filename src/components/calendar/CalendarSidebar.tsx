@@ -400,14 +400,19 @@ export function CalendarSidebar({
         </SidebarSection>
 
         {/* Bookmarked events — pinned across all calendars; ended ones crossed out.
-            Only rendered once something is bookmarked (empty section is noise). */}
-        {bookmarks.length > 0 && (
+            Always rendered (with a hint when empty) so the feature is discoverable. */}
+        {onBookmarkSelect && (
           <SidebarSection
             id="bookmarks"
             label="Bookmarked"
             open={openSections.bookmarks}
             onToggle={() => toggleSection("bookmarks")}
           >
+            {bookmarks.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-2 py-1">
+                No bookmarks yet — open an event and tap the <Bookmark className="inline size-3 align-[-2px]" /> icon next to its title.
+              </p>
+            ) : (
             <div className="flex flex-col gap-0.5">
               {(() => {
                 // `today` is set client-side after mount (same pattern as the mini
@@ -465,6 +470,7 @@ export function CalendarSidebar({
                 });
               })()}
             </div>
+            )}
           </SidebarSection>
         )}
 
