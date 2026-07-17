@@ -78,6 +78,7 @@ const ROUND_BY_LABEL: Record<string, { round: KnockoutRound; order: number }> = 
   "4強": { round: "SF", order: 4 },
   準決賽: { round: "SF", order: 4 },
   季軍戰: { round: "ThirdPlace", order: 5 },
+  季軍賽: { round: "ThirdPlace", order: 5 }, // seed uses 賽, older data 戰 — accept both
   決賽: { round: "Final", order: 6 },
 };
 
@@ -106,7 +107,7 @@ export function isWorldCupEvent(e: EventType): boolean {
   if (e.description?.includes("FIFA 世界盃")) return true;
   if (e.calendar?.name?.toLowerCase().trim() === "world cup") return true;
   // Fall back to the title shapes in case the calendar/description differ.
-  return /^[A-L]組\s+.+\s+vs\.?\s+/.test(e.title) || /^(\d+強|決賽|季軍戰|準決賽)\s*\|/.test(e.title);
+  return /^[A-L]組\s+.+\s+vs\.?\s+/.test(e.title) || /^(\d+強|決賽|季軍戰|季軍賽|準決賽)\s*\|/.test(e.title);
 }
 
 /** Parse a group-stage fixture, or null if the event isn't one. */
@@ -129,7 +130,7 @@ const MATCH_ID_RE = /World Cup Match ID:\s*(\d+)/;
 
 /** Parse a knockout fixture, or null if the event isn't one. */
 export function parseKnockoutMatch(e: EventType): Omit<KnockoutMatch, "side"> | null {
-  const m = e.title.match(/^(\d+強|決賽|季軍戰|準決賽)\s*\|\s*(.+)$/);
+  const m = e.title.match(/^(\d+強|決賽|季軍戰|季軍賽|準決賽)\s*\|\s*(.+)$/);
   if (!m) return null;
   const roundInfo = ROUND_BY_LABEL[m[1]];
   if (!roundInfo) return null;

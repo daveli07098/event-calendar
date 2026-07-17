@@ -176,6 +176,31 @@ export const VERIFIED_KNOCKOUT_TEAMS: VerifiedKnockoutTeams[] = [
   { matchId: 86, home: "澳洲", away: "埃及" },
   { matchId: 87, home: "阿根廷", away: "佛得角" },
   { matchId: 88, home: "哥倫比亞", away: "加納" },
+  // ── Round of 16 → Final (real zh-yue bracket). The code's KNOCKOUT_FEEDERS
+  // pairs these differently from the actual 2026 draw, so we set every match's
+  // teams explicitly here (getKnockoutTeams overrides propagation). matchIds are
+  // assigned to keep the bracket tree visual: left half 89–92 / 97–98 / 101,
+  // right half 93–96 / 99–100 / 102; third-place 103, final 104.
+  // Round of 16
+  { matchId: 89, home: "巴拉圭", away: "法國" },
+  { matchId: 90, home: "加拿大", away: "摩洛哥" },
+  { matchId: 91, home: "葡萄牙", away: "西班牙" },
+  { matchId: 92, home: "美國", away: "比利時" },
+  { matchId: 93, home: "巴西", away: "挪威" },
+  { matchId: 94, home: "墨西哥", away: "英格蘭" },
+  { matchId: 95, home: "阿根廷", away: "埃及" },
+  { matchId: 96, home: "瑞士", away: "哥倫比亞" },
+  // Quarter-finals
+  { matchId: 97, home: "法國", away: "摩洛哥" },
+  { matchId: 98, home: "西班牙", away: "比利時" },
+  { matchId: 99, home: "挪威", away: "英格蘭" },
+  { matchId: 100, home: "阿根廷", away: "瑞士" },
+  // Semi-finals
+  { matchId: 101, home: "法國", away: "西班牙" },
+  { matchId: 102, home: "英格蘭", away: "阿根廷" },
+  // Third-place play-off (SF losers) & Final (SF winners)
+  { matchId: 103, home: "法國", away: "英格蘭" },
+  { matchId: 104, home: "西班牙", away: "阿根廷" },
 ];
 
 /**
@@ -226,11 +251,42 @@ export interface VerifiedKnockoutScore {
  * knockout stage produces results.
  */
 export const VERIFIED_KNOCKOUT_SCORES: VerifiedKnockoutScore[] = [
-  // ── Round of 32 (played so far; home = first slot of VERIFIED_KNOCKOUT_TEAMS) ──
+  // ── Round of 32 (home = first slot of VERIFIED_KNOCKOUT_TEAMS) ──
   { matchId: 73, homeScore: 0, awayScore: 1, status: "FT" }, // 南非 0–1 加拿大
   { matchId: 74, homeScore: 2, awayScore: 1, status: "FT" }, // 巴西 2–1 日本
-  { matchId: 75, homeScore: 1, awayScore: 1, status: "3-4 pens", winner: "away" }, // 德國 1–1 巴拉圭 (巴拉圭 win 4-3 on pens)
-  { matchId: 76, homeScore: 1, awayScore: 1, status: "2-3 pens", winner: "away" }, // 荷蘭 1–1 摩洛哥 (摩洛哥 win 3-2 on pens)
+  { matchId: 75, homeScore: 1, awayScore: 1, status: "3-4 pens", winner: "away" }, // 德國 1–1 巴拉圭 (pens 3-4)
+  { matchId: 76, homeScore: 1, awayScore: 1, status: "2-3 pens", winner: "away" }, // 荷蘭 1–1 摩洛哥 (pens 2-3)
+  { matchId: 77, homeScore: 1, awayScore: 2, status: "FT" }, // 科特迪瓦 1–2 挪威
+  { matchId: 78, homeScore: 3, awayScore: 0, status: "FT" }, // 法國 3–0 瑞典
+  { matchId: 79, homeScore: 2, awayScore: 0, status: "FT" }, // 墨西哥 2–0 厄瓜多
+  { matchId: 80, homeScore: 2, awayScore: 1, status: "FT" }, // 英格蘭 2–1 剛果民主共和國
+  { matchId: 81, homeScore: 3, awayScore: 2, status: "AET", winner: "home" }, // 比利時 3–2 塞內加爾 (a.e.t.)
+  { matchId: 82, homeScore: 2, awayScore: 0, status: "FT" }, // 美國 2–0 波赫
+  { matchId: 83, homeScore: 3, awayScore: 0, status: "FT" }, // 西班牙 3–0 奧地利
+  { matchId: 84, homeScore: 2, awayScore: 1, status: "FT" }, // 葡萄牙 2–1 克羅地亞
+  { matchId: 85, homeScore: 2, awayScore: 0, status: "FT" }, // 瑞士 2–0 阿爾及利亞
+  { matchId: 86, homeScore: 1, awayScore: 1, status: "2-4 pens", winner: "away" }, // 澳洲 1–1 埃及 (pens 2-4)
+  { matchId: 87, homeScore: 3, awayScore: 2, status: "AET", winner: "home" }, // 阿根廷 3–2 佛得角 (a.e.t.)
+  { matchId: 88, homeScore: 1, awayScore: 0, status: "FT" }, // 哥倫比亞 1–0 加納
+  // ── Round of 16 ──
+  { matchId: 89, homeScore: 0, awayScore: 1, status: "FT" }, // 巴拉圭 0–1 法國
+  { matchId: 90, homeScore: 0, awayScore: 3, status: "FT" }, // 加拿大 0–3 摩洛哥
+  { matchId: 91, homeScore: 0, awayScore: 1, status: "FT" }, // 葡萄牙 0–1 西班牙
+  { matchId: 92, homeScore: 1, awayScore: 4, status: "FT" }, // 美國 1–4 比利時
+  { matchId: 93, homeScore: 1, awayScore: 2, status: "FT" }, // 巴西 1–2 挪威
+  { matchId: 94, homeScore: 2, awayScore: 3, status: "FT" }, // 墨西哥 2–3 英格蘭
+  { matchId: 95, homeScore: 3, awayScore: 2, status: "FT" }, // 阿根廷 3–2 埃及
+  { matchId: 96, homeScore: 0, awayScore: 0, status: "4-3 pens", winner: "home" }, // 瑞士 0–0 哥倫比亞 (pens 4-3)
+  // ── Quarter-finals ──
+  { matchId: 97, homeScore: 2, awayScore: 0, status: "FT" }, // 法國 2–0 摩洛哥
+  { matchId: 98, homeScore: 2, awayScore: 1, status: "FT" }, // 西班牙 2–1 比利時
+  { matchId: 99, homeScore: 1, awayScore: 2, status: "AET", winner: "away" }, // 挪威 1–2 英格蘭 (a.e.t.)
+  { matchId: 100, homeScore: 3, awayScore: 1, status: "AET", winner: "home" }, // 阿根廷 3–1 瑞士 (a.e.t.)
+  // ── Semi-finals ──
+  { matchId: 101, homeScore: 0, awayScore: 2, status: "FT" }, // 法國 0–2 西班牙
+  { matchId: 102, homeScore: 1, awayScore: 2, status: "FT" }, // 英格蘭 1–2 阿根廷
+  // Third-place (M103 法國 vs 英格蘭, Jul 18) and Final (M104 西班牙 vs 阿根廷,
+  // Jul 19) are not played yet — teams set above, scores to follow.
 ];
 
 // ── Lookup maps (built once) ───────────────────────────────────────────────
