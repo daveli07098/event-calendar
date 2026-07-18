@@ -95,6 +95,9 @@ export function EventModal({
   const [syncingTeams, setSyncingTeams] = useState(false);
   const [syncTeamsError, setSyncTeamsError] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
+  // Additional info / reference URL — a later-announced page (e.g. per-station
+  // ticketing) that Sync prefers over the description's Ticket URL when set
+  const [referenceUrl, setReferenceUrl] = useState("");
   const [seatingPlanUrl, setSeatingPlanUrl] = useState("");
   const [seatingDragOver, setSeatingDragOver] = useState(false);
   const seatingInputRef = useRef<HTMLInputElement>(null);
@@ -193,6 +196,7 @@ export function EventModal({
         setCalendarId(event.calendarId || defaultCalendarId);
         setCategory(event.category ?? null);
         setArtist(event.artist ?? "");
+        setReferenceUrl(event.referenceUrl ?? "");
         setSeatingPlanUrl(seating);
         setSyncError(null);
         setSyncPreview(null);
@@ -211,6 +215,7 @@ export function EventModal({
         setCalendarId(initialData.calendarId || defaultCalendarId);
         setCategory(initialData.category ?? null);
         setArtist(initialData.artist ?? "");
+        setReferenceUrl(initialData.referenceUrl ?? "");
         setSeatingPlanUrl(seating);
         setSyncError(null);
         setSyncPreview(null);
@@ -233,6 +238,7 @@ export function EventModal({
         setCalendarId(defaultCalendarId);
         setCategory(null);
         setArtist("");
+        setReferenceUrl("");
         setSeatingPlanUrl("");
         setSyncError(null);
         setSyncPreview(null);
@@ -248,6 +254,7 @@ export function EventModal({
       setCalendarId(defaultCalendarId);
       setCategory(null);
       setArtist("");
+      setReferenceUrl("");
       setSeatingPlanUrl("");
       setSyncError(null);
       setSyncPreview(null);
@@ -300,11 +307,16 @@ export function EventModal({
     }
   };
 
-  // Sync: re-scrape the ticket URL, diff against stored event, show changes before applying
+  // Sync: re-scrape the ticket URL, diff against stored event, show changes before applying.
+  // When a reference URL is set (a later-announced / station-specific page), scrape THAT
+  // instead — but keep the description's Ticket URL as the event's identity so diff lookup,
+  // sale events, and related-event grouping stay anchored on the original URL.
   const handleSync = async () => {
     if (!event) return;
-    const ticketUrl = event.description?.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
-    if (!ticketUrl) return;
+    const descUrl = event.description?.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
+    const scrapeUrl = referenceUrl.trim() || event.referenceUrl || descUrl;
+    if (!scrapeUrl) return;
+    const canonicalUrl = descUrl ?? scrapeUrl;
     setSyncing(true);
     setSyncError(null);
     setSyncPreview(null);
@@ -313,16 +325,18 @@ export function EventModal({
       const scrapeRes = await fetch("/api/tickets/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: ticketUrl }),
+        body: JSON.stringify({ url: scrapeUrl }),
       });
       if (!scrapeRes.ok) throw new Error(await scrapeRes.text());
       const ticket = await scrapeRes.json();
+      // Re-anchor scraped data on the canonical Ticket URL (see note above)
+      if (ticket.sourceUrl !== canonicalUrl) ticket.sourceUrl = canonicalUrl;
 
       // 2. Diff against existing event
       const diffRes = await fetch("/api/tickets/diff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: ticketUrl, ticket, tzOffsetMinutes: new Date().getTimezoneOffset() }),
+        body: JSON.stringify({ url: canonicalUrl, ticket, eventId: event.id, tzOffsetMinutes: new Date().getTimezoneOffset() }),
       });
       if (!diffRes.ok) throw new Error("Diff check failed");
       const diff = await diffRes.json();
@@ -418,6 +432,7 @@ export function EventModal({
         calendarId,
         category: category ?? null,
         artist: artist.trim() || null,
+        referenceUrl: referenceUrl.trim() || null,
       });
     } finally {
       setSaving(false);
@@ -726,6 +741,36 @@ export function EventModal({
             );
           })()}
 
+          {/* Additional info / reference URL — later-announced page (e.g. per-station
+              ticketing); Sync scrapes this instead of the Ticket URL when filled in */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="reference-url" className="text-xs text-muted-foreground">
+              Additional Info / Reference 補充連結
+            </Label>
+            <div className="flex items-center gap-1.5">
+              <Input
+                id="reference-url"
+                type="url"
+                placeholder="Paste URL for ticket-sale updates (used by Sync)…"
+                value={referenceUrl}
+                onChange={(e) => setReferenceUrl(e.target.value)}
+                readOnly={readOnly}
+                className={`h-8 text-sm${readOnly ? " cursor-default select-text" : ""}`}
+              />
+              {referenceUrl.trim().startsWith("http") && (
+                <a
+                  href={referenceUrl.trim()}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open reference URL"
+                  className="text-primary hover:text-primary/80 shrink-0"
+                >
+                  <ExternalLink className="size-4" />
+                </a>
+              )}
+            </div>
+          </div>
+
           {/* Seating plan — URL input + clickable image preview + drag-drop */}
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground flex items-center gap-1">
@@ -863,6 +908,7 @@ export function EventModal({
                     calendarId,
                     category: category ?? null,
                     artist: artist.trim() || null,
+                    referenceUrl: referenceUrl.trim() || null,
                   })
                 }
                 disabled={saving || syncing}
@@ -885,8 +931,8 @@ export function EventModal({
                 {syncingTeams ? "更新中…" : "更新球隊"}
               </Button>
             )}
-            {/* Sync button — only shown when event has a Ticket URL and user can edit */}
-            {event && !readOnly && event.description?.includes("Ticket URL:") && (
+            {/* Sync button — shown when event has a Ticket URL or a reference URL and user can edit */}
+            {event && !readOnly && (event.description?.includes("Ticket URL:") || Boolean(referenceUrl.trim() || event.referenceUrl)) && (
               <Button
                 type="button"
                 variant="outline"

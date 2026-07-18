@@ -120,14 +120,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { url?: string; ticket?: ScrapedTicket; tzOffsetMinutes?: number };
+  let body: { url?: string; ticket?: ScrapedTicket; tzOffsetMinutes?: number; eventId?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { url, ticket, tzOffsetMinutes = 0 } = body;
+  const { url, ticket, tzOffsetMinutes = 0, eventId } = body;
   if (!url || !ticket) {
     return NextResponse.json({ error: "url and ticket required" }, { status: 400 });
   }
@@ -157,6 +157,16 @@ export async function POST(req: NextRequest) {
     },
     include: { calendar: true },
   });
+
+  // Fallback anchor: events synced via a reference URL may have no "Ticket URL:"
+  // line in their description — target them directly by id.
+  if (matchingEvents.length === 0 && eventId) {
+    const byId = await prisma.event.findFirst({
+      where: { id: eventId, calendarId: { in: calendarIds } },
+      include: { calendar: true },
+    });
+    if (byId) matchingEvents.push(byId);
+  }
 
   if (matchingEvents.length === 0) {
     return NextResponse.json<DiffResult>({

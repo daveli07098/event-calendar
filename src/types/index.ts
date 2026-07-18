@@ -84,6 +84,8 @@ export interface EventType {
   googleEventId: string | null;
   category: EventCategory | null;
   artist?: string | null;
+  /** Additional info / reference URL (e.g. per-station ticketing page) — preferred source for Sync */
+  referenceUrl?: string | null;
   createdAt: string;
   updatedAt: string;
   calendar?: CalendarType;
@@ -110,4 +112,5 @@ export interface EventFormData {
   calendarId: string;
   category?: EventCategory | null;
   artist?: string | null;
+  referenceUrl?: string | null;
 }

@@ -113,6 +113,7 @@ model Event {
   googleEventId  String?
   category       String?  // e.g. "concert", "exhibition", "theatre", "sports", "festival", "anime", "popup", "comedy", "film", "food", "other"
   artist         String?  // main performer/artist/group (e.g. "Bruno Mars") — extracted from ticket pages
+  referenceUrl   String?  // additional info/reference URL (e.g. per-station ticketing page) — preferred source for Sync updates
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
