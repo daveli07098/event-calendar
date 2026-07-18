@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import type { CalendarType, EventType, EventFormData, EventCategory, BookmarkedEvent } from "@/types";
 import { CATEGORY_EMOJI } from "@/types";
 import { EventModal } from "@/components/events/EventModal";
+import { detectLocationTag } from "@/lib/location-tags";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
 import { BookmarkPopover } from "@/components/calendar/BookmarkPopover";
 import { EventReminder } from "@/components/calendar/EventReminder";
@@ -180,8 +181,13 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     if (!visibleCalendarIds.includes(e.calendarId)) return false;
     if (categoryFilter && e.category !== categoryFilter) return false;
     if (locationFilter) {
+      // Match the same way the sidebar chip counts do (title + location against
+      // the shared LOCATION_RULES) — a substring check on location alone hides
+      // events tagged only in Chinese (e.g. "MOM Livehouse, 香港北角…" under the
+      // "Hong Kong" chip). Substring fallback keeps non-canonical filters working.
       const loc = e.location ?? "";
-      if (!loc.toLowerCase().includes(locationFilter.toLowerCase())) return false;
+      const matchesTag = detectLocationTag(e.title, e.location ?? null) === locationFilter;
+      if (!matchesTag && !loc.toLowerCase().includes(locationFilter.toLowerCase())) return false;
     }
     return true;
   });
