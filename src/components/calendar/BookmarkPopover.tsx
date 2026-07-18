@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Bookmark } from "lucide-react";
+import { Bookmark, ChevronLeft, ChevronRight } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { BookmarkedEvent } from "@/types";
+
+/** Rows per page in the popover list. */
+const PAGE_SIZE = 8;
 
 interface BookmarkPopoverProps {
   bookmarks: BookmarkedEvent[];
@@ -21,18 +24,27 @@ export function BookmarkPopover({ bookmarks, onSelect }: BookmarkPopoverProps) {
   // Snapshotted when the popover opens (event handler, not render) so the
   // ended/upcoming split is computed against a stable "now".
   const [now, setNow] = useState(0);
+  const [page, setPage] = useState(0);
 
   const ended = (b: BookmarkedEvent) => now > 0 && new Date(b.endTime).getTime() < now;
   const upcoming = bookmarks.filter((b) => !ended(b));
   const past = bookmarks.filter(ended).reverse(); // API sorts by start asc → most recent first
   const sorted = [...upcoming, ...past];
 
+  // Date-ordered pagination: upcoming pages first (soonest → latest), ended after
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, totalPages - 1);
+  const pageItems = sorted.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
+
   return (
     <Popover
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (o) setNow(Date.now());
+        if (o) {
+          setNow(Date.now());
+          setPage(0); // always reopen on the first (soonest-upcoming) page
+        }
       }}
     >
       <PopoverTrigger
@@ -56,7 +68,7 @@ export function BookmarkPopover({ bookmarks, onSelect }: BookmarkPopoverProps) {
           </p>
         ) : (
           <div className="flex flex-col gap-0.5">
-            {sorted.map((b) => {
+            {pageItems.map((b) => {
               const isPast = ended(b);
               const date = new Date(b.startTime).toLocaleDateString("en-US", {
                 month: "short",
@@ -101,6 +113,34 @@ export function BookmarkPopover({ bookmarks, onSelect }: BookmarkPopoverProps) {
                 </button>
               );
             })}
+          </div>
+        )}
+        {/* Pagination footer — only when the list spans multiple pages */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-border/60 mt-1.5 pt-1.5 px-1">
+            <button
+              type="button"
+              onClick={() => setPage(Math.max(0, clampedPage - 1))}
+              disabled={clampedPage === 0}
+              aria-label="Previous page"
+              className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none rounded px-1.5 py-1 hover:bg-accent transition-colors"
+            >
+              <ChevronLeft className="size-3.5" />
+              Prev
+            </button>
+            <span className="text-[10px] text-muted-foreground tabular-nums">
+              {clampedPage + 1} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage(Math.min(totalPages - 1, clampedPage + 1))}
+              disabled={clampedPage >= totalPages - 1}
+              aria-label="Next page"
+              className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none rounded px-1.5 py-1 hover:bg-accent transition-colors"
+            >
+              Next
+              <ChevronRight className="size-3.5" />
+            </button>
           </div>
         )}
       </PopoverContent>
