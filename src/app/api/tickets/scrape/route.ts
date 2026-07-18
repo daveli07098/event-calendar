@@ -11,6 +11,7 @@ import {
   getResetAt,
 } from "@/lib/ai/quota";
 import { geminiPool } from "@/lib/ai/models";
+import { parseJsonLoose } from "@/lib/ai/client";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1087,15 +1088,10 @@ async function callGemini(text: string, url: string, model = "gemini-3-flash-pre
   const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
   const usage = data.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | undefined;
   const tokensUsed = usage?.totalTokenCount ?? null;
-  const cleaned = raw.replace(/```json\n?|```/g, "").trim();
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    // Truncated response — attempt to salvage by closing open braces/brackets
-    const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
-    try { parsed = JSON.parse(salvaged); } catch { parsed = {}; }
-  }
+  // Shared lenient parser — handles code fences, preambles, truncation AND a
+  // stray trailing "}" after the object (gemini-3.5-flash JSON mode artifact
+  // that made the old inline salvage return {} and silently drop the result).
+  const parsed = parseJsonLoose(raw);
   return { ...(parsed as Partial<TicketData>), _tokensUsed: tokensUsed };
 }
 
@@ -1134,14 +1130,7 @@ async function callOpenAICompatible(
   const raw: string = data.choices?.[0]?.message?.content ?? "{}";
   const usage = data.usage as { total_tokens?: number } | undefined;
   const tokensUsed = usage?.total_tokens ?? null;
-  const cleaned = raw.replace(/```json\n?|```/g, "").trim();
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
-    try { parsed = JSON.parse(salvaged); } catch { parsed = {}; }
-  }
+  const parsed = parseJsonLoose(raw);
   return { ...(parsed as Partial<TicketData>), _tokensUsed: tokensUsed };
 }
 

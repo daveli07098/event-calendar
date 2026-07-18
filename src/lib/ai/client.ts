@@ -85,6 +85,35 @@ export function hasAiProvider(): boolean {
 }
 
 /**
+ * Extract the first BALANCED {…} block from a string, tracking brace depth
+ * while skipping string literals. Handles both trailing junk after the object
+ * (e.g. a stray extra "}" the model appends — seen from gemini-3.5-flash in
+ * JSON mode) and preambles before it ("Here is the JSON: {…}").
+ * Returns null when no balanced object exists (e.g. truncated output).
+ */
+function extractBalancedJson(s: string): string | null {
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inString) {
+      if (ch === "\\") i++; // skip escaped char
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null; // never closed — truncated
+}
+
+/**
  * Lenient JSON parsing for LLM output: strips code fences and attempts to
  * salvage truncated responses by closing open braces.
  */
@@ -95,13 +124,13 @@ export function parseJsonLoose(raw: string): Record<string, unknown> {
   } catch {
     // Fall through to recovery strategies below.
   }
-  // Model sometimes adds a preamble ("Here is the JSON: {…}") — extract the
-  // outermost {…} block and parse that.
-  const first = cleaned.indexOf("{");
-  const last = cleaned.lastIndexOf("}");
-  if (first !== -1 && last > first) {
+  // Preamble or trailing junk around the object — parse the first balanced
+  // {…} block. (lastIndexOf("}") is NOT safe here: a stray extra "}" after the
+  // object would be included and the whole result silently dropped.)
+  const balanced = extractBalancedJson(cleaned);
+  if (balanced) {
     try {
-      return JSON.parse(cleaned.slice(first, last + 1));
+      return JSON.parse(balanced);
     } catch {
       // Fall through to the truncation salvage below.
     }
