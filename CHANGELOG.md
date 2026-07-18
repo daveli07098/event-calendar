@@ -1,3 +1,10 @@
+## [2026-07-19] — Session: reference URL sync source & manual data ops
+### Added
+- feat(events): "Additional Info / Reference 補充連結" URL field on events — new nullable `Event.referenceUrl` column (migration `20260718162000_add_event_reference_url`), editable in the event modal, saved through the events API. When set, Sync scrapes THAT page (e.g. a later-announced per-station ticketing site) instead of the description's Ticket URL, while the scraped ticket is re-anchored on the canonical Ticket URL so diff lookup, sale-event updates and related-event grouping stay intact; the diff route also accepts an `eventId` fallback anchor for events with a reference URL but no Ticket URL line ([8932cc5])
+### Maintenance
+- data: LoveLive Link Live Dream ～103期卒業公演～ (Budokan, 2027-01-23/24) — appended 最速先行抽選 ticket info (prices / eplus / Day.1+Day.2 application windows) to the event description in the app's own field formats, and created two ⭐ sale-ticket reminder events spanning the JST application windows (Day.1: 10/14 12:00〜11/8 23:59, Day.2: 9/25 12:00〜11/8 23:59) — the AI scrape had missed the windows (page is server-rendered; extraction verified fine — model nondeterminism)
+- data: Pokémon RUN 30 (2026–2027 APAC tour) — created 9 all-day station events (Philippines, Taichung, Kaohsiung, Singapore, New Taipei, Malaysia, Jakarta, Thailand, Hong Kong) on event-reminders, each with the full 📍 tour schedule and Ticket URL for related-event grouping; venues TBD for MY/TH to be filled via the new reference URL field
+
 ## [2026-07-17] — Session: event bookmarks
 ### Added
 - feat(tickets): `artist` field end-to-end — the AI scrape now extracts the headlining performer/group (e.g. "Bruno Mars", not the tour name), shown as an editable "Artist 演出者" field in the ticket import UI, stored in a new `Event.artist` column (migration `20260717000001_add_event_artist`), and editable in the event modal
