@@ -1054,9 +1054,18 @@ async function callGemini(text: string, url: string, model = "gemini-3-flash-pre
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
     contents: [{ parts: [{ text: EXTRACT_PROMPT(text, url) }] }],
-    // temperature 0 → deterministic extraction. 2048 output tokens so events with
+    // temperature 0 → deterministic extraction. 8192 output tokens so events with
     // many sale windows / venue runs don't truncate before the later JSON fields.
-    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0 },
+    // Thinking models (gemini-3.5/3.1/2.5) burn hidden reasoning tokens out of
+    // maxOutputTokens — the old 2048 cap left ~70 tokens of JSON (finishReason
+    // MAX_TOKENS) so saleDates/venueRuns were silently lost; thinkingBudget: 0
+    // disables that for extraction (Gemma models reject thinkingConfig — skip).
+    generationConfig: {
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192,
+      temperature: 0,
+      ...(geminiPool.spec(model)?.thinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+    },
   });
 
   let res: Response | null = null;

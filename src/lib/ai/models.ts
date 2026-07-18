@@ -23,6 +23,13 @@ export interface GeminiModelSpec {
   grounding: boolean;
   /** Lightweight/cheap variant — preferred for high-volume, low-stakes tasks. */
   lite: boolean;
+  /**
+   * Thinking model family (accepts `thinkingConfig`). Thinking burns hidden
+   * reasoning tokens out of maxOutputTokens — a 2048 cap can leave ~70 tokens
+   * for the actual JSON (finishReason MAX_TOKENS), truncating extractions.
+   * Deterministic JSON extraction disables it via thinkingBudget: 0.
+   */
+  thinking: boolean;
 }
 
 /**
@@ -32,12 +39,12 @@ export interface GeminiModelSpec {
  * always 429s — a dead hop that only slows every cascade down.
  */
 export const GEMINI_POOL: readonly GeminiModelSpec[] = [
-  { id: "gemini-3.5-flash",      rpm: 5,  grounding: true,  lite: false },
-  { id: "gemini-3.1-flash-lite", rpm: 15, grounding: true,  lite: true  },
-  { id: "gemini-2.5-flash",      rpm: 5,  grounding: true,  lite: false },
-  { id: "gemini-2.5-flash-lite", rpm: 10, grounding: true,  lite: true  },
-  { id: "gemma-4-31b-it",        rpm: 15, grounding: false, lite: false },
-  { id: "gemma-4-26b-it",        rpm: 15, grounding: false, lite: false },
+  { id: "gemini-3.5-flash",      rpm: 5,  grounding: true,  lite: false, thinking: true  },
+  { id: "gemini-3.1-flash-lite", rpm: 15, grounding: true,  lite: true,  thinking: true  },
+  { id: "gemini-2.5-flash",      rpm: 5,  grounding: true,  lite: false, thinking: true  },
+  { id: "gemini-2.5-flash-lite", rpm: 10, grounding: true,  lite: true,  thinking: true  },
+  { id: "gemma-4-31b-it",        rpm: 15, grounding: false, lite: false, thinking: false },
+  { id: "gemma-4-26b-it",        rpm: 15, grounding: false, lite: false, thinking: false },
 ];
 
 /**

@@ -141,7 +141,16 @@ export async function callGeminiJson(
     // temperature 0 → deterministic extraction. Without it Gemini defaults to a
     // high temperature and gives inconsistent results (e.g. a clear sale page
     // flipping between hasDiscount true/false across identical calls).
-    generationConfig: { responseMimeType: "application/json", maxOutputTokens: 2048, temperature: 0 },
+    // Thinking models burn hidden reasoning tokens out of maxOutputTokens — at
+    // 2048 that left ~70 tokens of actual JSON (finishReason MAX_TOKENS) and the
+    // salvaged fragment lost saleDates/venueRuns entirely. Disable thinking for
+    // extraction and raise the cap so long window/run lists fit.
+    generationConfig: {
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192,
+      temperature: 0,
+      ...(geminiPool.spec(model)?.thinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+    },
   });
 
   let res: Response | null = null;
