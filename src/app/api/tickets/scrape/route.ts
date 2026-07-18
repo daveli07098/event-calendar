@@ -127,7 +127,10 @@ function extractTextFromHtml(html: string): string {
   // contain keywords (prices, sale dates, venue) right at the start of the
   // truncated text so they're never cut off by the 8000-char limit.
   const keywords = /HK\$|USD\$|price|ticket|sale|on.?sale|開售|售票|票價|presale|優先|venue|hall|arena|stadium|livehouse|live.?house|顯示位置|Cityline|KKTIX|Ticketmaster|Eventbrite|BOOKYAY|快達票|膠紙座|TickCats|klook|accupass|開催場所|開催期間|会場|開催日|開催地/i;
-  const sentences = text.split(/(?<=[.!?。！？\n])\s*/);
+  // ASCII .!? split only before whitespace — a zero-width split would sever
+  // domain-style tokens mid-word ("Trip.com" → "Trip." + "com …"), orphaning the
+  // sale date that follows the vendor name. CJK 。！？ never appear inside tokens.
+  const sentences = text.split(/(?<=[。！？\n])\s*|(?<=[.!?])\s+/);
   const relevant = sentences.filter(s => keywords.test(s));
   const rest = sentences.filter(s => !keywords.test(s));
   // Put relevant sentences first, then the rest — keeps total within limit
@@ -172,7 +175,11 @@ interface MetaFallback {
   location: string | null;
   saleDate: string | null;        // earliest public/general on-sale from JSON-LD
   saleFirstDate: string | null;   // earliest presale/fan-club date from JSON-LD
-  saleDates: Array<{ date: string; time: string | null; label: string }> | null;
+  saleDates: SaleWindow[] | null;
+  /** true when saleDates came from structured per-vendor data (Remix ticketing[])
+   *  and therefore lists EVERY vendor window — AI windows on the same dates are
+   *  duplicates/mislabels, not extras. */
+  saleDatesComplete: boolean;
   ticketPlatforms: string[] | null; // e.g. ["快達票 HK Ticketing", "Cityline"]
   sourceTimezone: string | null;  // ±HH:MM offset detected from JSON-LD or URL domain
   slots: EventSlot[];             // grouped performance timeslots (empty when ≤1 unique slot)
@@ -425,8 +432,17 @@ interface RemixEvent {
   endDate: string | null;
   endTime: string | null;
   ticketPlatforms: string[] | null; // authoritative sellers from ticketing[]
+  saleWindows: SaleWindow[] | null; // authoritative per-vendor sale windows from ticketing[]
   concertEvents: Array<{ startDate: string; dateObj: Date; raw: Record<string, unknown> }>;
 }
+
+/** Human label for a Timable ticketing[] entry's ticketingType, as shown on the page badges. */
+const REMIX_TICKETING_TYPE_LABELS: Record<string, string> = {
+  preOrder: "預訂",
+  public: "公開發售",
+  presale: "優先發售",
+  priority: "優先發售",
+};
 
 function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | null {
   const m = html.match(/window\.__remixContext\s*=\s*(\{[\s\S]*?\});\s*<\/script>/);
@@ -483,7 +499,13 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
   // Ticketing sellers — the authoritative platform list. Timable's page text /
   // sidebars often mention unrelated sellers (e.g. 膠紙座 from related events),
   // so this structured source must win over the text-pattern scan.
+  // Each entry also carries the vendor's exact sale window (start/end datetimes
+  // + ticketingType), so build the saleDates list here too — this must beat both
+  // the text-scan Strategy D (whose fixed vendor list misses e.g. hopestar and
+  // collapses same-date vendors) and the AI (which can credit a window to the
+  // page's organizer channel instead of the vendor).
   let ticketPlatforms: string[] | null = null;
+  const saleWindows: SaleWindow[] = [];
   if (Array.isArray(event.ticketing)) {
     const names = new Set<string>();
     for (const t of event.ticketing) {
@@ -491,9 +513,25 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
       const loc = isRec(t.location) ? t.location : null;
       const name = loc && typeof loc.name === "string" ? loc.name.trim() : null;
       if (name) names.add(name);
+      const startIso = typeof t.startDatetime === "string" ? t.startDatetime : null;
+      if (!startIso || Number.isNaN(new Date(startIso).getTime())) continue;
+      const start = utcToLocalStrings(new Date(startIso), tz, startIso);
+      const endIso = typeof t.endDatetime === "string" && !Number.isNaN(new Date(t.endDatetime).getTime())
+        ? t.endDatetime : null;
+      const end = endIso ? utcToLocalStrings(new Date(endIso), tz, endIso) : null;
+      const typeLabel = typeof t.ticketingType === "string"
+        ? (REMIX_TICKETING_TYPE_LABELS[t.ticketingType] ?? t.ticketingType) : null;
+      saleWindows.push({
+        date: start.date,
+        time: start.time,
+        endDate: end?.date ?? null,
+        endTime: end?.time ?? null,
+        label: [name, typeLabel].filter(Boolean).join(" ") || "Sale",
+      });
     }
     if (names.size) ticketPlatforms = [...names];
   }
+  saleWindows.sort((a, b) => `${a.date} ${a.time ?? ""}`.localeCompare(`${b.date} ${b.time ?? ""}`));
 
   const first = concertEvents[0]!;
   const last = concertEvents[concertEvents.length - 1]!;
@@ -511,6 +549,7 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
     endDate: ed && d0 && ed > d0 ? ed : null,
     endTime: et ? et.slice(0, 5) : null,
     ticketPlatforms,
+    saleWindows: saleWindows.length > 0 ? saleWindows : null,
     concertEvents,
   };
 }
@@ -1002,9 +1041,15 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     endTime: schemaEndTime ?? remix?.endTime ?? null,
     venue: schemaVenue || remix?.venue || null,
     location: schemaLocation || remix?.location || null,
-    saleDate: schemaSaleDate,
-    saleFirstDate: schemaSaleFirstDate,
-    saleDates: schemaSaleDates.length > 0 ? schemaSaleDates : null,
+    // Remix ticketing[] windows are complete + exactly labeled per vendor, so
+    // they beat the JSON-LD/text-scan strategies (which collapse same-date
+    // vendors and only know a fixed vendor list).
+    saleDate: remix?.saleWindows?.length
+      ? remix.saleWindows[remix.saleWindows.length - 1]!.date
+      : schemaSaleDate,
+    saleFirstDate: remix?.saleWindows?.length ? remix.saleWindows[0]!.date : schemaSaleFirstDate,
+    saleDates: remix?.saleWindows ?? (schemaSaleDates.length > 0 ? schemaSaleDates : null),
+    saleDatesComplete: !!remix?.saleWindows?.length,
     // Structured ticketing sellers (Remix) are authoritative — the text-pattern
     // scan misfires on unrelated sellers mentioned elsewhere on the page.
     ticketPlatforms: remix?.ticketPlatforms?.length ? remix.ticketPlatforms : metaPlatforms,
@@ -1027,6 +1072,7 @@ CRITICAL — performance date vs sale dates:
   • Sale dates are weeks or months BEFORE the show. If the page shows e.g. show on Sep 30 and sales starting Mar 20, then date=Sep 30, saleDates start Mar 20.
   • saleFirstDate MUST be earlier than "date". If your saleFirstDate equals "date", you have confused the concert date with a sale date — set saleFirstDate to null instead.
   • On Timable and similar HK ticketing pages, each ticket vendor (Klook, 膠紙座, Cityline, etc.) has its own section showing when THAT VENDOR'S sale opens. "YYYY年MM月DD日 HH:MM 開始" under a vendor name means the SALE opens on that date — NOT when the show happens. Add those as saleDates entries, not as the event date.
+  • The vendor of a sale row is the name DIRECTLY attached to that row's date (e.g. "預訂 hopestar 丨 2026年5月15日" → vendor hopestar). A name next to subscriber counts (訂閱人數/訂閱) is the page's ORGANIZER CHANNEL — never use it as a sale-row vendor or ticketPlatforms entry unless it also appears in its own sale row.
 
 CRITICAL — extract ALL sale windows into saleDates (one entry per distinct date/type):
   Common sale types to look for (use the EXACT label shown on the page, Chinese or English):
@@ -1614,6 +1660,9 @@ export async function POST(req: NextRequest) {
     ticketPlatforms: (() => {
       const ai = (aiResult as Partial<TicketData>).ticketPlatforms;
       const mt = meta.ticketPlatforms;
+      // Structured per-vendor data (Remix ticketing[]) lists every real seller —
+      // AI "extras" at that point are misreads (e.g. the page's organizer channel).
+      if (meta.saleDatesComplete && mt?.length) return mt;
       if (mt?.length && ai?.length) {
         // Merge without exact duplicates (case-insensitive)
         const merged = [...mt];
@@ -1626,10 +1675,17 @@ export async function POST(req: NextRequest) {
     })(),
     endDate: (aiResult as Partial<TicketData>).endDate ?? meta.endDate ?? textDate.endDate ?? null,
     endTime: (aiResult as Partial<TicketData>).endTime ?? meta.endTime ?? null,
-    saleDate: (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
-    saleFirstDate: (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
+    saleDate: meta.saleDatesComplete
+      ? meta.saleDate
+      : (aiResult as Partial<TicketData>).saleDate ?? meta.saleDate ?? null,
+    saleFirstDate: meta.saleDatesComplete
+      ? meta.saleFirstDate
+      : (aiResult as Partial<TicketData>).saleFirstDate ?? meta.saleFirstDate ?? null,
     // Merge AI + meta saleDates: meta has structurally extracted all windows (with descriptive labels);
     // AI may catch extra windows meta missed. Union by date, meta label wins on conflict.
+    // When meta is COMPLETE (per-vendor Remix ticketing[]), same-date AI windows are
+    // duplicates or mislabels; different-date AI windows can still add e.g. a
+    // fan-club presale only mentioned in the description text.
     saleDates: (() => {
       const ai = (aiResult as Partial<TicketData>).saleDates;
       const mt = meta.saleDates;
