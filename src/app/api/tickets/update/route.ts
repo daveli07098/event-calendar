@@ -192,7 +192,15 @@ export async function PATCH(req: NextRequest) {
 
     const winStart = parseLocalToUTC(window.date, window.time ?? null, tzOffsetMinutes);
     if (!winStart) continue;
-    const winEnd = new Date(winStart.getTime() + 3_600_000);
+    // Ranged windows span open → close; a window without an explicit close is
+    // the on-sale DAY, covered as a 1-day reminder (open → 23:59) — mirrors the
+    // add route so Sync-created/updated sale events get the same span.
+    let winEnd = parseLocalToUTC(
+      window.endDate ?? window.date,
+      window.endTime ?? "23:59",
+      tzOffsetMinutes,
+    );
+    if (!winEnd || winEnd <= winStart) winEnd = new Date(winStart.getTime() + 3_600_000);
 
     // Look up event ID in saleEventIds (new map), fall back to legacy fields
     const seId = saleEventIds[label]

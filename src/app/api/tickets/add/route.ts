@@ -245,10 +245,13 @@ export async function POST(req: NextRequest) {
     const saleIsCollaborative = saleResolved?.isCollaborative ?? false;
 
     for (const window of saleWindows) {
-      // Ranged windows (application open → close) span the whole period on the calendar
+      // Ranged windows (application open → close) span the whole period on the
+      // calendar. A window without an explicit close is the on-sale DAY — cover
+      // it as a 1-day reminder (open → 23:59) rather than an arbitrary 2h block.
       const { start: wStart, end: wEnd } = parseEventTime(
         window.date, window.time ?? null, tz, tzOffsetMinutes,
-        window.endDate ?? null, window.endTime ?? null,
+        window.endDate ?? null,
+        window.endTime ?? (window.endDate ? null : "23:59"),
       );
       const isPublic = window.label.toLowerCase().includes("public") || window.label.toLowerCase().includes("公開");
       const emoji = isPublic ? "🎫" : "⭐";
