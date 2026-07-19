@@ -522,8 +522,13 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
       const typeLabel = typeof t.ticketingType === "string"
         ? (REMIX_TICKETING_TYPE_LABELS[t.ticketingType] ?? t.ticketingType) : null;
       // Same-day windows (e.g. a 1-day 預訂 11:00–23:59) are just an on-sale
-      // moment — keep only the open, no range.
-      const isRange = !!end && end.date !== start.date;
+      // moment — keep only the open, no range. Likewise a window whose end is
+      // the performance day is Timable's way of saying "on sale until the show"
+      // for an open-ended 開始 row — the page shows no range there, so neither
+      // do we. Only an explicit close BEFORE the show (e.g. a lottery
+      // application window) is a real range.
+      const perfDate = concertEvents[0]?.startDate.split("T")[0] ?? null;
+      const isRange = !!end && end.date !== start.date && (!perfDate || end.date < perfDate);
       saleWindows.push({
         date: start.date,
         time: start.time,
