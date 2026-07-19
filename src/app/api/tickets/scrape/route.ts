@@ -521,11 +521,14 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
       const end = endIso ? utcToLocalStrings(new Date(endIso), tz, endIso) : null;
       const typeLabel = typeof t.ticketingType === "string"
         ? (REMIX_TICKETING_TYPE_LABELS[t.ticketingType] ?? t.ticketingType) : null;
+      // Same-day windows (e.g. a 1-day 預訂 11:00–23:59) are just an on-sale
+      // moment — keep only the open, no range.
+      const isRange = !!end && end.date !== start.date;
       saleWindows.push({
         date: start.date,
         time: start.time,
-        endDate: end?.date ?? null,
-        endTime: end?.time ?? null,
+        endDate: isRange ? end.date : null,
+        endTime: isRange ? end.time : null,
         label: [name, typeLabel].filter(Boolean).join(" ") || "Sale",
       });
     }
