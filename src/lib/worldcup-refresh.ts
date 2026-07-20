@@ -9,7 +9,8 @@
  * results (which always win) → persist the singleton snapshot.
  */
 import { prisma } from "@/lib/prisma";
-import { callGeminiGrounded, hasAiProvider, GROUNDED_MODELS } from "@/lib/ai/client";
+import { callGeminiGrounded, hasAiProvider } from "@/lib/ai/client";
+import { availableGrounded } from "@/lib/ai/model-quota";
 import { checkRemainingAiLimit, incrementAiLimit, getResetAt } from "@/lib/ai/quota";
 import {
   buildGroups,
@@ -268,7 +269,8 @@ export async function refreshWorldCupScores(uid: string, scope: RefreshScope = "
     let aiData: Record<string, unknown> | null = null;
     let fallback: { data: Record<string, unknown>; provider: string } | null = null;
     const failures: string[] = [];
-    for (const model of GROUNDED_MODELS) {
+    // Grounding-capable models with remaining free-tier daily quota first.
+    for (const model of await availableGrounded()) {
       try {
         const res = await callGeminiGrounded(prompt, model, maxOut);
         const arr = Array.isArray(res.data.results) ? res.data.results : [];

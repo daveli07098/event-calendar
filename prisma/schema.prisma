@@ -166,3 +166,14 @@ model WorldCupScores {
   provider  String?
   fetchedAt DateTime @updatedAt
 }
+
+// Per-model daily request counter for the shared Gemini free-tier pool (RPD).
+// Google resets daily quotas at midnight Pacific time, so `dayKey` is the
+// "YYYY-MM-DD" date in America/Los_Angeles. One global row per model — the
+// free-tier quota is per API key/project, not per user.
+model AiModelUsage {
+  model     String   @id
+  dayKey    String
+  count     Int      @default(0)
+  updatedAt DateTime @updatedAt
+}

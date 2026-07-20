@@ -19,6 +19,15 @@ export interface GeminiModelSpec {
   id: string;
   /** Approx free-tier requests/min. Higher = more resilient to 429 storms. */
   rpm: number;
+  /**
+   * Approx free-tier requests/DAY (AI Studio dashboard, 2026-07). This is the
+   * quota we actually exhaust in practice: calls are small (~3k tokens) and
+   * spread out, so RPM/TPM never spike — but 20-ish daily requests on the
+   * flagship flash models run out fast. Tracked in AiModelUsage (see
+   * src/lib/ai/model-quota.ts) so the cascade can start from a model with
+   * remaining daily quota instead of burning a 429 on an exhausted one.
+   */
+  rpd: number;
   /** Supports the google_search grounding tool (Gemma models do NOT). */
   grounding: boolean;
   /** Lightweight/cheap variant — preferred for high-volume, low-stakes tasks. */
@@ -37,14 +46,26 @@ export interface GeminiModelSpec {
  *
  * Deliberately excludes `gemini-2.0-flash`: its free tier is now limit 0, so it
  * always 429s — a dead hop that only slows every cascade down.
+ *
+ * Also deliberately excludes models whose idle free-tier quota looks tempting
+ * on the AI Studio dashboard but that CANNOT serve this cascade (verified by
+ * live calls, 2026-07-20). Do not re-add:
+ *   • gemini-3.1-flash-live-preview / gemini-3.5-live-translate-preview — only
+ *     support bidiGenerateContent (realtime WebSocket Live API); HTTP
+ *     generateContent rejects them.
+ *   • antigravity-preview-05-2026 — ListModels advertises generateContent, but
+ *     real calls 400 with "This model only supports Interactions API" (and
+ *     "JSON mode is not enabled") — it's the Antigravity agent quota bucket.
  */
 export const GEMINI_POOL: readonly GeminiModelSpec[] = [
-  { id: "gemini-3.5-flash",      rpm: 5,  grounding: true,  lite: false, thinking: true  },
-  { id: "gemini-3.1-flash-lite", rpm: 15, grounding: true,  lite: true,  thinking: true  },
-  { id: "gemini-2.5-flash",      rpm: 5,  grounding: true,  lite: false, thinking: true  },
-  { id: "gemini-2.5-flash-lite", rpm: 10, grounding: true,  lite: true,  thinking: true  },
-  { id: "gemma-4-31b-it",        rpm: 15, grounding: false, lite: false, thinking: false },
-  { id: "gemma-4-26b-it",        rpm: 15, grounding: false, lite: false, thinking: false },
+  { id: "gemini-3.5-flash",           rpm: 5,  rpd: 20,    grounding: true,  lite: false, thinking: true  },
+  { id: "gemini-3.1-flash-lite",      rpm: 15, rpd: 50,    grounding: true,  lite: true,  thinking: true  },
+  { id: "gemini-2.5-flash",           rpm: 5,  rpd: 20,    grounding: true,  lite: false, thinking: true  },
+  { id: "gemini-2.5-flash-lite",      rpm: 10, rpd: 20,    grounding: true,  lite: true,  thinking: true  },
+  { id: "gemma-4-31b-it",             rpm: 15, rpd: 14400, grounding: false, lite: false, thinking: false },
+  // NOTE: "gemma-4-26b-it" does not exist — ListModels says the real id is
+  // gemma-4-26b-a4b-it; the old id 404'd on every call (dead cascade hop).
+  { id: "gemma-4-26b-a4b-it",         rpm: 15, rpd: 14400, grounding: false, lite: false, thinking: false },
 ];
 
 /**

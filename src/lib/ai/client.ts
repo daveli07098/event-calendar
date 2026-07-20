@@ -16,6 +16,12 @@
  */
 import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { geminiPool } from "./models";
+import {
+  availableCascade,
+  isDailyQuotaError,
+  markModelExhausted,
+  recordModelCall,
+} from "./model-quota";
 
 /** Result of a JSON-mode AI call: parsed object plus usage metadata. */
 export interface AiJsonResult {
@@ -76,6 +82,9 @@ async function aiFetch(url: string, init: RequestInit): Promise<Response> {
 //   • GEMINI_MODELS  — full cascade, priority order (general JSON extraction).
 //   • GROUNDED_MODELS — grounding-capable only, highest free-tier quota first
 //     (Gemma excluded — it can't use the google_search tool).
+// These are the STATIC rosters; cascade loops should prefer the RPD-aware
+// availableCascade()/availableGrounded()/availableLite() from ./model-quota,
+// which skip models whose free-tier daily quota is already spent.
 export const GEMINI_MODELS = geminiPool.cascade();
 export const GROUNDED_MODELS = geminiPool.grounded();
 
@@ -85,32 +94,42 @@ export function hasAiProvider(): boolean {
 }
 
 /**
- * Extract the first BALANCED {…} block from a string, tracking brace depth
- * while skipping string literals. Handles both trailing junk after the object
+ * Extract ALL top-level BALANCED {…} blocks from a string, tracking brace
+ * depth while skipping string literals. Handles trailing junk after an object
  * (e.g. a stray extra "}" the model appends — seen from gemini-3.5-flash in
  * JSON mode) and preambles before it ("Here is the JSON: {…}").
- * Returns null when no balanced object exists (e.g. truncated output).
+ * Returns [] when no balanced object exists (e.g. truncated output).
  */
-function extractBalancedJson(s: string): string | null {
-  const start = s.indexOf("{");
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  for (let i = start; i < s.length; i++) {
-    const ch = s[i];
-    if (inString) {
-      if (ch === "\\") i++; // skip escaped char
-      else if (ch === '"') inString = false;
-      continue;
+function extractBalancedJsonBlocks(s: string): string[] {
+  const blocks: string[] = [];
+  let i = 0;
+  while ((i = s.indexOf("{", i)) !== -1) {
+    const start = i;
+    let depth = 0;
+    let inString = false;
+    let end = -1;
+    for (; i < s.length; i++) {
+      const ch = s[i];
+      if (inString) {
+        if (ch === "\\") i++; // skip escaped char
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') inString = true;
+      else if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
     }
-    if (ch === '"') inString = true;
-    else if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return s.slice(start, i + 1);
-    }
+    if (end === -1) break; // never closed — truncated tail
+    blocks.push(s.slice(start, end + 1));
+    i = end + 1;
   }
-  return null; // never closed — truncated
+  return blocks;
 }
 
 /**
@@ -124,19 +143,44 @@ export function parseJsonLoose(raw: string): Record<string, unknown> {
   } catch {
     // Fall through to recovery strategies below.
   }
-  // Preamble or trailing junk around the object — parse the first balanced
-  // {…} block. (lastIndexOf("}") is NOT safe here: a stray extra "}" after the
-  // object would be included and the whole result silently dropped.)
-  const balanced = extractBalancedJson(cleaned);
-  if (balanced) {
+  // Preamble or trailing junk around the object — parse balanced {…} blocks,
+  // LAST first: reasoning-leak models (gemma-4-26b-a4b-it) echo the prompt's
+  // schema as the FIRST block and emit the real answer at the end, so first-
+  // block-wins would return the schema echo as data. (lastIndexOf("}") is NOT
+  // safe either: a stray extra "}" after the object would be included and the
+  // whole result silently dropped.)
+  const blocks = extractBalancedJsonBlocks(cleaned);
+  for (let i = blocks.length - 1; i >= 0; i--) {
     try {
-      return JSON.parse(balanced);
+      return JSON.parse(blocks[i]);
     } catch {
-      // Fall through to the truncation salvage below.
+      // Unparseable block (e.g. a pseudo-JSON schema echo) — try the previous.
     }
   }
-  // Truncated response — close a dangling object.
-  const salvaged = cleaned.replace(/,\s*$/, "") + (cleaned.includes("{") ? "}" : "");
+  // Truncated response — drop a dangling partial member (`,"key":` or
+  // `,"key":"unterminated…`), then close whatever string/braces remain open.
+  // The old single `+ "}"` couldn't repair nested objects or mid-pair cuts.
+  const start = cleaned.indexOf("{");
+  if (start === -1) return {};
+  const trimmed = cleaned
+    .slice(start)
+    .replace(/,\s*"(?:[^"\\]|\\.)*"?\s*(?::\s*(?:"(?:[^"\\]|\\.)*)?)?$/, "")
+    .replace(/,\s*$/, "");
+  // Track the open {/[ nesting so each level is closed with its own bracket
+  // (a truncated saleDates array needs `}]}`, not `}}}`).
+  const closers: string[] = [];
+  let inString = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === "{") closers.push("}");
+    else if (ch === "[") closers.push("]");
+    else if (ch === "}" || ch === "]") closers.pop();
+  }
+  const salvaged = trimmed + (inString ? '"' : "") + closers.reverse().join("");
   try {
     return JSON.parse(salvaged);
   } catch {
@@ -203,8 +247,12 @@ export async function callGeminiJson(
     } catch {
       // Non-JSON error body — status code alone will have to do
     }
+    // A per-DAY 429 means the model is dead until Pacific midnight — record it
+    // so availableCascade() stops offering this model today.
+    if (res?.status === 429 && isDailyQuotaError(detail)) await markModelExhausted(model);
     throw new Error(`Gemini API error: ${res?.status ?? "unknown"}${detail}`);
   }
+  await recordModelCall(model); // count toward today's RPD budget
   const data = await res.json();
   const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
   const usage = data.usageMetadata as { totalTokenCount?: number } | undefined;
@@ -261,8 +309,10 @@ export async function callGeminiGrounded(
     } catch {
       // Non-JSON error body — status code alone will have to do
     }
+    if (res?.status === 429 && isDailyQuotaError(detail)) await markModelExhausted(model);
     throw new Error(`Gemini API error: ${res?.status ?? "unknown"}${detail}`);
   }
+  await recordModelCall(model); // count toward today's RPD budget
   const data = await res.json();
   // Grounded answers can span multiple parts — concatenate the text parts.
   const parts: Array<{ text?: string }> = data.candidates?.[0]?.content?.parts ?? [];
@@ -295,7 +345,9 @@ export async function callOpenAICompatibleJson(
     body: JSON.stringify({
       model,
       messages: [{ role: "user", content: prompt }],
-      max_tokens: 2048,
+      // 4096: typical extraction JSON is ~600 tokens, but events with many
+      // saleDates/venueRuns overflowed the old 2048 cap and got truncated.
+      max_tokens: 4096,
       temperature: 0,
     }),
   });
@@ -359,18 +411,23 @@ export async function aiExtractJson(prompt: string): Promise<AiJsonResult> {
 
   const providers: Array<() => Promise<AiJsonResult>> = [];
   if (geminiKey) {
-    for (const model of GEMINI_MODELS) {
+    // RPD-aware ordering: models with remaining daily quota first, exhausted
+    // ones skipped — no doomed 429 hop at the head of every cascade.
+    for (const model of await availableCascade()) {
       providers.push(() => callGeminiJson(prompt, model));
     }
   }
   if (groqKey) {
+    // llama-3.3-70b-versatile: current Groq production model with a 128k
+    // context. The old llama3-8b-8192 is decommissioned AND its 8k total
+    // context couldn't even fit a CJK-heavy 8000-char page (~10k tokens).
     providers.push(() =>
       callOpenAICompatibleJson(
         prompt,
         "https://api.groq.com/openai/v1/chat/completions",
         groqKey,
-        "llama3-8b-8192",
-        "groq-llama3"
+        "llama-3.3-70b-versatile",
+        "groq-llama-3.3-70b"
       )
     );
   }

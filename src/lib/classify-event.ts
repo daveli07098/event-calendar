@@ -1,5 +1,10 @@
 import { EVENT_CATEGORIES, type EventCategory } from "@/types";
-import { geminiPool } from "@/lib/ai/models";
+import {
+  availableLite,
+  isDailyQuotaError,
+  markModelExhausted,
+  recordModelCall,
+} from "@/lib/ai/model-quota";
 
 const VALID_CATEGORIES = new Set<string>(EVENT_CATEGORIES);
 
@@ -19,11 +24,9 @@ const CATEGORY_PROMPT_LINES = `  concert    — live music, band show, K-pop con
   other      — does not fit any above`;
 
 // Classification is a cheap, high-volume task — use the pool's lightweight
-// models (highest free-tier quota first) from the shared roster.
-const GEMINI_MODELS = geminiPool.lite();
-
+// models, ordered by remaining free-tier DAILY quota (see model-quota.ts).
 async function callGemini(prompt: string, apiKey: string): Promise<string | null> {
-  for (const model of GEMINI_MODELS) {
+  for (const model of await availableLite()) {
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -37,7 +40,15 @@ async function callGemini(prompt: string, apiKey: string): Promise<string | null
           signal: AbortSignal.timeout(20000),
         }
       );
-      if (!res.ok) continue;
+      if (!res.ok) {
+        // Per-DAY 429 → mark the model spent so later calls skip it today.
+        if (res.status === 429) {
+          const detail = await res.text().catch(() => "");
+          if (isDailyQuotaError(detail)) await markModelExhausted(model);
+        }
+        continue;
+      }
+      await recordModelCall(model); // count toward today's RPD budget
       const data = await res.json();
       return data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
     } catch {

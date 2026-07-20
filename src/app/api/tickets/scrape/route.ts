@@ -11,6 +11,13 @@ import {
   getResetAt,
 } from "@/lib/ai/quota";
 import { geminiPool } from "@/lib/ai/models";
+import {
+  availableCascade,
+  availableLite,
+  isDailyQuotaError,
+  markModelExhausted,
+  recordModelCall,
+} from "@/lib/ai/model-quota";
 import { parseJsonLoose } from "@/lib/ai/client";
 
 // ---------------------------------------------------------------------------
@@ -1137,7 +1144,21 @@ async function callGemini(text: string, url: string, model = "gemini-3-flash-pre
     if (res.ok || res.status !== 503) break; // success or non-retryable error
   }
 
-  if (!res || !res.ok) throw new Error(`Gemini API error: ${res?.status ?? "unknown"}`);
+  if (!res || !res.ok) {
+    // Read the error detail so a per-DAY 429 can mark the model exhausted for
+    // the rest of the Pacific day (availableCascade() then skips it) — and so
+    // failures are diagnosable beyond a bare status code.
+    let detail = "";
+    try {
+      const errBody = await res?.json();
+      if (errBody?.error?.message) detail = ` — ${errBody.error.message}`;
+    } catch {
+      // Non-JSON error body — status code alone will have to do
+    }
+    if (res?.status === 429 && isDailyQuotaError(detail)) await markModelExhausted(model);
+    throw new Error(`Gemini API error: ${res?.status ?? "unknown"}${detail}`);
+  }
+  await recordModelCall(model); // count toward today's RPD budget
   const data = await res.json();
   const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
   const usage = data.usageMetadata as { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number } | undefined;
@@ -1172,7 +1193,9 @@ async function callOpenAICompatible(
           content: EXTRACT_PROMPT(text, url),
         },
       ],
-      max_tokens: 2048,
+      // 4096: typical extraction JSON is ~600 tokens, but events with many
+      // saleDates/venueRuns overflowed the old 2048 cap and got truncated.
+      max_tokens: 4096,
       temperature: 0,
     }),
     // Bound the call so a stalled provider falls through instead of hanging.
@@ -1255,8 +1278,8 @@ async function generateDescription(t: TicketData, apiKey: string): Promise<strin
 
   const prompt = `Write ONE natural, concise calendar description (max 25 words) for this event, in the SAME language as the title. Say what it is and where/when. Output ONLY the sentence — no keywords, tags, hashtags, quotes, or labels.\n\n${facts}`;
 
-  // Lightweight task → use the pool's lite models (highest free-tier quota first).
-  for (const model of geminiPool.lite()) {
+  // Lightweight task → use the pool's lite models with remaining daily quota.
+  for (const model of await availableLite()) {
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -1271,7 +1294,15 @@ async function generateDescription(t: TicketData, apiKey: string): Promise<strin
           signal: AbortSignal.timeout(12_000),
         },
       );
-      if (!res.ok) continue; // 429/400 → try next lite model
+      if (!res.ok) {
+        // Per-DAY 429 → mark the model spent so later calls skip it today.
+        if (res.status === 429) {
+          const detail = await res.text().catch(() => "");
+          if (isDailyQuotaError(detail)) await markModelExhausted(model);
+        }
+        continue; // 429/400 → try next lite model
+      }
+      await recordModelCall(model); // count toward today's RPD budget
       const data = await res.json();
       const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
       const clean = raw.trim().replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s+/g, " ");
@@ -1563,10 +1594,11 @@ export async function POST(req: NextRequest) {
     // Try each provider in order; skip to next on 429
     const providers: Array<() => Promise<{ result: Partial<TicketData>; name: string }>> = [];
 
-    // Gemini models in priority order — sourced from the shared pool so the
-    // roster stays in sync with every other AI feature (see src/lib/ai/models.ts).
+    // Gemini models sourced from the shared pool (see src/lib/ai/models.ts),
+    // ordered by remaining free-tier DAILY quota: models with headroom first,
+    // exhausted ones skipped — no doomed 429 burned at the head of the cascade.
     if (geminiKey) {
-      for (const model of geminiPool.cascade()) {
+      for (const model of await availableCascade()) {
         const m = model; // capture for closure
         providers.push(async () => ({
           result: await callGemini(pageText, url, m),
@@ -1575,14 +1607,17 @@ export async function POST(req: NextRequest) {
       }
     }
     if (groqKey) {
+      // llama-3.3-70b-versatile: current Groq production model with a 128k
+      // context. The old llama3-8b-8192 is decommissioned AND its 8k total
+      // context couldn't even fit a CJK-heavy 8000-char page (~10k tokens).
       providers.push(async () => ({
         result: await callOpenAICompatible(
           pageText, url,
           "https://api.groq.com/openai/v1/chat/completions",
           groqKey,
-          "llama3-8b-8192"
+          "llama-3.3-70b-versatile"
         ),
-        name: "groq-llama3",
+        name: "groq-llama-3.3-70b",
       }));
     }
     if (githubToken) {
