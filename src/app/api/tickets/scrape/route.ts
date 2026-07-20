@@ -18,6 +18,12 @@ import {
   markModelExhausted,
   recordModelCall,
 } from "@/lib/ai/model-quota";
+import {
+  getScrapeCache,
+  patchScrapeCache,
+  saveScrapeCache,
+  scrapeCacheKey,
+} from "@/lib/ai/scrape-cache";
 import { parseJsonLoose } from "@/lib/ai/client";
 
 // ---------------------------------------------------------------------------
@@ -1079,6 +1085,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
 // ---------------------------------------------------------------------------
 // Compact prompt — fewer tokens, same structured output.
 // Field names are self-explanatory; examples only where format is ambiguous.
+// Bump the version whenever the prompt changes materially — it is part of the
+// AiScrapeCache key, so old cached extractions are invalidated automatically.
+const EXTRACT_PROMPT_VERSION = "2026-07-20.1";
 const EXTRACT_PROMPT = (text: string, url: string) => `Extract event/ticket info from the page text below. Return ONLY a JSON object with these fields (null if not found):
 {"title":"Event name","date":"YYYY-MM-DD","time":"HH:MM 24h","endDate":"YYYY-MM-DD last day if multi-day/multi-night","endTime":"HH:MM 24h end time if stated (e.g. from '8:00 PM – 10:30 PM' → 22:30)","venue":"building/hall name","location":"city or address","country":"country name in English (e.g. Japan, Hong Kong, Taiwan) or null if unknown","description":"ONE natural sentence summarising the event (who/what/where/when), written in the same language as the title — write it yourself from the facts; NEVER a comma-separated keyword/tag list","ticketPrices":["HK$699","HK$899"],"ticketPlatforms":["Cityline","KKTIX"],"saleDate":"YYYY-MM-DD HH:MM public/general on-sale","saleFirstDate":"YYYY-MM-DD HH:MM earliest presale/priority (must be BEFORE the performance date)","saleDates":[{"date":"YYYY-MM-DD open","time":"HH:MM or null","endDate":"YYYY-MM-DD close of the window, or null","endTime":"HH:MM close time or null","label":"exact label from page"}],"venueRuns":[{"venue":"venue name","location":"city or null","date":"YYYY-MM-DD","endDate":"YYYY-MM-DD"}],"category":"one of: concert|exhibition|theatre|sports|festival|anime|popup|kuji|crane|comedy|film|food|other","artist":"main performer/artist/group/team headlining the event (e.g. Bruno Mars, 五月天) — the act itself, NOT the tour name; null for events without a performer (exhibitions, pop-ups)"}
 
@@ -1107,6 +1116,8 @@ CRITICAL — multi-night concerts: if multiple performance dates are listed (e.g
 CRITICAL — endTime: extract from patterns like "7:30 PM – 10:10 PM" (→ 22:10) or JSON-LD endDate.
 
 CRITICAL — category: choose the single best fit from: concert (live music/bands), exhibition (art/gallery/museum), theatre (play/musical/opera/dance), sports (matches/tournaments), festival (cultural fair/parade), anime (anime/manga/IP/character merch), popup (pop-up store/limited retail), kuji (ichiban kuji/一番くじ/one-kuji lottery merchandise raffle), crane (crane game/UFO catcher/arcade prize merchandise/クレーンゲームプライズ), comedy (stand-up), film (screening/premiere), food (food fair/dining event), ticket (ticket sale / presale reminder with no physical performance on that date), other.
+
+CRITICAL — "description" and "category" are REQUIRED, never null: even from sparse or keyword-only page text, COMPOSE the description yourself from whatever facts you extracted (title/venue/date are enough for a sentence), and always pick the closest category — use "other" only as the true last resort.
 
 URL: ${url}
 ${text}`.trim();
@@ -1583,11 +1594,31 @@ export async function POST(req: NextRequest) {
   let aiError: string | null = null;
   let aiTokensUsed: number | null = null;
 
+  // Reuse a previous AI extraction when this exact page content was already
+  // extracted (Sync re-scrapes ticket pages on every check; unchanged page →
+  // identical prompt at temperature 0 → identical result). A cache hit costs
+  // ZERO Gemini requests — the free tier's binding limit is requests/day —
+  // and doesn't consume the user's daily app quota either. Any page-content
+  // change or EXTRACT_PROMPT_VERSION bump produces a new hash → fresh AI call.
+  const cacheKey = scrapeCacheKey(EXTRACT_PROMPT_VERSION, url, pageText);
+  let cacheHit = false;
+  if (hasAiProvider) {
+    const cached = await getScrapeCache(cacheKey);
+    if (cached) {
+      aiResult = cached.result as Partial<TicketData>;
+      aiUsed = `cache (${cached.provider})`;
+      cacheHit = true;
+      console.log(`[tickets/scrape] AI extraction served from cache (${cached.provider}) — no AI call`);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // AI cascade: multiple Gemini models → Groq → Copilot
   // Each Gemini model is tried in order; on 429 (quota) we fall through to next.
   // ---------------------------------------------------------------------------
-  if (hasAiProvider && !withinLimit) {
+  if (cacheHit) {
+    // Served from cache — skip the cascade entirely.
+  } else if (hasAiProvider && !withinLimit) {
     console.warn(`[tickets/scrape] User ${uid} hit daily AI limit (${AI_DAILY_LIMIT}/day) — using OG-meta fallback`);
     aiError = `Daily AI limit reached (${AI_DAILY_LIMIT}/day)`;
   } else if (hasAiProvider && withinLimit) {
@@ -1640,6 +1671,14 @@ export async function POST(req: NextRequest) {
         if (aiTokensUsed) console.log(`[tickets/scrape] ${name} tokens used: ${aiTokensUsed}`);
         console.log(`[tickets/scrape][ai-result] ${name}:`, JSON.stringify(aiResult, null, 2));
         await incrementAiLimit(uid);
+        // Cache the extraction for future scrapes of the same page content —
+        // but only a substantive one; freezing an empty parse for 30 days
+        // would silently lock in a bad result.
+        if (result.title || result.date) {
+          const { _tokensUsed, ...cacheable } = result as Record<string, unknown>;
+          void _tokensUsed;
+          await saveScrapeCache(cacheKey, url, cacheable, name);
+        }
         break; // success — stop trying
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -1863,6 +1902,9 @@ export async function POST(req: NextRequest) {
   // (same prompt and model cascade used by the Classify Category tab).
   if (!ticket.category) {
     ticket.category = await classifySingleEvent(ticket.title, ticket.venue ?? ticket.location, ticket.description);
+    // Remember the classification in the scrape cache so re-scrapes of this
+    // page content don't re-spend a request on the classify fallback.
+    if (ticket.category) await patchScrapeCache(cacheKey, { category: ticket.category });
   }
 
   // Make good use of AI for the content: when the page only yielded a keyword/tag
@@ -1874,6 +1916,8 @@ export async function POST(req: NextRequest) {
     if (generated) {
       ticket.description = generated;
       console.log(`[tickets/scrape] generated description via AI (was keyword-soup/empty)`);
+      // Same: cache the composed description alongside the extraction.
+      await patchScrapeCache(cacheKey, { description: generated });
     }
   }
 

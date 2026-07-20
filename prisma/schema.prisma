@@ -177,3 +177,19 @@ model AiModelUsage {
   count     Int      @default(0)
   updatedAt DateTime @updatedAt
 }
+
+// Cache of AI scrape extractions keyed by sha256(prompt version + url + page
+// text). Sync re-scrapes ticket pages on every check; when the page content is
+// unchanged the prompt would be identical, so the previous AI result is reused
+// at ZERO Gemini requests (the free tier's binding limit is requests/day).
+// Any page-content change or prompt bump produces a new hash → fresh AI call.
+model AiScrapeCache {
+  hash      String   @id
+  url       String
+  result    Json
+  provider  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([updatedAt])
+}
