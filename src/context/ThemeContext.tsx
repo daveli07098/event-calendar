@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -16,7 +17,9 @@ import {
   STORAGE_KEY,
   type Theme,
 } from "@/lib/theme";
-import { getEventTheme } from "@/lib/event-themes";
+import { EVENT_THEMES } from "@/lib/event-themes";
+import { applyThemeToDocument } from "@/lib/theme-boot";
+import { mutate } from "@/lib/mutate";
 
 interface ThemeContextValue {
   theme: Theme;
@@ -34,45 +37,11 @@ function prefersDark(): boolean {
     : false;
 }
 
+// Thin wrapper around the shared `applyThemeToDocument` (src/lib/theme-boot.ts) —
+// that single function is also stringified into the pre-hydration boot script in
+// src/app/layout.tsx, so this call site and the boot script can never drift apart.
 function applyTheme(theme: Theme, isDark: boolean) {
-  const root = document.documentElement;
-
-  // --- dark class ---
-  root.classList.toggle("dark", isDark);
-
-  // --- primary accent: an active event theme overrides the chosen accent color ---
-  const eventTheme = getEventTheme(theme.eventTheme);
-  if (eventTheme) {
-    // Event skin takes priority — paint its palette and tag the root so CSS can
-    // hook decorative styles via [data-event-theme="…"] if desired.
-    root.style.setProperty("--primary", isDark ? eventTheme.darkPrimary : eventTheme.lightPrimary);
-    root.style.setProperty("--primary-foreground", eventTheme.primaryForeground);
-    root.style.setProperty("--ring", isDark ? eventTheme.darkRing : eventTheme.lightRing);
-    root.dataset.eventTheme = eventTheme.id;
-  } else {
-    delete root.dataset.eventTheme;
-    // Fall back to the accent color (or remove overrides for default slate).
-    const accent = ACCENT_COLORS[theme.accent];
-    if (theme.accent === "slate") {
-      root.style.removeProperty("--primary");
-      root.style.removeProperty("--primary-foreground");
-      root.style.removeProperty("--ring");
-    } else {
-      root.style.setProperty("--primary", isDark ? accent.darkPrimary : accent.lightPrimary);
-      root.style.setProperty("--primary-foreground", accent.primaryForeground);
-      root.style.setProperty("--ring", isDark ? accent.darkRing : accent.lightRing);
-    }
-  }
-
-  // --- border radius ---
-  root.style.setProperty("--radius", RADIUS_VALUES[theme.radius].value);
-
-  // --- font ---
-  const fontVar = FONT_OPTIONS[theme.font ?? "geist"].variable;
-  root.style.setProperty("--font-sans", `var(${fontVar})`);
-
-  // --- density via data attribute (CSS selects [data-density="compact"]) ---
-  root.dataset.density = theme.density;
+  applyThemeToDocument(theme, isDark, EVENT_THEMES, ACCENT_COLORS, RADIUS_VALUES, FONT_OPTIONS);
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -88,6 +57,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       // ignore quota errors
     }
   }, []);
+
+  // Set the instant a user-initiated change happens (setTheme, below) and checked
+  // by the boot effect's server-fetch callback: guards against the race where the
+  // user toggles the theme while the GET below is still in flight, and the stale
+  // server payload would otherwise land afterwards and silently clobber their
+  // fresh choice.
+  const userEditedRef = useRef(false);
 
   // Boot: load from localStorage (fast, for instant paint) → then authoritative fetch from server
   useEffect(() => {
@@ -106,6 +82,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     fetch("/api/user/settings")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        // If the user already changed the theme while this GET was in flight,
+        // their change wins — don't overwrite it with the (now stale) server value.
+        if (userEditedRef.current) return;
         if (data?.theme && typeof data.theme === "object") {
           const serverTheme: Theme = { ...DEFAULT_THEME, ...(data.theme as Partial<Theme>) };
           setThemeState(serverTheme);
@@ -128,15 +107,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = useCallback(
     (patch: Partial<Theme>) => {
+      userEditedRef.current = true;
       setThemeState((prev) => {
         const next = { ...prev, ...patch };
         applyAndPersist(next);
-        // Persist to server (best-effort — don't block the UI)
-        fetch("/api/user/settings", {
+        // Persist to server (best-effort — don't block the UI). `mutate()` checks
+        // res.ok and surfaces a single toast.error on failure instead of swallowing
+        // it, so a sync failure isn't silently invisible to the user; localStorage
+        // still holds the change either way.
+        void mutate("/api/user/settings", {
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ theme: next }),
-        }).catch(() => {/* ignore — localStorage is the fallback */});
+          body: { theme: next },
+          fallbackError: "Couldn't sync your theme to your account — it's saved on this device only.",
+        });
         return next;
       });
     },
