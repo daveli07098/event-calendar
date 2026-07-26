@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { signOut } from "next-auth/react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +27,7 @@ import {
   PopoverContent,
 } from "@/components/ui/popover";
 import { ShareCalendarDialog } from "@/components/calendar/ShareCalendarDialog";
+import { mutate } from "@/lib/mutate";
 import type { CalendarType } from "@/types";
 
 const PRESET_COLORS = [
@@ -122,32 +124,36 @@ export function SettingsClient({ user }: SettingsClientProps) {
   }, []);
 
   const deleteCalendar = async (id: string) => {
+    // No AlertDialog primitive exists in src/components/ui/ yet — deferring
+    // to native confirm() for this destructive action rather than hand-rolling
+    // a duplicate one (another agent may add one).
     if (!confirm("Delete this calendar and all its events?")) return;
-    const res = await fetch(`/api/calendars/${id}`, { method: "DELETE" });
-    if (res.ok) {
+    const result = await mutate(`/api/calendars/${id}`, {
+      method: "DELETE",
+      fallbackError: "Failed to delete calendar.",
+    });
+    if (result.ok) {
       setCalendars((prev) => prev.filter((c) => c.id !== id));
-    } else {
-      const data = await res.json();
-      alert(data.error || "Failed to delete");
     }
   };
 
   const updateCalendar = async (id: string, name: string) => {
-    await fetch(`/api/calendars/${id}`, {
+    const result = await mutate(`/api/calendars/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: { name },
+      fallbackError: "Failed to rename calendar.",
+      successMessage: "Calendar renamed.",
     });
-    fetchCalendars();
+    if (result.ok) fetchCalendars();
   };
 
   const updateCalendarColor = async (id: string, color: string) => {
-    const res = await fetch(`/api/calendars/${id}`, {
+    const result = await mutate(`/api/calendars/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ color }),
+      body: { color },
+      fallbackError: "Failed to update calendar color.",
     });
-    if (res.ok) {
+    if (result.ok) {
       setCalendars((prev) =>
         prev.map((c) => (c.id === id ? { ...c, color } : c))
       );
@@ -163,13 +169,12 @@ export function SettingsClient({ user }: SettingsClientProps) {
   const syncCalendar = async (cal: CalendarType) => {
     setSyncingCalendarId(cal.id);
     try {
-      const res = await fetch(`/api/calendars/${cal.id}/sync`, { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
-        alert(`Synced ${data.importedEvents} events from Google Calendar.`);
+      const result = await mutate<{ importedEvents: number }>(`/api/calendars/${cal.id}/sync`, {
+        fallbackError: "Sync failed.",
+      });
+      if (result.ok && result.data) {
+        toast.success(`Synced ${result.data.importedEvents} events from Google Calendar.`);
         fetchCalendars();
-      } else {
-        alert(data.error || "Sync failed");
       }
     } finally {
       setSyncingCalendarId(null);
@@ -177,19 +182,24 @@ export function SettingsClient({ user }: SettingsClientProps) {
   };
 
   const leaveCalendar = async (id: string) => {
+    // No AlertDialog primitive exists in src/components/ui/ yet — deferring
+    // to native confirm() for this destructive action rather than hand-rolling
+    // a duplicate one (another agent may add one).
     if (!confirm("Leave this calendar? You will lose access to its events.")) return;
-    await fetch(`/api/calendars/${id}`, { method: "DELETE" });
-    setCalendars((prev) => prev.filter((c) => c.id !== id));
+    const previousCalendars = calendars;
+    await mutate(`/api/calendars/${id}`, {
+      method: "DELETE",
+      optimisticUpdate: () => setCalendars((prev) => prev.filter((c) => c.id !== id)),
+      rollback: () => setCalendars(previousCalendars),
+      fallbackError: "Failed to leave calendar.",
+    });
   };
 
   const duplicateCalendar = async (cal: CalendarType) => {
-    const res = await fetch(`/api/calendars/${cal.id}/duplicate`, { method: "POST" });
-    if (res.ok) {
-      fetchCalendars();
-    } else {
-      const data = await res.json();
-      alert(data.error || "Failed to duplicate");
-    }
+    const result = await mutate(`/api/calendars/${cal.id}/duplicate`, {
+      fallbackError: "Failed to duplicate calendar.",
+    });
+    if (result.ok) fetchCalendars();
   };
 
   const exportCalendar = (cal: CalendarType) => {

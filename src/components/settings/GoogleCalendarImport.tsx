@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Download, Loader2, RefreshCw, Unlink } from "lucide-react";
+import { mutate } from "@/lib/mutate";
 
 interface GoogleCalendarImportProps {
   onImported: () => void;
@@ -36,18 +38,21 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
   }, []);
 
   const unlinkGoogle = async () => {
+    // No AlertDialog primitive exists in src/components/ui/ yet — deferring
+    // to native confirm() for this destructive action rather than hand-rolling
+    // a duplicate one (another agent may add one).
     if (!confirm("Unlink your Google account? You can reconnect at any time, but synced calendars will stop updating.")) return;
     setUnlinking(true);
     try {
-      const res = await fetch("/api/google/account", { method: "DELETE" });
-      if (res.ok) {
+      const result = await mutate("/api/google/account", {
+        method: "DELETE",
+        fallbackError: "Failed to unlink Google account.",
+      });
+      if (result.ok) {
         setHasGoogleLinked(false);
         setGoogleCalendars([]);
         setError(null);
         onImported(); // refresh calendars (clears G badge)
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to unlink");
       }
     } finally {
       setUnlinking(false);
@@ -75,26 +80,26 @@ export function GoogleCalendarImport({ onImported }: GoogleCalendarImportProps) 
 
   const importCalendar = async (googleCal: GoogleCalendarItem) => {
     setImporting(googleCal.id);
-    try {
-      const res = await fetch("/api/google/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          googleCalendarId: googleCal.id,
-          name: googleCal.summary,
-          color: googleCal.backgroundColor || "#0f9d58",
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        alert(`Imported ${data.importedEvents} events from ${googleCal.summary}`);
-        onImported();
-      }
-    } catch {
-      setError("Failed to import calendar");
-    } finally {
-      setImporting(null);
+    setError(null);
+    const result = await mutate<{ importedEvents: number }>("/api/google/sync", {
+      method: "POST",
+      body: {
+        googleCalendarId: googleCal.id,
+        name: googleCal.summary,
+        color: googleCal.backgroundColor || "#0f9d58",
+      },
+      // Surfaced inline via `error` state below (in addition to the toast)
+      // so a non-OK response — expired Google token, sync error — leaves a
+      // visible trail instead of the spinner just stopping.
+      fallbackError: "Failed to import calendar.",
+    });
+    if (result.ok && result.data) {
+      toast.success(`Imported ${result.data.importedEvents} events from ${googleCal.summary}`);
+      onImported();
+    } else {
+      setError(result.error ?? "Failed to import calendar.");
     }
+    setImporting(null);
   };
 
   return (

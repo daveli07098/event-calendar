@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { Copy, Check, Link2, X, Loader2 } from "lucide-react";
 import Image from "next/image";
+import { mutate } from "@/lib/mutate";
 import type { CalendarType, CalendarMemberType } from "@/types";
 
 interface ShareCalendarDialogProps {
@@ -47,44 +49,66 @@ export function ShareCalendarDialog({
   const enableSharing = async (mode: ShareMode) => {
     if (!calendar) return;
     setSaving(true);
-    const res = await fetch(`/api/calendars/${calendar.id}/share`, {
+    const result = await mutate(`/api/calendars/${calendar.id}/share`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode }),
+      body: { mode },
+      fallbackError: "Failed to update sharing settings.",
     });
-    if (res.ok) onUpdated();
+    if (result.ok) onUpdated();
     setSaving(false);
   };
 
   const disableSharing = async () => {
     if (!calendar) return;
     setSaving(true);
-    const res = await fetch(`/api/calendars/${calendar.id}/share`, {
+    const result = await mutate(`/api/calendars/${calendar.id}/share`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: null }),
+      body: { mode: null },
+      fallbackError: "Failed to stop sharing.",
     });
-    if (res.ok) {
+    if (result.ok) {
       setMembers([]);
       onUpdated();
     }
     setSaving(false);
   };
 
-  const removeMember = async (userId: string) => {
+  // Security-adjacent: this revokes another user's access. It must NOT drop
+  // the member from local state unless the server actually confirms the
+  // removal — otherwise a failed revocation would look successful to the
+  // owner while the collaborator silently keeps access.
+  const removeMember = async (member: CalendarMemberType) => {
     if (!calendar) return;
-    await fetch(`/api/calendars/${calendar.id}/members/${userId}`, {
+    const label = member.user?.name ?? member.user?.email ?? "this member";
+    // No AlertDialog primitive exists in src/components/ui/ yet — deferring
+    // to native confirm() for this destructive/access-control action rather
+    // than hand-rolling a duplicate one (another agent may add one).
+    if (!confirm(`Remove ${label} from this calendar? They will lose access immediately.`)) {
+      return;
+    }
+
+    const previousMembers = members;
+    const result = await mutate(`/api/calendars/${calendar.id}/members/${member.userId}`, {
       method: "DELETE",
+      optimisticUpdate: () => setMembers((prev) => prev.filter((m) => m.userId !== member.userId)),
+      rollback: () => setMembers(previousMembers),
+      fallbackError: "Failed to remove member — they still have access.",
     });
-    setMembers((prev) => prev.filter((m) => m.userId !== userId));
-    onUpdated();
+    if (result.ok) onUpdated();
   };
 
   const copyLink = () => {
     if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    navigator.clipboard
+      .writeText(shareUrl)
+      .then(() => {
+        setCopied(true);
+        toast.success("Invite link copied to clipboard");
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        toast.error("Failed to copy link — copy it manually instead.");
+      });
   };
 
   if (!calendar) return null;
@@ -229,7 +253,7 @@ export function ShareCalendarDialog({
                       size="icon"
                       variant="ghost"
                       className="size-6 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeMember(m.userId)}
+                      onClick={() => removeMember(m)}
                     >
                       <X className="size-3" />
                     </Button>

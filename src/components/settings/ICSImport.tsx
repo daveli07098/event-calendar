@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FileUp, Loader2 } from "lucide-react";
+import { FileUp, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 
 const PRESET_COLORS = [
   "#4285f4", "#0f9d58", "#db4437", "#f4b400",
@@ -135,12 +135,28 @@ export function ICSImport({ onImported }: ICSImportProps) {
         </div>
       </div>
 
-      {/* Feedback */}
+      {/* Feedback — role="status"/aria-live so screen readers hear the outcome,
+          and an icon alongside color so color-blind users aren't relying on
+          hue alone to tell success from failure. */}
       {result && (
-        <p className="text-sm text-green-600 dark:text-green-400">{result}</p>
+        <p
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-1.5 text-sm text-green-600 dark:text-green-400"
+        >
+          <CheckCircle2 className="size-4 shrink-0" />
+          {result}
+        </p>
       )}
       {error && (
-        <p className="text-sm text-destructive">{error}</p>
+        <p
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-1.5 text-sm text-destructive"
+        >
+          <AlertCircle className="size-4 shrink-0" />
+          {error}
+        </p>
       )}
 
       <Button
