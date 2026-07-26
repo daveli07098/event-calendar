@@ -89,24 +89,15 @@ something went wrong — go back and commit before sending the reply.
 
 ## Knowledge Vault
 
-All research, drafts, and persistent memory for this project go into the Obsidian vault at
-`/Users/daveli/git/obsidian-ai-collab-vault/`. Route content automatically using the table
-below — do not ask the user where to save, and do not require explicit vault paths in prompts.
+This repo shares the Obsidian collaboration vault at `~/git/obsidian-ai-collab-vault/`.
 
-| Content type | Save to |
-|---|---|
-| Web research, summaries, findings | `ai-workspace/research/YYYY-MM-DD-<slug>.md` |
-| WIP thinking, scratch, exploratory | `ai-workspace/drafts/<slug>.md` |
-| Bug fix — root cause, solution, prevention | `ai-workspace/fix/YYYY-MM-DD-<slug>.md` |
-| Feature implementation notes & decisions | `ai-workspace/implement/YYYY-MM-DD-<slug>.md` |
-| User-requested documentation | `ai-workspace/docs/YYYY-MM-DD-<slug>.md` |
-| Persistent facts about this project | `ai-workspace/memory/projects/event-calendar.md` |
-| Finished deliverables for human review | `review/inbox/YYYY-MM-DD-<slug>.md` |
+All routing rules (where to save research, drafts, fixes, memory, deliverables) are defined
+**once** in the vault. Read and follow that contract — do not duplicate it here:
 
-Rules:
-- Base path: `/Users/daveli/git/obsidian-ai-collab-vault/`
-- Use `integration/templates/note-template.md` as the base for all new notes if it exists.
-- Set `project: event-calendar` in frontmatter.
-- Never write to `review/approved/` — human domain only.
-- Never store secrets in the vault except under `ai-workspace/memory/secrets/` (git-ignored).
-- Confirm each save with one line: "Saved to vault: `<relative-path>`"
+→ `~/git/obsidian-ai-collab-vault/_integration/agent-guide.md`
+
+Set `project: event-calendar` frontmatter on any note you save to the vault.
+`audience:` is always a YAML list (e.g. `[self]`, `[agent]`), never a bare string.
+Confirm each save with one line: `Saved to vault: <relative-path>`.
+
+Never write secrets into the vault except under `2-agent/secrets/` (git-ignored).
