@@ -3,38 +3,20 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { X, Bell, MapPin, Clock } from "lucide-react";
 import type { CalendarType, EventType } from "@/types";
+import { getReminderLeadMinutes } from "@/lib/reminder-prefs";
+import { hasFired, markFired, onFiredElsewhere } from "@/lib/reminder-fired-store";
 
 interface ReminderToast {
   id: string; // event id + trigger key
   event: EventType;
   calendar: CalendarType | undefined;
-  kind: "soon" | "now"; // ≤10min away | just started
+  kind: "soon" | "now"; // ≤lead-time away | just started
   minutesLeft: number;
 }
 
 interface EventReminderProps {
   events: EventType[];
   calendars: CalendarType[];
-}
-
-const SOON_MINUTES = 10; // warn this many minutes before
-const FIRED_KEY = "ec-reminder-fired"; // sessionStorage key
-
-function getFired(): Set<string> {
-  try {
-    const raw = sessionStorage.getItem(FIRED_KEY);
-    return raw ? new Set(JSON.parse(raw)) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function addFired(key: string) {
-  const fired = getFired();
-  fired.add(key);
-  try {
-    sessionStorage.setItem(FIRED_KEY, JSON.stringify([...fired]));
-  } catch {}
 }
 
 function fmtTime(iso: string) {
@@ -59,6 +41,15 @@ export function EventReminder({ events, calendars }: EventReminderProps) {
     }
   }, []);
 
+  // Cross-tab coordination: if another tab fires the same reminder key
+  // (e.g. both tabs' polls raced the same 30s tick), drop any toast we
+  // already queued for it here rather than leaving duplicates shown.
+  useEffect(() => {
+    return onFiredElsewhere((key) => {
+      setToasts((prev) => prev.filter((t) => t.id !== key));
+    });
+  }, []);
+
   const dismiss = useCallback((toastId: string) => {
     setExiting((prev) => new Set([...prev, toastId]));
     setTimeout(() => {
@@ -75,7 +66,7 @@ export function EventReminder({ events, calendars }: EventReminderProps) {
   useEffect(() => {
     const check = () => {
       const now = Date.now();
-      const fired = getFired();
+      const soonMinutes = getReminderLeadMinutes(); // re-read each tick so a preference change (this or another tab) takes effect on the next poll
       const newToasts: ReminderToast[] = [];
 
       for (const event of events) {
@@ -85,10 +76,10 @@ export function EventReminder({ events, calendars }: EventReminderProps) {
         const diffMin = diffMs / 60000;
         const cal = calendars.find((c) => c.id === event.calendarId);
 
-        // "starting soon" — between 0 and SOON_MINUTES minutes away
+        // "starting soon" — between 0 and soonMinutes minutes away
         const soonKey = `${event.id}:soon`;
-        if (diffMin > 0 && diffMin <= SOON_MINUTES && !fired.has(soonKey)) {
-          addFired(soonKey);
+        if (diffMin > 0 && diffMin <= soonMinutes && !hasFired(soonKey)) {
+          markFired(soonKey, start);
           newToasts.push({
             id: soonKey,
             event,
@@ -108,8 +99,8 @@ export function EventReminder({ events, calendars }: EventReminderProps) {
 
         // "just started" — within 1 minute past start
         const nowKey = `${event.id}:now`;
-        if (diffMs <= 0 && diffMs > -60000 && !fired.has(nowKey)) {
-          addFired(nowKey);
+        if (diffMs <= 0 && diffMs > -60000 && !hasFired(nowKey)) {
+          markFired(nowKey, start);
           newToasts.push({
             id: nowKey,
             event,
@@ -163,7 +154,7 @@ export function EventReminder({ events, calendars }: EventReminderProps) {
             }}
           >
             <div
-              className="relative flex items-start gap-3 rounded-xl border bg-popover text-popover-foreground shadow-lg px-4 py-3 w-80 overflow-hidden"
+              className="relative flex items-start gap-3 rounded-xl border bg-popover text-popover-foreground shadow-lg px-4 py-3 w-80 max-w-[calc(100vw-3rem)] overflow-hidden"
               style={{ borderLeftColor: color, borderLeftWidth: 3 }}
             >
               {/* Animated progress bar */}
