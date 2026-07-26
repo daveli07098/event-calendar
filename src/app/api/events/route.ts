@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canWriteToCalendar } from "@/lib/event-access";
 
 /** Returns all calendar IDs the user can read (owned + shared memberships) */
 async function accessibleCalendarIds(userId: string): Promise<string[]> {
@@ -12,19 +13,6 @@ async function accessibleCalendarIds(userId: string): Promise<string[]> {
     ...owned.map((c) => c.id),
     ...memberships.map((m) => m.calendarId),
   ];
-}
-
-/** Returns true if user may write to this calendar (owner or editor on collaborative) */
-async function canWriteToCalendar(calendarId: string, userId: string): Promise<boolean> {
-  const calendar = await prisma.calendar.findUnique({
-    where: { id: calendarId },
-    include: { members: { where: { userId } } },
-  });
-  if (!calendar) return false;
-  if (calendar.userId === userId) return true;
-  // Editor on collaborative calendar
-  if (calendar.shareMode === "collaborative" && calendar.members[0]?.role === "editor") return true;
-  return false;
 }
 
 export async function GET(req: NextRequest) {

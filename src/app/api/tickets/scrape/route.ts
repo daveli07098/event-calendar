@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { classifySingleEvent } from "@/lib/classify-event";
 import { detectCountry } from "@/lib/detect-country";
+import { safeFetch, assertPublicUrl, UnsafeUrlError } from "@/lib/safe-fetch";
 import {
   AI_DAILY_LIMIT,
   checkRemainingAiLimit,
@@ -1485,31 +1486,24 @@ export async function POST(req: NextRequest) {
   }
 
   // Basic URL validation
-  let parsedUrl: URL;
   try {
-    parsedUrl = new URL(url);
+    const parsedUrl = new URL(url);
     if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error();
   } catch {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
 
-  // Block private network requests (SSRF protection)
-  const hostname = parsedUrl.hostname.toLowerCase();
-  const isPrivate =
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname.startsWith("192.168.") ||
-    hostname.startsWith("10.") ||
-    hostname.startsWith("172.") ||
-    hostname.endsWith(".local");
-  if (isPrivate) {
+  // Block private network requests (SSRF protection) — see src/lib/safe-fetch.ts.
+  try {
+    await assertPublicUrl(url);
+  } catch {
     return NextResponse.json({ error: "Private URLs are not allowed" }, { status: 400 });
   }
 
   // Fetch the page server-side
   let html: string;
   try {
-    const fetchRes = await fetch(url, {
+    const fetchRes = await safeFetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; EventCalendarBot/1.0; +https://github.com/event-calendar)",
@@ -1526,6 +1520,9 @@ export async function POST(req: NextRequest) {
     }
     html = await fetchRes.text();
   } catch (err) {
+    if (err instanceof UnsafeUrlError) {
+      return NextResponse.json({ error: "Private URLs are not allowed" }, { status: 400 });
+    }
     const msg = err instanceof Error ? err.message : "Fetch failed";
     return NextResponse.json({ error: `Could not fetch URL: ${msg}` }, { status: 422 });
   }

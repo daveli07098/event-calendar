@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enrichLocationWithCountry } from "@/lib/detect-country";
+import { calendarIsWritable } from "@/lib/event-access";
 
 interface ScrapedTicket {
   title: string;
@@ -100,14 +101,39 @@ export async function PATCH(req: NextRequest) {
   const uid = session.user.id;
 
   try {
-  // Verify ownership
-  const existingEvent = await prisma.event.findUnique({
-    where: { id: eventId },
-    include: { calendar: true },
+  // Authorize every event id this request could touch — the main event, the
+  // sale/presale events, and every id in the sale-windows map — *before*
+  // writing anything. A caller could smuggle in an id for an event they don't
+  // own/co-edit via any of these fields (not just `eventId`), so each one must
+  // be checked, and the whole request rejected up front if any fails: partial
+  // writes would leak which ids exist and which the caller could reach.
+  const idsToAuthorize = Array.from(
+    new Set(
+      [eventId, saleEventId, presaleEventId, ...Object.values(saleEventIds)].filter(
+        (id): id is string => Boolean(id)
+      )
+    )
+  );
+
+  // One batched query (not one findUnique per id) — pull the calendar + the
+  // caller's own membership row for every candidate event at once, then
+  // evaluate the write predicate per row in memory.
+  const candidateEvents = await prisma.event.findMany({
+    where: { id: { in: idsToAuthorize } },
+    include: { calendar: { include: { members: { where: { userId: uid } } } } },
   });
-  if (!existingEvent || existingEvent.calendar.userId !== uid) {
-    return NextResponse.json({ error: "Event not found or access denied" }, { status: 404 });
+  const eventsById = new Map(candidateEvents.map((e) => [e.id, e]));
+
+  for (const id of idsToAuthorize) {
+    const candidate = eventsById.get(id);
+    // Don't distinguish "doesn't exist" from "exists but no access" — same
+    // error for both so the response can't be used to probe for valid ids.
+    if (!candidate || !calendarIsWritable(candidate.calendar, uid)) {
+      return NextResponse.json({ error: "Event not found or access denied" }, { status: 404 });
+    }
   }
+
+  const existingEvent = eventsById.get(eventId)!;
 
   const apply = new Set(appliedFields);
 

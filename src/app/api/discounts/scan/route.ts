@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { aiExtractJson, hasAiProvider } from "@/lib/ai/client";
+import { safeFetch, assertPublicUrl, UnsafeUrlError } from "@/lib/safe-fetch";
 import {
   AI_DAILY_LIMIT,
   checkRemainingAiLimit,
@@ -99,24 +100,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "url is required" }, { status: 400 });
   }
 
-  let parsedUrl: URL;
   try {
-    parsedUrl = new URL(url);
+    const parsedUrl = new URL(url);
     if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error();
   } catch {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
 
-  // Block private network requests (SSRF protection)
-  const hostname = parsedUrl.hostname.toLowerCase();
-  const isPrivate =
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname.startsWith("192.168.") ||
-    hostname.startsWith("10.") ||
-    hostname.startsWith("172.") ||
-    hostname.endsWith(".local");
-  if (isPrivate) {
+  // Block private network requests (SSRF protection) — see src/lib/safe-fetch.ts.
+  try {
+    await assertPublicUrl(url);
+  } catch {
     return NextResponse.json({ error: "Private URLs are not allowed" }, { status: 400 });
   }
 
@@ -137,7 +131,9 @@ export async function POST(req: NextRequest) {
   // (Nike/adidas) reject obvious bot user agents.
   let html: string;
   try {
-    const fetchRes = await fetch(url, {
+    // SSRF guard: resolves + validates the hostname (and every redirect hop)
+    // before fetching — see src/lib/safe-fetch.ts.
+    const fetchRes = await safeFetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -159,6 +155,9 @@ export async function POST(req: NextRequest) {
     }
     html = await fetchRes.text();
   } catch (err) {
+    if (err instanceof UnsafeUrlError) {
+      return NextResponse.json({ error: "Private URLs are not allowed" }, { status: 400 });
+    }
     const msg = err instanceof Error ? err.message : "Fetch failed";
     console.warn(`[discounts/scan] fetch error: ${url} → ${msg}`);
     return NextResponse.json({ error: `Could not fetch site: ${msg}` }, { status: 422 });

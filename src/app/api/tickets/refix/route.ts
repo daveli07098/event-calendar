@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { safeFetch } from "@/lib/safe-fetch";
 
 // ---------------------------------------------------------------------------
 // Lightweight JSON-LD extractor (og-meta only, no AI — fast, no quota)
@@ -31,7 +32,9 @@ async function scrapeEventTime(url: string): Promise<{
 } | null> {
   let html: string;
   try {
-    const res = await fetch(url, {
+    // SSRF guard: url comes from user-controlled event.description (see
+    // extractTicketUrl below) — must not be trusted without validation.
+    const res = await safeFetch(url, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; EventCalendarBot/1.0; +https://github.com/event-calendar)",
         Accept: "text/html,application/xhtml+xml",

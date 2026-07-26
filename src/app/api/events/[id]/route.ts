@@ -1,31 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-
-async function canWriteToCalendar(calendarId: string, userId: string): Promise<boolean> {
-  const calendar = await prisma.calendar.findUnique({
-    where: { id: calendarId },
-    include: { members: { where: { userId } } },
-  });
-  if (!calendar) return false;
-  if (calendar.userId === userId) return true;
-  if (calendar.shareMode === "collaborative" && calendar.members[0]?.role === "editor") return true;
-  return false;
-}
-
-async function canAccessEvent(eventId: string, userId: string) {
-  const event = await prisma.event.findUnique({
-    where: { id: eventId },
-    include: { calendar: { include: { members: { where: { userId } } } } },
-  });
-  if (!event) return null;
-  const cal = event.calendar;
-  const isOwner = cal.userId === userId;
-  const isEditor =
-    cal.shareMode === "collaborative" && cal.members[0]?.role === "editor";
-  const canWrite = isOwner || isEditor;
-  return { event, canWrite };
-}
+import { canWriteToCalendar, canAccessEvent } from "@/lib/event-access";
 
 export async function GET(
   _req: NextRequest,
