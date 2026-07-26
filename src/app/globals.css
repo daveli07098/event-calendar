@@ -445,14 +445,27 @@
   .fc .fc-toolbar-title {
     font-size: 0.95rem !important;
   }
+  /* Toolbar buttons used to shrink here, which put every primary nav control
+     (prev/next/today/search) at ~26px on exactly the breakpoint where input is
+     touch. Keep the compact type size but guarantee a real tap target. 40px is
+     a deliberate compromise: comfortably past WCAG 2.5.8's 24px floor, while
+     two toolbar rows at a full 44px would eat too much of a phone viewport. */
   .fc .fc-button {
     font-size: 0.75rem;
     padding: 0.25rem 0.5rem;
+    min-height: 40px;
+    min-width: 40px;
   }
-  /* Hamburger menu button — larger tap target */
+  /* Hamburger menu button — slightly larger glyph, same tap target */
   .fc .fc-menu-button {
     font-size: 1rem;
     padding: 0.25rem 0.6rem;
+  }
+  /* Mobile view-switcher row (footerToolbar): centered, breathable, and not
+     competing with the grid for vertical space. */
+  .fc .fc-footer-toolbar {
+    margin-top: 0.5rem !important;
+    gap: 4px;
   }
   /* Reduce calendar grid cell padding */
   .fc .fc-daygrid-day-number {

@@ -234,7 +234,9 @@ export function CalendarSidebar({
             variant="ghost"
             size="icon"
             onClick={onMobileClose}
-            className="size-6 md:hidden"
+            /* Mobile-only control, so it was the one button guaranteed to be
+               tapped rather than clicked — 24px was too small for that. */
+            className="size-10 md:hidden"
             aria-label="Close sidebar"
           >
             <X className="size-4" />
@@ -245,12 +247,14 @@ export function CalendarSidebar({
       {/* Mini Calendar */}
       <div className="p-3 border-b border-border">
         <div className="flex items-center justify-between mb-2">
-          <Button variant="ghost" size="icon" onClick={prevMonth} className="size-6" aria-label="Previous month" title="Previous month">
-            <ChevronLeft className="size-3" />
+          {/* Larger tap targets on touch, original density on desktop — this
+              mini calendar is reused verbatim inside the mobile drawer. */}
+          <Button variant="ghost" size="icon" onClick={prevMonth} className="size-9 md:size-6" aria-label="Previous month" title="Previous month">
+            <ChevronLeft className="size-4 md:size-3" />
           </Button>
           <span className="text-xs font-medium" aria-live="polite">{monthName}</span>
-          <Button variant="ghost" size="icon" onClick={nextMonth} className="size-6" aria-label="Next month" title="Next month">
-            <ChevronRight className="size-3" />
+          <Button variant="ghost" size="icon" onClick={nextMonth} className="size-9 md:size-6" aria-label="Next month" title="Next month">
+            <ChevronRight className="size-4 md:size-3" />
           </Button>
         </div>
         <div className="grid grid-cols-7 gap-0 text-center">
@@ -277,7 +281,7 @@ export function CalendarSidebar({
                 onClick={() => onMiniDateClick?.(clickDate)}
                 aria-label={clickDate.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                 aria-current={isToday ? "date" : undefined}
-                className={`text-xs py-1 md:text-[11px] md:py-0.5 rounded-full cursor-pointer select-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                className={`text-xs py-1 min-h-9 md:min-h-0 md:text-[11px] md:py-0.5 rounded-full cursor-pointer select-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                   isToday
                     ? "bg-primary text-primary-foreground font-bold"
                     : "hover:bg-accent"

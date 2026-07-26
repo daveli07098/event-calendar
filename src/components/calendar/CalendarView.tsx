@@ -116,6 +116,27 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
+
+  // `isMobile` can only be resolved after mount (matchMedia needs `window`, and
+  // guessing during SSR would desync hydration), but FullCalendar reads
+  // `initialView` once at construction and never again — so the mobile default
+  // never reached it and phones were stuck in dayGridMonth with no way out.
+  // Drive the view imperatively instead. The breakpoint ref means a user who
+  // deliberately picks another view isn't reset by unrelated re-renders or by
+  // resizes that don't cross the breakpoint.
+  const lastBreakpointRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const api: CalendarApi | undefined = calendarRef.current?.getApi();
+    if (!api) return;
+    if (lastBreakpointRef.current === isMobile) return;
+    const isFirstResolve = lastBreakpointRef.current === null;
+    lastBreakpointRef.current = isMobile;
+    // Desktop already constructs into dayGridMonth — only correct on mount when
+    // we're actually on a phone. Real breakpoint crossings always re-sync.
+    if (isFirstResolve && !isMobile) return;
+    api.changeView(isMobile ? "listWeek" : "dayGridMonth");
+  }, [isMobile]);
+
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
   const [newEventId, setNewEventId] = useState<string | null>(null);
@@ -616,6 +637,12 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               center: "title",
               right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
             }}
+            // The mobile header has no room for view buttons, which previously
+            // left phones with no way out of whatever view they started in.
+            // Give them their own row instead of cramming the header.
+            footerToolbar={isMobile ? {
+              center: "listWeek,dayGridMonth,timeGridDay",
+            } : false}
             buttonText={{
               today: "Today",
               month: "Month",
