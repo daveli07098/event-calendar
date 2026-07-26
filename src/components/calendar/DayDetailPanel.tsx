@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CalendarType, EventType } from "@/types";
 import { CATEGORY_EMOJI } from "@/types";
+import { describeVenueTime, formatClockTime, venueTimeZone } from "@/lib/event-timezone";
 
 interface DayDetailPanelProps {
   date: string; // "YYYY-MM-DD"
@@ -21,11 +22,14 @@ interface DayDetailPanelProps {
 }
 
 // Explicit locale — keeps dates/times consistent with the rest of the
-// (English) UI regardless of the OS/browser locale.
-function formatTime(isoString: string): string {
+// (English) UI regardless of the OS/browser locale. Timezone is passed in
+// explicitly rather than left implicit, so the caller decides the zone and
+// every row in the panel is formatted against the same one.
+function formatTime(isoString: string, timeZone: string): string {
   return new Date(isoString).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
+    timeZone,
   });
 }
 
@@ -66,6 +70,11 @@ export function DayDetailPanel({
   bookmarkedIds,
   onBookmarkToggle,
 }: DayDetailPanelProps) {
+  // Device zone, matching EventModal — the two surfaces show the same event, so
+  // they must not disagree about what time it is. See the note in EventModal for
+  // why Theme.timeZone isn't used here.
+  const viewerTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
   const dayEvents = events
     .filter((e) => {
       // Use logical date boundaries rather than just string comparison to handle
@@ -167,13 +176,29 @@ export function DayDetailPanel({
                 </p>
                 {event.allDay ? (
                   <p className="text-xs text-muted-foreground">All day</p>
-                ) : (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                    <Clock className="size-3 shrink-0" />
-                    {formatTime(event.startTime)}
-                    {` – ${formatTime(getTimedEventEnd(event).toISOString())}`}
-                  </p>
-                )}
+                ) : (() => {
+                  const endIso = getTimedEventEnd(event).toISOString();
+                  // Headline time is always in the viewer's zone, labeled with its
+                  // abbreviation so it's unambiguous even without a second line.
+                  const info = describeVenueTime(event.startTime, event, viewerTimeZone);
+                  const venueTz = venueTimeZone(event);
+                  return (
+                    <>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                        <Clock className="size-3 shrink-0" />
+                        {formatTime(event.startTime, viewerTimeZone)}
+                        {` – ${formatTime(endIso, viewerTimeZone)} ${info.primaryZoneLabel}`}
+                      </p>
+                      {/* Secondary venue-local line — only when it adds information (see describeVenueTime) */}
+                      {info.secondaryTime && venueTz && (
+                        <p className="text-[11px] text-muted-foreground/70 pl-4">
+                          {formatClockTime(event.startTime, venueTz)}
+                          {` – ${formatClockTime(endIso, venueTz)} local time at venue`}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 {event.location && (
                   <div className="flex items-center gap-1 mt-1 flex-wrap">
                     <MapPin className="size-3 text-muted-foreground shrink-0" />

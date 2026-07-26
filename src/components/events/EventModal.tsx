@@ -33,6 +33,7 @@ import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon, 
 import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 import { useEventFormState } from "@/hooks/useEventFormState";
+import { describeVenueTime } from "@/lib/event-timezone";
 
 interface RelatedEvent {
   id: string;
@@ -141,15 +142,25 @@ export function EventModal({
     setSyncTeamsError(null);
   }, [initVersion]);
 
-  // The datetime-local inputs use the device's local time, so label them with
-  // the real IANA zone (read on mount to avoid an SSR/client hydration mismatch).
-  const [userTimezone, setUserTimezone] = useState("");
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time read of the device timezone
-    setUserTimezone(Intl.DateTimeFormat().resolvedOptions().timeZone);
-  }, []);
+  // The device's zone, NOT Theme.timeZone. The datetime-local inputs below hold
+  // device wall-clock values and submit is computed from them, so labelling them
+  // with any other zone would be a lie: someone in London with the shipped
+  // default (Asia/Hong_Kong) would see London times under a "Hong Kong" label.
+  // Theme.timeZone deliberately still governs read-only surfaces like
+  // WorldCupSection; unifying the two means making these inputs zone-aware,
+  // which is a bigger change than a display tweak.
+  const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const hasInvalidDateRange = Boolean(startTime && endTime) && new Date(endTime).getTime() < new Date(startTime).getTime();
+
+  // Venue-timezone secondary line for the start time — only meaningful for
+  // timed events, and only rendered when describeVenueTime finds it adds real
+  // information (venue zone resolves, differs from the viewer zone, AND the
+  // wall-clock time actually differs).
+  const startDate = startTime ? new Date(startTime) : null;
+  const venueTimeInfo = !allDay && startDate && !Number.isNaN(startDate.getTime())
+    ? describeVenueTime(startDate.toISOString(), { title, location }, userTimezone)
+    : null;
 
   // Helper: update description to include/replace seating plan URL line
   const applySeatingPlan = (desc: string, url: string): string => {
@@ -504,6 +515,11 @@ export function EventModal({
           {!allDay && userTimezone && (
             <p className="text-xs text-muted-foreground -mt-2">
               Times in your local timezone ({userTimezone.replace(/_/g, " ")})
+            </p>
+          )}
+          {venueTimeInfo?.secondaryTime && (
+            <p className="text-xs text-muted-foreground -mt-2">
+              {venueTimeInfo.secondaryTime} local time at venue
             </p>
           )}
 
