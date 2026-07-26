@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
-  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag, BadgePercent, Trophy,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag, BadgePercent, Trophy, XCircle,
 } from "lucide-react";
 import { VenueSection } from "@/components/tickets/VenueSection";
 import { DiscountSection } from "@/components/tickets/DiscountSection";
@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { EVENT_CATEGORIES, CATEGORY_LABELS, type EventCategory } from "@/types";
+import { useAbortableRequest } from "@/lib/use-abortable-request";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 
@@ -225,6 +226,10 @@ export function TicketSection() {
   const [locationResult, setLocationResult] = useState<{ updated: number; total: number; message: string } | null>(null);
   const SALE_CALENDAR_NAME = "sale-ticket";
 
+  // Cancellation + timeout for the scrape/diff-check network calls — a single
+  // implicit key is enough since only one scan can be in flight at a time.
+  const scrapeAbort = useAbortableRequest(45_000);
+
   // Fetch quota on mount so badge shows before first scan
   useEffect(() => {
     fetch("/api/tickets/scrape")
@@ -258,10 +263,6 @@ export function TicketSection() {
       .catch(() => null);
   }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleRefix = async () => {
-    // Re-fix Times has been removed from the UI; this handler is kept for safety but unused
-  };
-
   const handleScrape = async () => {
     const trimmed = url.trim();
     if (!trimmed) return;
@@ -272,11 +273,16 @@ export function TicketSection() {
     setSelectedFields(new Set());
     setErrorMsg("");
 
+    // One signal covers the whole scrape → diff-check flow below; it's the
+    // signal a Cancel click (or the 45 s timeout) aborts.
+    const signal = scrapeAbort.start();
+
     try {
       const res = await fetch("/api/tickets/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: trimmed, method: extractMethod }),
+        signal,
       });
 
       const data = await res.json();
@@ -330,6 +336,7 @@ export function TicketSection() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: trimmed, ticket: data, tzOffsetMinutes: new Date().getTimezoneOffset() }),
+          signal,
         });
         if (diffRes.ok) {
           const diff: DiffResult = await diffRes.json();
@@ -340,7 +347,16 @@ export function TicketSection() {
             return;
           }
         }
-      } catch { /* diff check failure is non-fatal */ }
+      } catch {
+        // A user cancel during the diff-check should bail out to idle just
+        // like a cancel during the scrape itself — not fall through to
+        // "scraped" as if the check had merely failed non-fatally.
+        if (signal.aborted && signal.reason === "cancel") {
+          setStatus("idle");
+          return;
+        }
+        /* otherwise, diff check failure is non-fatal */
+      }
 
       setStatus("scraped");
 
@@ -349,9 +365,24 @@ export function TicketSection() {
       if (bestDup) setMergeTarget(bestDup.id);
       else setMergeTarget(null);
     } catch {
-      setErrorMsg("Network error — please try again");
+      if (signal.aborted && signal.reason === "cancel") {
+        // User-initiated cancel — drop back to the input state with the
+        // typed URL intact (do NOT call handleReset, which clears it).
+        setStatus("idle");
+        return;
+      }
+      if (signal.aborted && signal.reason === "timeout") {
+        setErrorMsg("This took too long — the AI provider may be busy. Please try again.");
+      } else {
+        setErrorMsg("Network error — please try again");
+      }
       setStatus("error");
     }
+  };
+
+  /** Cancel the in-flight scrape/diff-check, keeping the typed URL for a retry. */
+  const handleCancelScrape = () => {
+    scrapeAbort.cancel();
   };
 
   const toggleField = (field: string) => {
@@ -609,12 +640,30 @@ export function TicketSection() {
     setMergeTarget(null);
   };
 
-  // Auto-reset 3 s after a successful add so the input is ready for the next scan
+  // Auto-reset 3 s after a successful add so the input is ready for the next scan.
+  // Paused while the pointer is over the card or a child has focus, so the
+  // "View calendar" / "Add another" buttons aren't yanked away mid-click.
+  const doneResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (status !== "done") return;
-    const t = setTimeout(handleReset, 3000);
-    return () => clearTimeout(t);
+    doneResetTimer.current = setTimeout(handleReset, 3000);
+    return () => {
+      if (doneResetTimer.current) clearTimeout(doneResetTimer.current);
+      doneResetTimer.current = null;
+    };
   }, [status]); // handleReset is stable (no deps change identity)
+
+  const pauseAutoReset = () => {
+    if (doneResetTimer.current) {
+      clearTimeout(doneResetTimer.current);
+      doneResetTimer.current = null;
+    }
+  };
+  const resumeAutoReset = () => {
+    if (status === "done" && !doneResetTimer.current) {
+      doneResetTimer.current = setTimeout(handleReset, 3000);
+    }
+  };
 
   const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
 
@@ -676,15 +725,6 @@ export function TicketSection() {
               )}
             </div>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs text-muted-foreground gap-1 hidden"
-            onClick={handleRefix}
-            disabled
-            title="Re-fix Times has been moved to settings"
-          >
-          </Button>
           {ticket?.aiUsed && (
             <Badge variant="secondary" className="text-xs font-mono">
               {ticket.aiUsed}
@@ -1055,6 +1095,12 @@ export function TicketSection() {
                   <><RefreshCw className="size-4 mr-2" />Scan</>
                 )}
               </Button>
+              {(status === "scraping" || status === "checking") && (
+                <Button variant="outline" onClick={handleCancelScrape}>
+                  <XCircle className="size-4 mr-2" />
+                  Cancel
+                </Button>
+              )}
             </div>
 
             {/* Supported sites hint */}
@@ -1073,9 +1119,15 @@ export function TicketSection() {
               <div className="space-y-1">
                 <p className="text-sm font-medium text-destructive">Could not extract ticket info</p>
                 <p className="text-xs text-muted-foreground">{errorMsg}</p>
-                <Button variant="outline" size="sm" onClick={handleReset} className="mt-2">
-                  Try another URL
-                </Button>
+                <div className="flex gap-2 mt-2">
+                  <Button variant="default" size="sm" onClick={handleScrape}>
+                    <RefreshCw className="size-3.5 mr-1.5" />
+                    Retry
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={handleReset}>
+                    Try another URL
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -1628,7 +1680,15 @@ export function TicketSection() {
 
         {/* Done */}
         {status === "done" && (
-          <Card className="border-green-500/30 bg-green-500/5">
+          <Card
+            className="border-green-500/30 bg-green-500/5"
+            onPointerEnter={pauseAutoReset}
+            onPointerLeave={resumeAutoReset}
+            onFocus={pauseAutoReset}
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resumeAutoReset();
+            }}
+          >
             <CardContent className="space-y-3 pt-4">
               <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
                 <CheckCircle2 className="size-4" />

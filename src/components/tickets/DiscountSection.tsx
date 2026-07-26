@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   BadgePercent, RefreshCw, Loader2, Plus, Trash2, ExternalLink,
-  CalendarPlus, CheckCircle2, AlertCircle, Copy, Check, Quote, Tag, Users, Sparkles, Clock,
+  CalendarPlus, CheckCircle2, AlertCircle, Copy, Check, Quote, Tag, Users, Sparkles, Clock, XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { useAbortableRequest } from "@/lib/use-abortable-request";
 import type { CalendarType } from "@/types";
 
 interface DiscountOffer {
@@ -108,6 +109,15 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const [newSource, setNewSource] = useState("");
   const [statuses, setStatuses] = useState<Record<string, SourceStatus>>({});
   const [checkingAll, setCheckingAll] = useState(false);
+  // Aggregate progress for the sequential "Check all" loop — shown as
+  // "Checking N/M…" next to the button since it can run for minutes.
+  const [checkAllProgress, setCheckAllProgress] = useState<{ index: number; total: number; url: string } | null>(null);
+  // Set by cancelCheckAll() to stop the loop cleanly after the in-flight
+  // request aborts, instead of racing ahead into the remaining sources.
+  const stopCheckAllRef = useRef(false);
+  // Keyed by source URL so concurrent per-row scans and the sequential
+  // "Check all" loop can each be cancelled/timed out independently.
+  const { start: startAbortable, cancel: cancelSource } = useAbortableRequest(45_000);
   const [calendars, setCalendars] = useState<CalendarType[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState<Record<string, string>>({});
   const [addingFor, setAddingFor] = useState<string | null>(null);
@@ -183,11 +193,13 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
 
   const scanSource = async (url: string): Promise<void> => {
     setStatuses((prev) => ({ ...prev, [url]: { state: "scanning" } }));
+    const signal = startAbortable(url);
     try {
       const res = await fetch("/api/discounts/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
+        signal,
       });
       const data = await res.json();
       if (!res.ok) {
@@ -197,17 +209,43 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       setStatuses((prev) => ({ ...prev, [url]: { state: "done", result: data.result } }));
       if (data.aiQuota) onQuotaUpdate?.(data.aiQuota);
     } catch {
+      if (signal.aborted && signal.reason === "cancel") {
+        // User cancelled — back to idle rather than showing an error state.
+        setStatuses((prev) => ({ ...prev, [url]: { state: "idle" } }));
+        return;
+      }
+      if (signal.aborted && signal.reason === "timeout") {
+        setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: "This took too long — the AI provider may be busy" } }));
+        return;
+      }
       setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: "Network error" } }));
     }
+  };
+
+  /** Cancel whichever source is currently scanning (single "Check" or "Check all" loop). */
+  const cancelScan = (url: string) => {
+    if (checkingAll && checkAllProgress?.url === url) stopCheckAllRef.current = true;
+    cancelSource(url);
   };
 
   // Sequential on purpose — free-tier AI providers are RPM-limited
   const checkAll = async () => {
     setCheckingAll(true);
-    for (const url of sources) {
+    stopCheckAllRef.current = false;
+    for (const [i, url] of sources.entries()) {
+      if (stopCheckAllRef.current) break;
+      setCheckAllProgress({ index: i + 1, total: sources.length, url });
       await scanSource(url);
+      if (stopCheckAllRef.current) break;
     }
     setCheckingAll(false);
+    setCheckAllProgress(null);
+  };
+
+  /** Stop the "Check all" loop after the current in-flight request aborts. */
+  const cancelCheckAll = () => {
+    stopCheckAllRef.current = true;
+    if (checkAllProgress) cancelSource(checkAllProgress.url);
   };
 
   // Build the full calendar-event payload + display fields for a discount,
@@ -321,14 +359,27 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
               <CardTitle className="text-base">Sources</CardTitle>
               <CardDescription>Sites checked for discounts</CardDescription>
             </div>
-            <Button onClick={checkAll} disabled={checkingAll} className="gap-2">
-              {checkingAll ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <RefreshCw className="size-4" />
+            <div className="flex items-center gap-2">
+              {checkingAll && checkAllProgress && (
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  Checking {checkAllProgress.index}/{checkAllProgress.total}…
+                </span>
               )}
-              Check all
-            </Button>
+              {checkingAll && (
+                <Button variant="outline" size="sm" onClick={cancelCheckAll} className="gap-1.5">
+                  <XCircle className="size-3.5" />
+                  Cancel
+                </Button>
+              )}
+              <Button onClick={checkAll} disabled={checkingAll} className="gap-2">
+                {checkingAll ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                Check all
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -386,15 +437,17 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     variant="outline"
                     size="sm"
                     className="gap-1.5"
-                    onClick={() => scanSource(url)}
-                    disabled={status.state === "scanning" || checkingAll}
+                    onClick={() => (status.state === "scanning" ? cancelScan(url) : scanSource(url))}
+                    disabled={status.state !== "scanning" && checkingAll}
                   >
                     {status.state === "scanning" ? (
-                      <Loader2 className="size-3.5 animate-spin" />
+                      <><Loader2 className="size-3.5 animate-spin" />Cancel</>
                     ) : (
-                      <RefreshCw className="size-3.5" />
+                      <>
+                        <RefreshCw className="size-3.5" />
+                        {status.state === "done" || status.state === "error" ? "Re-check" : "Check"}
+                      </>
                     )}
-                    {status.state === "done" || status.state === "error" ? "Re-check" : "Check"}
                   </Button>
                 </div>
 
