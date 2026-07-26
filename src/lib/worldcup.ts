@@ -91,6 +91,27 @@ export const ROUND_LABELS_EN: Record<KnockoutRound, string> = {
   Final: "Final",
 };
 
+/** A group match counts as "live" for ~2h after kickoff (no scores needed):
+ *  90 minutes plus stoppage time, with a little buffer. */
+export const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
+
+/** A knockout match can extend past 90 minutes into 30 minutes of extra time
+ *  and then a penalty shootout, so it needs a longer "still live" window than
+ *  a group match — otherwise a match still in ET/penalties gets marked
+ *  finished. 3.5h covers 90 + ET + shootout + a comfortable buffer. */
+export const KNOCKOUT_LIVE_WINDOW_MS = 3.5 * 60 * 60 * 1000;
+
+/** How long a fixture (group or knockout) counts as "live" after kickoff. */
+export function liveWindowMs(isKnockout: boolean): number {
+  return isKnockout ? KNOCKOUT_LIVE_WINDOW_MS : LIVE_WINDOW_MS;
+}
+
+/** Live-window predicate: is a match still "live" at `nowMs`, given its
+ *  kickoff time and whether it's a knockout fixture? */
+export function isMatchLive(kickoffMs: number, nowMs: number, isKnockout: boolean): boolean {
+  return kickoffMs <= nowMs && nowMs < kickoffMs + liveWindowMs(isKnockout);
+}
+
 // Splits "<home> vs <away>" (with optional dot / surrounding space) into two
 // trimmed names. Returns null when there's no clear "vs" separator.
 function splitTeams(s: string): { home: string; away: string } | null {

@@ -4,9 +4,7 @@ import { useEffect, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWorldCupMatches, type WorldCupFixture } from "@/lib/use-worldcup-matches";
 import { getTeamFlag } from "@/lib/team-flags";
-
-/** A match is considered "live" for ~2h after kickoff (no scores needed). */
-const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
+import { isMatchLive, liveWindowMs } from "@/lib/worldcup";
 
 function sameLocalDay(iso: string, now: Date): boolean {
   const d = new Date(iso);
@@ -64,10 +62,7 @@ export function WorldCupBannerExtras() {
   if (!loaded || matches.length === 0) return null;
 
   const now = new Date(nowMs);
-  const live = matches.find((m) => {
-    const k = new Date(m.kickoff).getTime();
-    return k <= nowMs && nowMs < k + LIVE_WINDOW_MS;
-  });
+  const live = matches.find((m) => isMatchLive(new Date(m.kickoff).getTime(), nowMs, m.isKnockout));
   const next = matches.find((m) => new Date(m.kickoff).getTime() > nowMs);
   const todayCount = matches.filter((m) => sameLocalDay(m.kickoff, now)).length;
 
@@ -81,7 +76,7 @@ export function WorldCupBannerExtras() {
       matches.find(
         (m) =>
           (m.home === favourite || m.away === favourite) &&
-          new Date(m.kickoff).getTime() + LIVE_WINDOW_MS > nowMs,
+          new Date(m.kickoff).getTime() + liveWindowMs(m.isKnockout) > nowMs,
       );
   }
 

@@ -11,6 +11,10 @@ import {
   resolveKnockout,
   propagateKnockout,
   clinchedPositions,
+  isMatchLive,
+  liveWindowMs,
+  LIVE_WINDOW_MS,
+  KNOCKOUT_LIVE_WINDOW_MS,
   type TeamStanding,
   type KnockoutMatch,
   type BracketRound,
@@ -318,5 +322,31 @@ describe("resolveKnockout", () => {
     expect(out["g1"].away.position).toBe(3);
     expect(out["g1"].away.thirdGroups).toEqual(["A", "B", "C", "D", "F"]);
     expect(out["g1"].away.team).toBe("A3rd");
+  });
+});
+
+describe("isMatchLive / liveWindowMs", () => {
+  const kickoff = new Date("2026-06-15T15:00:00Z").getTime();
+
+  it("gives knockout matches a longer live window than group matches", () => {
+    expect(KNOCKOUT_LIVE_WINDOW_MS).toBeGreaterThan(LIVE_WINDOW_MS);
+    expect(liveWindowMs(false)).toBe(LIVE_WINDOW_MS);
+    expect(liveWindowMs(true)).toBe(KNOCKOUT_LIVE_WINDOW_MS);
+  });
+
+  it("at the knockout boundary (2.5h post-kickoff), a group match is finished but a knockout match is still live", () => {
+    const now = kickoff + 2.5 * 60 * 60 * 1000; // 2.5h in — inside ET/penalties territory
+    expect(isMatchLive(kickoff, now, false)).toBe(false); // group: 2h window already elapsed
+    expect(isMatchLive(kickoff, now, true)).toBe(true);   // knockout: 3.5h window still open
+  });
+
+  it("treats both kinds of match as finished once well past their live window", () => {
+    const now = kickoff + 4 * 60 * 60 * 1000; // 4h in — past even the knockout window
+    expect(isMatchLive(kickoff, now, false)).toBe(false);
+    expect(isMatchLive(kickoff, now, true)).toBe(false);
+  });
+
+  it("is false before kickoff", () => {
+    expect(isMatchLive(kickoff, kickoff - 1000, true)).toBe(false);
   });
 });

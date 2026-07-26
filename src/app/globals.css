@@ -391,6 +391,29 @@
   filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.35));
 }
 
+/* ── World Cup section: accent palette for the bracket/round colours ──
+   WorldCupSection.tsx used to hand-roll bare -400/-500 Tailwind shades
+   (text-sky-400, text-amber-400, etc.) with no `dark:` variant at all — fine
+   on a dark card, unreadable on a light one. Centralized here as explicit
+   light/dark custom properties instead of sprinkling `dark:` classes across
+   ~16 call sites. Defined at :root/.dark (not scoped to a wrapper class)
+   because InfoTip's tooltip content is portaled straight onto <body>, outside
+   any element a scoping class could sit on, and custom properties only
+   inherit through the DOM tree, not through portals.
+   Contrast (WCAG, against the app's card/background at that shade): */
+:root {
+  --wc-sky: oklch(0.5 0.16 240);      /* R32 header + InfoTip default tone — 5.65:1 on white */
+  --wc-violet: oklch(0.52 0.18 295);  /* R16 header — 5.97:1 on white */
+  --wc-gold: oklch(0.55 0.15 75);     /* QF header, winner trophy, provisional slot, "soon" kickoff — 4.95:1 on white */
+  --wc-orange: oklch(0.55 0.18 45);   /* SF header — 5.21:1 on white */
+}
+.dark {
+  --wc-sky: oklch(0.78 0.13 240);     /* 9.07:1 on the dark card */
+  --wc-violet: oklch(0.78 0.15 295);  /* 8.40:1 on the dark card */
+  --wc-gold: oklch(0.82 0.15 80);     /* 10.11:1 on the dark card */
+  --wc-orange: oklch(0.78 0.16 50);   /* 8.26:1 on the dark card */
+}
+
 /* Respect reduced-motion: keep the visuals, drop the movement. */
 @media (prefers-reduced-motion: reduce) {
   .ec-timed-event.ec-wc-event .ec-wc-marker:first-child,
@@ -514,6 +537,8 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-success-foreground: var(--success-foreground);
+  --color-success: var(--success);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -552,6 +577,12 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Semantic "success" pair, mirrored on the --primary/--primary-foreground
+     light/dark contrast pattern (destructive has no -foreground counterpart
+     in this file, so primary is the fuller pattern to follow): a mid-dark
+     green (5.19:1 on white) with near-white text (4.97:1 on the green). */
+  --success: oklch(0.52 0.14 145);
+  --success-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -587,6 +618,10 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  /* Lighter, more saturated green for dark backgrounds (8.50:1 on the dark
+     --background) with near-black text (7.69:1 on the green). */
+  --success: oklch(0.72 0.17 145);
+  --success-foreground: oklch(0.205 0 0);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

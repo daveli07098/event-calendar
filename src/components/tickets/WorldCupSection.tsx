@@ -25,6 +25,7 @@ import {
   clinchedPositions,
   groupOdds,
   ROUND_LABELS_EN,
+  liveWindowMs,
   type MatchScore,
   type TeamStanding,
   type KnockoutMatch,
@@ -42,12 +43,15 @@ interface ScoresSnapshot { groups: Record<string, GroupScores>; knockout?: Knock
 const TOURNAMENT_START = "2026-06-01T00:00:00.000Z";
 const TOURNAMENT_END = "2026-07-31T23:59:59.000Z";
 
-// Per-round colour so the bracket is easy to read at a glance (header + left bar).
+// Per-round colour so the bracket is easy to read at a glance (header + left
+// bar). These reference the --wc-* custom properties (globals.css), which
+// carry explicit light/dark values — Final/ThirdPlace already had a semantic
+// token that works in both modes, so they're untouched.
 const ROUND_COLOR: Record<string, { head: string; border: string }> = {
-  R32: { head: "text-sky-400", border: "border-l-sky-500/70" },
-  R16: { head: "text-violet-400", border: "border-l-violet-500/70" },
-  QF: { head: "text-amber-400", border: "border-l-amber-500/70" },
-  SF: { head: "text-orange-400", border: "border-l-orange-500/70" },
+  R32: { head: "text-[var(--wc-sky)]", border: "border-l-[var(--wc-sky)]/70" },
+  R16: { head: "text-[var(--wc-violet)]", border: "border-l-[var(--wc-violet)]/70" },
+  QF: { head: "text-[var(--wc-gold)]", border: "border-l-[var(--wc-gold)]/70" },
+  SF: { head: "text-[var(--wc-orange)]", border: "border-l-[var(--wc-orange)]/70" },
   Final: { head: "text-primary", border: "border-l-primary" },
   ThirdPlace: { head: "text-muted-foreground", border: "border-l-muted-foreground/50" },
 };
@@ -91,8 +95,8 @@ function InfoTip({
   const lines = label.split("\n");
   const toneCls =
     tone === "green" ? { border: "border-l-primary", head: "text-primary" }
-    : tone === "amber" ? { border: "border-l-amber-500", head: "text-amber-400" }
-    : { border: "border-l-sky-500", head: "text-sky-300" };
+    : tone === "amber" ? { border: "border-l-[var(--wc-gold)]", head: "text-[var(--wc-gold)]" }
+    : { border: "border-l-[var(--wc-sky)]", head: "text-[var(--wc-sky)]" };
   return (
     <span className={className} onMouseEnter={track} onMouseMove={track} onMouseLeave={() => setPos(null)}>
       {children}
@@ -234,9 +238,6 @@ function AddMatchButton({
   );
 }
 
-/** A match counts as "live" for ~2h after kickoff (no scores needed). */
-const LIVE_WINDOW_MS = 2 * 60 * 60 * 1000;
-
 /**
  * Live tournament stage tracker shown in the World Cup header: a progress bar
  * plus a Groups → R32 → R16 → QF → SF → Final stepper. Each stage is derived
@@ -270,7 +271,9 @@ function TournamentProgress({ events, now }: { events: EventType[]; now: number 
   const items = stages.map((s) => {
     if (s.earliest === null) return { ...s, status: "upcoming" as const };
     const started = s.earliest <= now;
-    const done = s.latest !== null && s.latest + LIVE_WINDOW_MS < now;
+    // Knockout stages (everything past "group") get the longer live window, so
+    // a stage isn't marked "done" while its last match is still in ET/penalties.
+    const done = s.latest !== null && s.latest + liveWindowMs(s.key !== "group") < now;
     return { ...s, status: !started ? ("upcoming" as const) : done ? ("done" as const) : ("live" as const) };
   });
 
@@ -824,7 +827,7 @@ function GroupCard({
                 className={cn(
                   "flex items-center gap-1.5 text-xs rounded px-1 py-0.5",
                   finished && "bg-primary/5",
-                  soon && "bg-amber-400/10 ring-1 ring-amber-400/50",
+                  soon && "bg-[var(--wc-gold)]/10 ring-1 ring-[var(--wc-gold)]/50",
                 )}
               >
                 <span
@@ -834,7 +837,7 @@ function GroupCard({
                   )}
                 >
                   {f.home}
-                  {homeWin && <Trophy className="size-3 shrink-0 text-amber-400" />}
+                  {homeWin && <Trophy className="size-3 shrink-0 text-[var(--wc-gold)]" />}
                   {draw && <span className="text-muted-foreground/60 text-[9px]">=</span>}
                 </span>
                 {played ? (
@@ -844,8 +847,8 @@ function GroupCard({
                 ) : finished ? (
                   <span className="px-1 py-0.5 rounded bg-muted text-muted-foreground text-[10px] font-semibold">FT</span>
                 ) : (
-                  <span className={cn("text-[10px] whitespace-nowrap inline-flex items-center gap-1", soon ? "text-amber-500 font-medium" : "text-muted-foreground")}>
-                    {soon && <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />}
+                  <span className={cn("text-[10px] whitespace-nowrap inline-flex items-center gap-1", soon ? "text-[var(--wc-gold)] font-medium" : "text-muted-foreground")}>
+                    {soon && <span className="size-1.5 rounded-full bg-[var(--wc-gold)] animate-pulse" />}
                     {fmtKickoff(f.kickoff, tz)}
                   </span>
                 )}
@@ -856,7 +859,7 @@ function GroupCard({
                   )}
                 >
                   {draw && <span className="text-muted-foreground/60 text-[9px]">=</span>}
-                  {awayWin && <Trophy className="size-3 shrink-0 text-amber-400" />}
+                  {awayWin && <Trophy className="size-3 shrink-0 text-[var(--wc-gold)]" />}
                   {f.away}
                 </span>
                 <AddMatchButton
@@ -885,7 +888,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
     return (
       <InfoTip
         tone="amber"
-        className="inline-flex items-center gap-1 truncate italic text-amber-500/90"
+        className="inline-flex items-center gap-1 truncate italic text-[var(--wc-gold)]"
         label={slot.title ?? `best 3rd place — one of: ${names.join(" / ")}`}
       >
         {names.join("/")}
@@ -898,7 +901,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
         tone={slot.confirmed ? "green" : "amber"}
         className={cn(
           "inline-flex items-center gap-1 truncate",
-          slot.confirmed ? "font-semibold text-foreground" : "italic text-amber-500",
+          slot.confirmed ? "font-semibold text-foreground" : "italic text-[var(--wc-gold)]",
         )}
         label={slot.title ?? `${slot.team} — ${slot.label}`}
       >
@@ -912,7 +915,7 @@ function SlotName({ fallback, slot }: { fallback: string; slot?: ResolvedSlot })
     return (
       <InfoTip
         tone="amber"
-        className="inline-flex items-center gap-1 truncate italic text-amber-500/90"
+        className="inline-flex items-center gap-1 truncate italic text-[var(--wc-gold)]"
         label={slot.title ?? `best 3rd place — from Group ${slot.thirdGroups.join("/")}`}
       >
         {slot.thirdGroups.join("/")}組第三名
@@ -956,12 +959,14 @@ function BracketMatch({
   const winner = knockoutWinner(score);
   return (
     <div className={cn("relative rounded-md border border-border border-l-2 bg-card text-xs", accent)}>
-      {/* White connector stub pointing toward the centre (Final) */}
+      {/* Connector stub pointing toward the centre (Final) — semantic --border
+          token so it stays a subtle line in both light and dark (was a bare
+          bg-white/40, invisible on a light card). */}
       {match.side === "left" && (
-        <span className="pointer-events-none absolute top-1/2 -right-4 h-px w-4 -translate-y-1/2 bg-white/40" />
+        <span className="pointer-events-none absolute top-1/2 -right-4 h-px w-4 -translate-y-1/2 bg-border" />
       )}
       {match.side === "right" && (
-        <span className="pointer-events-none absolute top-1/2 -left-4 h-px w-4 -translate-y-1/2 bg-white/40" />
+        <span className="pointer-events-none absolute top-1/2 -left-4 h-px w-4 -translate-y-1/2 bg-border" />
       )}
 
       <div className="absolute right-1 top-1">
@@ -972,13 +977,14 @@ function BracketMatch({
         />
       </div>
 
-      {/* Two team slots, clearly separated by a white divider */}
-      <div className="divide-y divide-white/15">
+      {/* Two team slots, clearly separated by a divider (semantic --border,
+          was divide-white/15 — invisible on a light card) */}
+      <div className="divide-y divide-border">
         <div className={cn("flex items-center gap-1 px-2.5 py-2 pr-8", played && winner === "away" && "opacity-45")}>
           <span className="min-w-0 flex-1">
             <SlotName fallback={match.home} slot={homeSlot} />
           </span>
-          {winner === "home" && <Trophy className="size-3 shrink-0 text-amber-400" />}
+          {winner === "home" && <Trophy className="size-3 shrink-0 text-[var(--wc-gold)]" />}
           {played && (
             <span className={cn("shrink-0 tabular-nums", winner === "home" ? "font-bold text-foreground" : "text-muted-foreground")}>
               {score!.homeScore}
@@ -990,7 +996,7 @@ function BracketMatch({
           <span className="min-w-0 flex-1">
             <SlotName fallback={match.away} slot={awaySlot} />
           </span>
-          {winner === "away" && <Trophy className="size-3 shrink-0 text-amber-400" />}
+          {winner === "away" && <Trophy className="size-3 shrink-0 text-[var(--wc-gold)]" />}
           {played && (
             <span className={cn("shrink-0 tabular-nums", winner === "away" ? "font-bold text-foreground" : "text-muted-foreground")}>
               {score!.awayScore}
@@ -998,7 +1004,7 @@ function BracketMatch({
           )}
         </div>
       </div>
-      <p className="border-t border-white/10 px-2.5 py-1 text-[9px] text-muted-foreground/60">
+      <p className="border-t border-border px-2.5 py-1 text-[9px] text-muted-foreground/60">
         {fmtKickoff(match.kickoff, tz)}
         {match.matchId != null && ` · M${match.matchId}`}
         {played && score!.status && score!.status !== "FT" && ` · ${score!.status}`}
