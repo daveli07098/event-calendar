@@ -7,6 +7,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +32,7 @@ import {
 import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon, Bookmark } from "lucide-react";
 import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
+import { useEventFormState } from "@/hooks/useEventFormState";
 
 interface RelatedEvent {
   id: string;
@@ -73,15 +84,27 @@ export function EventModal({
   bookmarked = false,
   onBookmarkToggle,
 }: EventModalProps) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [location, setLocation] = useState("");
-  const [startTime, setStartTime] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [allDay, setAllDay] = useState(false);
-  const [calendarId, setCalendarId] = useState(defaultCalendarId);
-  const [category, setCategory] = useState<EventCategory | null>(null);
-  const [artist, setArtist] = useState("");
+  // Form fields, initialization, all-day time-of-day memory, and the
+  // unsaved-changes dirty baseline all live in useEventFormState — see that
+  // hook for why initialization only runs on a genuine open/event transition.
+  const {
+    title, setTitle,
+    description, setDescription,
+    location, setLocation,
+    startTime, setStartTime,
+    endTime, setEndTime,
+    allDay, toggleAllDay,
+    calendarId, setCalendarId,
+    category, setCategory,
+    artist, setArtist,
+    referenceUrl, setReferenceUrl,
+    seatingPlanUrl, setSeatingPlanUrl,
+    swapStartEnd,
+    applyServerFields,
+    isDirty,
+    initVersion,
+  } = useEventFormState({ open, event, initialData, initialRange, defaultCalendarId });
+
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   // Optimistic bookmark state — flips immediately on click, reverts if the API fails
@@ -95,10 +118,6 @@ export function EventModal({
   const [syncingTeams, setSyncingTeams] = useState(false);
   const [syncTeamsError, setSyncTeamsError] = useState<string | null>(null);
   const [relatedEvents, setRelatedEvents] = useState<RelatedEvent[]>([]);
-  // Additional info / reference URL — a later-announced page (e.g. per-station
-  // ticketing) that Sync prefers over the description's Ticket URL when set
-  const [referenceUrl, setReferenceUrl] = useState("");
-  const [seatingPlanUrl, setSeatingPlanUrl] = useState("");
   const [seatingDragOver, setSeatingDragOver] = useState(false);
   const seatingInputRef = useRef<HTMLInputElement>(null);
   /** Holds scrape + diff result to show a preview before applying */
@@ -107,6 +126,20 @@ export function EventModal({
     ticket: Record<string, unknown>;
     diffResult: { eventId: string | null; saleEventIds: Record<string, string>; saleEventId: string | null; presaleEventId: string | null };
   } | null>(null);
+  // Gates Delete and the unsaved-changes ("discard?") confirmation dialogs —
+  // null when neither is pending.
+  const [confirmKind, setConfirmKind] = useState<"delete" | "discard" | null>(null);
+
+  // Transient sync UI (error/preview banners) is only meaningful for the
+  // currently-open event — clear it on a genuine open/event transition
+  // (see useEventFormState's initVersion) so stale banners don't bleed into
+  // the next event opened in the same modal instance.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset transient sync UI on a genuine open/event transition
+    setSyncError(null);
+    setSyncPreview(null);
+    setSyncTeamsError(null);
+  }, [initVersion]);
 
   // The datetime-local inputs use the device's local time, so label them with
   // the real IANA zone (read on mount to avoid an SSR/client hydration mismatch).
@@ -118,19 +151,6 @@ export function EventModal({
 
   const hasInvalidDateRange = Boolean(startTime && endTime) && new Date(endTime).getTime() < new Date(startTime).getTime();
 
-  const toLocalDateInput = (value: string) => {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "";
-    return d.toLocaleDateString("en-CA");
-  };
-
-  const toLocalDateTimeInput = (value: string) => {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return "";
-    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-    return local.toISOString().slice(0, 16);
-  };
-
   // Helper: update description to include/replace seating plan URL line
   const applySeatingPlan = (desc: string, url: string): string => {
     const line = url.trim() ? `Seating Plan: ${url.trim()}` : null;
@@ -141,127 +161,25 @@ export function EventModal({
     return replaced;
   };
 
-  // Refactor useEffect for setTitle with debouncing
-  useEffect(() => {
-    if (event) {
-      const title = event.title;
-      const timeoutId = setTimeout(() => setTitle(title), 0);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [event]);
-
-  // Refactor useEffect for setRelatedEvents with debouncing
+  // Related events — events sharing this one's Ticket URL, shown above the
+  // description so the user can jump between them. Re-derived whenever the
+  // open event changes; cleared when there's nothing to look up.
   useEffect(() => {
     if (!event?.description) {
-      const timeoutId = setTimeout(() => setRelatedEvents([]), 0);
-      return () => clearTimeout(timeoutId);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear related events when the open event has no description to read a Ticket URL from
+      setRelatedEvents([]);
+      return;
     }
     const ticketUrl = event.description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1];
     if (!ticketUrl) {
-      const timeoutId = setTimeout(() => setRelatedEvents([]), 0);
-      return () => clearTimeout(timeoutId);
+      setRelatedEvents([]);
+      return;
     }
     fetch(`/api/events/related?url=${encodeURIComponent(ticketUrl)}&excludeId=${event.id}`)
       .then((response) => response.json())
-      .then((data) => {
-        const timeoutId = setTimeout(() => setRelatedEvents(data), 0);
-        return () => clearTimeout(timeoutId);
-      })
-      .catch(() => {
-        const timeoutId = setTimeout(() => setRelatedEvents([]), 0);
-        return () => clearTimeout(timeoutId);
-      });
+      .then((data) => setRelatedEvents(data))
+      .catch(() => setRelatedEvents([]));
   }, [event]);
-
-  // Initialize fields whenever the modal opens.
-  // Priority: existing event edit -> copied initial data -> selected range -> empty defaults.
-  useEffect(() => {
-    if (!open) return;
-
-    const now = new Date();
-    const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-    const nowLocal = toLocalDateTimeInput(now.toISOString());
-    const oneHourLaterLocal = toLocalDateTimeInput(oneHourLater.toISOString());
-
-    const timeoutId = setTimeout(() => {
-      if (event) {
-        const eventDescription = event.description ?? "";
-        const seating = eventDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
-        setTitle(event.title ?? "");
-        setDescription(eventDescription);
-        setLocation(event.location ?? "");
-        setAllDay(event.allDay);
-        setStartTime(event.allDay ? toLocalDateInput(event.startTime) : toLocalDateTimeInput(event.startTime));
-        setEndTime(event.allDay ? toLocalDateInput(event.endTime) : toLocalDateTimeInput(event.endTime));
-        setCalendarId(event.calendarId || defaultCalendarId);
-        setCategory(event.category ?? null);
-        setArtist(event.artist ?? "");
-        setReferenceUrl(event.referenceUrl ?? "");
-        setSeatingPlanUrl(seating);
-        setSyncError(null);
-        setSyncPreview(null);
-        return;
-      }
-
-      if (initialData) {
-        const copiedDescription = initialData.description ?? "";
-        const seating = copiedDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
-        setTitle(initialData.title ?? "");
-        setDescription(copiedDescription);
-        setLocation(initialData.location ?? "");
-        setAllDay(Boolean(initialData.allDay));
-        setStartTime(initialData.allDay ? toLocalDateInput(initialData.startTime) : toLocalDateTimeInput(initialData.startTime));
-        setEndTime(initialData.allDay ? toLocalDateInput(initialData.endTime) : toLocalDateTimeInput(initialData.endTime));
-        setCalendarId(initialData.calendarId || defaultCalendarId);
-        setCategory(initialData.category ?? null);
-        setArtist(initialData.artist ?? "");
-        setReferenceUrl(initialData.referenceUrl ?? "");
-        setSeatingPlanUrl(seating);
-        setSyncError(null);
-        setSyncPreview(null);
-        return;
-      }
-
-      if (initialRange) {
-        const start = initialRange.allDay
-          ? initialRange.start.slice(0, 10)
-          : toLocalDateTimeInput(initialRange.start);
-        const end = initialRange.allDay
-          ? initialRange.end.slice(0, 10)
-          : toLocalDateTimeInput(initialRange.end);
-        setTitle("");
-        setDescription("");
-        setLocation("");
-        setAllDay(initialRange.allDay);
-        setStartTime(start);
-        setEndTime(end);
-        setCalendarId(defaultCalendarId);
-        setCategory(null);
-        setArtist("");
-        setReferenceUrl("");
-        setSeatingPlanUrl("");
-        setSyncError(null);
-        setSyncPreview(null);
-        return;
-      }
-
-      setTitle("");
-      setDescription("");
-      setLocation("");
-      setAllDay(false);
-      setStartTime(nowLocal);
-      setEndTime(oneHourLaterLocal);
-      setCalendarId(defaultCalendarId);
-      setCategory(null);
-      setArtist("");
-      setReferenceUrl("");
-      setSeatingPlanUrl("");
-      setSyncError(null);
-      setSyncPreview(null);
-    }, 0);
-
-    return () => clearTimeout(timeoutId);
-  }, [open, event, initialData, initialRange, defaultCalendarId]);
 
   // Bookmark toggle — allowed even on read-only calendars (per-user, doesn't edit the event)
   const handleBookmarkToggle = async () => {
@@ -295,9 +213,9 @@ export function EventModal({
         setSyncTeamsError(data.message ?? "Teams not yet determined.");
         return;
       }
-      // Update local form fields and notify parent
-      setTitle(data.updatedTitle);
-      if (data.updatedEvent?.description) setDescription(data.updatedEvent.description);
+      // Update local form fields (and fold them into the dirty baseline, since
+      // they're now what's persisted) and notify parent
+      applyServerFields({ title: data.updatedTitle, description: data.updatedEvent?.description });
       onSynced?.(data.updatedEvent);
       setSyncTeamsError(`✓ Updated: ${data.team1} vs ${data.team2}`);
     } catch (e) {
@@ -389,9 +307,11 @@ export function EventModal({
       const { updatedEvent, createdSaleCount } = applyData;
       setSyncPreview(null);
       if (updatedEvent) {
-        setTitle(updatedEvent.title ?? title);
-        setDescription(updatedEvent.description ?? description);
-        setLocation(updatedEvent.location ?? location);
+        applyServerFields({
+          title: updatedEvent.title ?? title,
+          description: updatedEvent.description ?? description,
+          location: updatedEvent.location ?? location,
+        });
         onSynced?.(updatedEvent);
       }
       // Re-fetch related events — new sale windows may have been created
@@ -448,8 +368,28 @@ export function EventModal({
     }
   };
 
+  // Escape, backdrop click, the dialog's ✕, and Cancel all funnel through
+  // here — prompt for confirmation only when there's something to lose.
+  const requestClose = () => {
+    if (isDirty) {
+      setConfirmKind("discard");
+    } else {
+      onOpenChange(false);
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          onOpenChange(next);
+        } else {
+          requestClose();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-[480px] flex flex-col max-h-[90vh]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -514,28 +454,7 @@ export function EventModal({
               id="allDay"
               checked={allDay}
               disabled={readOnly}
-              onCheckedChange={(checked) => {
-                setAllDay(checked);
-                if (!checked) {
-                  // Switching to timed — keep the date but add current time
-                  const now = new Date();
-                  const dateBase = startTime.slice(0, 10); // "YYYY-MM-DD"
-                  const hh = String(now.getHours()).padStart(2, "0");
-                  const mm = String(now.getMinutes()).padStart(2, "0");
-                  const newStart = `${dateBase}T${hh}:${mm}`;
-                  const endBase = endTime.slice(0, 10);
-                  const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000);
-                  const eh = String(oneHourLater.getHours()).padStart(2, "0");
-                  const em = String(oneHourLater.getMinutes()).padStart(2, "0");
-                  const newEnd = `${endBase}T${eh}:${em}`;
-                  setStartTime(newStart);
-                  setEndTime(newEnd);
-                } else {
-                  // Switching to all-day — strip time
-                  setStartTime(startTime.slice(0, 10));
-                  setEndTime(endTime.slice(0, 10));
-                }
-              }}
+              onCheckedChange={toggleAllDay}
             />
             <Label htmlFor="allDay">All day</Label>
           </div>
@@ -575,11 +494,7 @@ export function EventModal({
                 variant="outline"
                 size="sm"
                 className="h-6 shrink-0 px-2 text-xs"
-                onClick={() => {
-                  // End is before start → swapping makes the order valid.
-                  setStartTime(endTime);
-                  setEndTime(startTime);
-                }}
+                onClick={swapStartEnd}
               >
                 Swap
               </Button>
@@ -885,7 +800,7 @@ export function EventModal({
                 type="button"
                 variant="destructive"
                 size="sm"
-                onClick={handleDelete}
+                onClick={() => setConfirmKind("delete")}
                 disabled={saving || syncing}
               >
                 <Trash2 className="size-4 mr-1" />
@@ -950,7 +865,7 @@ export function EventModal({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
             >
               {readOnly ? "Close" : "Cancel"}
             </Button>
@@ -968,5 +883,48 @@ export function EventModal({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Delete confirmation — Delete no longer fires the DELETE request directly */}
+    <AlertDialog
+      open={confirmKind === "delete"}
+      onOpenChange={(next) => { if (!next) setConfirmKind(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete this event?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {title ? `“${title}” will be deleted.` : "This event will be deleted."} You can undo this right after.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={handleDelete}>
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Unsaved-changes guard — Escape, backdrop click, and Cancel all route here via requestClose */}
+    <AlertDialog
+      open={confirmKind === "discard"}
+      onOpenChange={(next) => { if (!next) setConfirmKind(null); }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Discard unsaved changes?</AlertDialogTitle>
+          <AlertDialogDescription>
+            You have unsaved changes to this event. Closing now will discard them.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep editing</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={() => onOpenChange(false)}>
+            Discard
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

@@ -435,17 +435,57 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
 
   const handleDeleteEvent = async () => {
     if (!selectedEvent) return;
+    // Snapshot before the delete request — selectedEvent may change by the
+    // time Undo is clicked (e.g. the modal reopens for a different event).
+    const deleted = selectedEvent;
     try {
-      const res = await fetch(`/api/events/${selectedEvent.id}`, {
+      const res = await fetch(`/api/events/${deleted.id}`, {
         method: "DELETE",
       });
       if (!res.ok) {
         toast.error("Couldn't delete event — please try again");
         return;
       }
-      setEvents((prev) => prev.filter((e) => e.id !== selectedEvent.id));
-      toast.success("Event deleted");
+      setEvents((prev) => prev.filter((e) => e.id !== deleted.id));
       setModalOpen(false);
+      toast.success("Event deleted", {
+        action: {
+          label: "Undo",
+          // Re-creates the event via POST /api/events. That endpoint doesn't
+          // accept a client-supplied id, so the restored event gets a brand-new
+          // id — anything keyed on the old id (bookmarks, related-event/sale
+          // links) is not restored.
+          onClick: async () => {
+            try {
+              const res = await fetch("/api/events", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  title: deleted.title,
+                  description: deleted.description ?? undefined,
+                  location: deleted.location ?? undefined,
+                  startTime: deleted.startTime,
+                  endTime: deleted.endTime,
+                  allDay: deleted.allDay,
+                  calendarId: deleted.calendarId,
+                  category: deleted.category ?? null,
+                  artist: deleted.artist ?? null,
+                  referenceUrl: deleted.referenceUrl ?? null,
+                }),
+              });
+              if (!res.ok) {
+                toast.error("Couldn't restore event");
+                return;
+              }
+              const restored = await res.json();
+              setEvents((prev) => [...prev, restored]);
+              toast.success("Event restored");
+            } catch {
+              toast.error("Couldn't restore event");
+            }
+          },
+        },
+      });
     } catch {
       toast.error("Couldn't delete event — please try again");
     }
