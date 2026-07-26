@@ -1,6 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { prismaMock, setMockSession, mockSession } from "../../../helpers";
+import {
+  prismaMock,
+  setMockSession,
+  mockSession,
+  getMockSession,
+  mockCalendar,
+  toJson,
+} from "../../../helpers";
+
+// vi.mock must live in this file (not helpers.ts) so Vitest hoists it above the
+// route import below — see the comment in helpers.ts for why.
+vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
+vi.mock("@/lib/auth", () => ({ auth: vi.fn(() => Promise.resolve(getMockSession())) }));
 
 import { PUT, DELETE } from "@/app/api/calendars/[id]/route";
 
@@ -33,8 +45,8 @@ describe("PUT /api/calendars/:id", () => {
   });
 
   it("updates calendar name", async () => {
-    const existing = { id: "cal-1", userId: "user-1", name: "Old", color: "#4285f4", isDefault: false };
-    const updated = { ...existing, name: "New" };
+    const existing = mockCalendar({ id: "cal-1", name: "Old" });
+    const updated = { ...mockCalendar({ id: "cal-1", name: "New" }), members: [] };
     prismaMock.calendar.findFirst.mockResolvedValue(existing);
     prismaMock.calendar.update.mockResolvedValue(updated);
 
@@ -44,12 +56,12 @@ describe("PUT /api/calendars/:id", () => {
     });
     const res = await PUT(req, makeParams("cal-1"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(updated);
+    expect(await res.json()).toEqual(toJson({ ...updated, members: [] }));
   });
 
   it("updates calendar visibility", async () => {
-    const existing = { id: "cal-1", userId: "user-1", name: "Cal", isVisible: true };
-    const updated = { ...existing, isVisible: false };
+    const existing = mockCalendar({ id: "cal-1", isVisible: true });
+    const updated = { ...mockCalendar({ id: "cal-1", isVisible: false }), members: [] };
     prismaMock.calendar.findFirst.mockResolvedValue(existing);
     prismaMock.calendar.update.mockResolvedValue(updated);
 
@@ -59,7 +71,7 @@ describe("PUT /api/calendars/:id", () => {
     });
     const res = await PUT(req, makeParams("cal-1"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(updated);
+    expect(await res.json()).toEqual(toJson({ ...updated, members: [] }));
   });
 });
 
@@ -77,16 +89,16 @@ describe("DELETE /api/calendars/:id", () => {
   });
 
   it("returns 404 when calendar not found", async () => {
+    // Not owned; also not a member (route allows a member to "leave" instead of 404).
     prismaMock.calendar.findFirst.mockResolvedValue(null);
+    prismaMock.calendarMember.findUnique.mockResolvedValue(null);
     const req = new NextRequest("http://localhost/api/calendars/missing", { method: "DELETE" });
     const res = await DELETE(req, makeParams("missing"));
     expect(res.status).toBe(404);
   });
 
   it("returns 400 when trying to delete default calendar", async () => {
-    prismaMock.calendar.findFirst.mockResolvedValue({
-      id: "cal-1", userId: "user-1", isDefault: true,
-    });
+    prismaMock.calendar.findFirst.mockResolvedValue(mockCalendar({ id: "cal-1", isDefault: true }));
     const req = new NextRequest("http://localhost/api/calendars/cal-1", { method: "DELETE" });
     const res = await DELETE(req, makeParams("cal-1"));
     expect(res.status).toBe(400);
@@ -94,10 +106,8 @@ describe("DELETE /api/calendars/:id", () => {
   });
 
   it("deletes a non-default calendar", async () => {
-    prismaMock.calendar.findFirst.mockResolvedValue({
-      id: "cal-2", userId: "user-1", isDefault: false,
-    });
-    prismaMock.calendar.delete.mockResolvedValue({});
+    prismaMock.calendar.findFirst.mockResolvedValue(mockCalendar({ id: "cal-2", isDefault: false }));
+    prismaMock.calendar.delete.mockResolvedValue(mockCalendar({ id: "cal-2" }));
 
     const req = new NextRequest("http://localhost/api/calendars/cal-2", { method: "DELETE" });
     const res = await DELETE(req, makeParams("cal-2"));

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { EventModal } from "@/components/events/EventModal";
 import type { CalendarType, EventType } from "@/types";
 
@@ -12,6 +12,8 @@ const calendars: CalendarType[] = [
     isDefault: true,
     isVisible: true,
     googleCalendarId: null,
+    shareToken: null,
+    shareMode: null,
     createdAt: "2025-01-01T00:00:00Z",
     updatedAt: "2025-01-01T00:00:00Z",
   },
@@ -28,6 +30,7 @@ const existingEvent: EventType = {
   allDay: false,
   recurrenceRule: null,
   googleEventId: null,
+  category: null,
   createdAt: "2025-01-01T00:00:00Z",
   updatedAt: "2025-01-01T00:00:00Z",
   calendar: calendars[0],
@@ -61,11 +64,15 @@ describe("EventModal", () => {
     expect(screen.getByText("Edit Event")).toBeInTheDocument();
   });
 
-  it("populates form fields from existing event", () => {
+  it("populates form fields from existing event", async () => {
     render(
       <EventModal {...baseProps} event={existingEvent} initialRange={null} />
     );
-    expect(screen.getByDisplayValue("Team Standup")).toBeInTheDocument();
+    // Field initialization is deferred a tick (setTimeout(0)) in EventModal so
+    // the dialog mounts before the form state updates — wait for it.
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Team Standup")).toBeInTheDocument();
+    });
     expect(screen.getByDisplayValue("Daily sync")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Room A")).toBeInTheDocument();
   });

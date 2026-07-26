@@ -68,16 +68,23 @@ describe("knockout helpers", () => {
   });
 });
 
-describe("verified knockout teams (official R32 map)", () => {
-  it("covers all 16 Round-of-32 matches (73–88), no gaps or dupes", () => {
+describe("verified knockout teams (official bracket map)", () => {
+  // VERIFIED_KNOCKOUT_TEAMS was extended beyond the original Round-of-32-only
+  // map to cover the full knockout tree per the real zh-yue bracket (R32 73-88,
+  // R16 89-96, QF 97-100, SF 101-102, 3rd place 103, final 104) — see the
+  // "Round of 16 → Final" comment block in worldcup-results.ts. 73-88 alone is
+  // stale; assert the full, contiguous 73-104 range instead.
+  it("covers all 32 knockout matches (73–104), no gaps or dupes", () => {
     const ids = VERIFIED_KNOCKOUT_TEAMS.map((m) => m.matchId).sort((a, b) => a - b);
-    expect(ids).toEqual(Array.from({ length: 16 }, (_, i) => 73 + i));
+    expect(ids).toEqual(Array.from({ length: 32 }, (_, i) => 73 + i));
   });
 
   it("resolves a match number to its official home/away teams", () => {
     expect(getKnockoutTeams(74)).toMatchObject({ home: "巴西", away: "日本" });
     expect(getKnockoutTeams(80)).toMatchObject({ home: "英格蘭", away: "剛果民主共和國" });
     expect(getKnockoutTeams(null)).toBeUndefined();
-    expect(getKnockoutTeams(101)).toBeUndefined(); // not an R32 match
+    // Match 101 is the Semi-final (法國 vs 西班牙) — covered by the extended map.
+    expect(getKnockoutTeams(101)).toMatchObject({ home: "法國", away: "西班牙" });
+    expect(getKnockoutTeams(999)).toBeUndefined(); // not a real match id
   });
 });
