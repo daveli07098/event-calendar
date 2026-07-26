@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { mutate } from "@/lib/mutate";
+import { REMINDERS_CALENDAR_NAME, remindersCalendarVisible } from "@/lib/calendar-names";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import { AddCalendarDialog } from "@/components/calendar/AddCalendarDialog";
@@ -45,18 +47,24 @@ export function CalendarPageClient({
   }, []);
 
   // Restore the user's last filter selection (none for first-time visitors).
+  // Skipped entirely while the reminders calendar is hidden: those filters only
+  // narrow ticket-derived events, so restoring them there would silently hide
+  // everything with no visible cause. Covers the cross-device case where this
+  // browser still has filters saved but the calendar was hidden elsewhere.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem("calendar.filters");
-      if (raw) {
-        const f = JSON.parse(raw) as { category?: unknown; location?: unknown };
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore on mount
-        if (typeof f.category === "string") setCategoryFilter(f.category as EventCategory);
-        if (typeof f.location === "string") setLocationFilter(f.location);
-      }
-    } catch { /* corrupt/blocked storage → stay unfiltered */ }
+    if (remindersCalendarVisible(initialCalendars)) {
+      try {
+        const raw = localStorage.getItem("calendar.filters");
+        if (raw) {
+          const f = JSON.parse(raw) as { category?: unknown; location?: unknown };
+          // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore on mount
+          if (typeof f.category === "string") setCategoryFilter(f.category as EventCategory);
+          if (typeof f.location === "string") setLocationFilter(f.location);
+        }
+      } catch { /* corrupt/blocked storage → stay unfiltered */ }
+    }
     setFiltersLoaded(true);
-  }, []);
+  }, [initialCalendars]);
 
   // Persist filter changes so the next visit restores them. Gated on
   // filtersLoaded so the initial restore doesn't immediately clobber storage.
@@ -128,26 +136,53 @@ export function CalendarPageClient({
   }, []);
 
   const handleCalendarToggle = async (id: string, visible: boolean) => {
-    setCalendars((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, isVisible: visible } : c))
-    );
-    await fetch(`/api/calendars/${id}`, {
+    // Snapshot so a failed PUT can restore exactly what was on screen before
+    // the optimistic flip, instead of silently reverting on the next reload.
+    const previousCalendars = calendars;
+    // Hiding the reminders calendar also drops the category/location filters:
+    // they only narrow ticket-derived events, so leaving them applied would
+    // show an empty calendar with no visible explanation. Snapshotted too, so
+    // a failed PUT restores the filters along with the visibility.
+    const clearsFilters =
+      !visible &&
+      calendars.some((c) => c.id === id && c.name === REMINDERS_CALENDAR_NAME && !c.memberRole);
+    const previousFilters = { category: categoryFilter, location: locationFilter };
+    await mutate(`/api/calendars/${id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ isVisible: visible }),
+      body: { isVisible: visible },
+      optimisticUpdate: () => {
+        setCalendars((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, isVisible: visible } : c))
+        );
+        if (clearsFilters) {
+          setCategoryFilter(null);
+          setLocationFilter(null);
+        }
+      },
+      rollback: () => {
+        setCalendars(previousCalendars);
+        if (clearsFilters) {
+          setCategoryFilter(previousFilters.category);
+          setLocationFilter(previousFilters.location);
+        }
+      },
+      fallbackError: "Failed to update calendar visibility.",
     });
   };
 
   const handleAddCalendar = async (name: string, color: string) => {
-    const res = await fetch("/api/calendars", {
+    const result = await mutate<CalendarType>("/api/calendars", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, color }),
+      body: { name, color },
+      fallbackError: "Failed to add calendar.",
     });
-    if (res.ok) {
-      const newCal = await res.json();
-      setCalendars((prev) => [...prev, newCal]);
+    if (!result.ok || !result.data) {
+      // Throwing (rather than silently returning) keeps AddCalendarDialog's
+      // form open on failure instead of closing as if the calendar was
+      // created — mirrors the handleBookmarkToggle pattern above.
+      throw new Error(result.error ?? "Failed to add calendar.");
     }
+    setCalendars((prev) => [...prev, result.data as CalendarType]);
   };
 
   return (

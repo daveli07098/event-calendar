@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
 import type { CalendarType, EventCategory } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
+import { TICKET_CALENDAR_NAMES } from "@/lib/calendar-names";
 
 interface CalendarSidebarProps {
   calendars: CalendarType[];
@@ -318,7 +319,7 @@ export function CalendarSidebar({
         >
         <div className="flex flex-col gap-1">
           {(() => {
-            const TICKET_NAMES = ["event-reminders", "sale-ticket"];
+            const TICKET_NAMES = TICKET_CALENDAR_NAMES;
             const myCalendars = calendars.filter((c) => !c.memberRole);
             // Names that also appear as shared-with-me → show "(yourself)" to distinguish
             const sharedNames = new Set(
