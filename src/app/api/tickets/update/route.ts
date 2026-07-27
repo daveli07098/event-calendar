@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { enrichLocationWithCountry } from "@/lib/detect-country";
 import { calendarIsWritable } from "@/lib/event-access";
+import { detectTimezoneFromUrl } from "@/lib/source-timezone";
 
 interface ScrapedTicket {
   title: string;
@@ -153,6 +154,19 @@ export async function PATCH(req: NextRequest) {
 
   const existingEvent = eventsById.get(eventId)!;
 
+  // Re-derive when the client didn't already resolve one — e.g. a stale
+  // cached ticket object from before global-brand-domain title fallback
+  // existed, or a genuinely domain-unresolvable source. ticket.title/location
+  // are the same fields the scrape route now feeds into this fallback, so
+  // this stays consistent whether the client supplies a fresh sourceTimezone
+  // or not.
+  const sourceTimezone = ticket.sourceTimezone
+    ?? detectTimezoneFromUrl(
+      ticket.sourceUrl,
+      ticket.date ? new Date(`${ticket.date}T12:00:00Z`) : undefined,
+      { title: ticket.title, location: ticket.location },
+    );
+
   const apply = new Set(appliedFields);
 
   // Build update payload for main event
@@ -168,7 +182,7 @@ export async function PATCH(req: NextRequest) {
     if (timeSrc !== null) {
       // ticket.time is local (venue wall-clock) — sourceTimezone takes priority
       // over the client offset, same precedence as add/route.ts.
-      newStart = parseLocalToUTC(dateSrc, timeSrc, tzOffsetMinutes, ticket.sourceTimezone);
+      newStart = parseLocalToUTC(dateSrc, timeSrc, tzOffsetMinutes, sourceTimezone);
     } else {
       // Keep the existing stored time, only change the date. existingTimeUTC is
       // already a UTC hh:mm (sliced straight off the stored UTC timestamp), NOT a
@@ -239,7 +253,7 @@ export async function PATCH(req: NextRequest) {
     const window = ticket.saleDates?.find((w) => w.label === label);
     if (!window) continue;
 
-    const winStart = parseLocalToUTC(window.date, window.time ?? null, tzOffsetMinutes, ticket.sourceTimezone);
+    const winStart = parseLocalToUTC(window.date, window.time ?? null, tzOffsetMinutes, sourceTimezone);
     if (!winStart) continue;
     // Ranged windows span open → close; a window without an explicit close is
     // the on-sale DAY, covered as a 1-day reminder (open → 23:59) — mirrors the
@@ -248,7 +262,7 @@ export async function PATCH(req: NextRequest) {
       window.endDate ?? window.date,
       window.endTime ?? "23:59",
       tzOffsetMinutes,
-      ticket.sourceTimezone,
+      sourceTimezone,
     );
     if (!winEnd || winEnd <= winStart) winEnd = new Date(winStart.getTime() + 3_600_000);
 
@@ -304,7 +318,7 @@ export async function PATCH(req: NextRequest) {
   if (saleEventId && saleFieldsChanged && !apply.has("saleWin::" + "Public Sale") && !apply.has("saleWin::" + "Sale Opens")) {
     const saleUpdateData: Record<string, unknown> = { description: buildSaleDescription(ticket) };
     if (apply.has("saleDate") && ticket.saleDate) {
-      const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes, ticket.sourceTimezone);
+      const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes, sourceTimezone);
       if (saleStart) {
         const saleEnd = new Date(saleStart);
         saleEnd.setHours(saleEnd.getHours() + 1);
@@ -325,7 +339,7 @@ export async function PATCH(req: NextRequest) {
       ].filter(Boolean).join("\n\n"),
     };
     if (apply.has("saleFirstDate") && ticket.saleFirstDate) {
-      const presaleStart = parseLocalToUTC(ticket.saleFirstDate, null, tzOffsetMinutes, ticket.sourceTimezone);
+      const presaleStart = parseLocalToUTC(ticket.saleFirstDate, null, tzOffsetMinutes, sourceTimezone);
       if (presaleStart) {
         const presaleEnd = new Date(presaleStart);
         presaleEnd.setHours(presaleEnd.getHours() + 1);

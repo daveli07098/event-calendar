@@ -605,8 +605,11 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   let schemaLocation: string | null = null;
   // Initialise sourceTz early from URL domain so Strategy A + B can use it even
   // when the concert JSON-LD block has no embedded tz offset. JSON-LD processing
-  // below may override this with a more precise value.
-  let sourceTz: string | null = detectTimezoneFromUrl(pageUrl);
+  // below may override this with a more precise value. og:title is passed as a
+  // last-resort text fallback for global-brand domains (e.g. pokemongo.com)
+  // whose country only appears in the title, never the URL — schemaLocation
+  // isn't parsed yet at this point, only og:title is available this early.
+  let sourceTz: string | null = detectTimezoneFromUrl(pageUrl, undefined, { title: ogTitle });
   // Remix-embedded structured event data (Timable etc.) — used as a reliable
   // fallback when the page ships no JSON-LD. Parsed up front so the return below
   // can fold it in behind any JSON-LD/OG values.
@@ -978,7 +981,15 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   // null above. schemaDate is known by now, so pass it as the anchor date — the
   // resolved offset is DST-sensitive for zones like Europe/London, so re-deriving it
   // "now" instead of for the actual event date would be wrong outside the current DST period.
-  if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl, schemaDate ? new Date(`${schemaDate}T12:00:00Z`) : undefined);
+  // title/location are now fully resolved too, so pass the same last-resort
+  // text context used at the top (title may have picked up remix/htmlTitle by now).
+  if (!sourceTz) {
+    sourceTz = detectTimezoneFromUrl(
+      pageUrl,
+      schemaDate ? new Date(`${schemaDate}T12:00:00Z`) : undefined,
+      { title: ogTitle ?? remix?.title ?? htmlTitle, location: schemaLocation || remix?.location || null },
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Ticket platform extraction

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { detectTimezoneFromUrl } from "@/lib/source-timezone";
 
 // ---------------------------------------------------------------------------
 // Types (mirrored from scrape route — keep in sync)
@@ -225,8 +226,18 @@ export async function POST(req: NextRequest) {
   const storedSale = parseStored(saleEvent?.description ?? null);
   const storedPresale = parseStored(presaleEvent?.description ?? null);
 
+  // Re-derive when the client didn't already resolve one — e.g. a stale
+  // cached ticket object from before global-brand-domain title fallback
+  // existed. Keeps this route consistent with update/route.ts's same fallback.
+  const sourceTimezone = ticket.sourceTimezone
+    ?? detectTimezoneFromUrl(
+      ticket.sourceUrl,
+      ticket.date ? new Date(`${ticket.date}T12:00:00Z`) : undefined,
+      { title: ticket.title, location: ticket.location },
+    );
+
   // Convert stored UTC timestamp to user-local date/time for comparison
-  const localStart = utcToLocal(mainEvent.startTime, tzOffsetMinutes, ticket.sourceTimezone);
+  const localStart = utcToLocal(mainEvent.startTime, tzOffsetMinutes, sourceTimezone);
 
   // Build diff
   const changes: FieldChange[] = [];
@@ -265,7 +276,7 @@ export async function POST(req: NextRequest) {
   if (ticket.saleDates?.length) {
     for (const window of ticket.saleDates) {
       const matchedEvent = allSaleEvents.find((se) => extractLabelFromTitle(se.title) === window.label);
-      const storedWindowDate = matchedEvent ? utcToLocal(matchedEvent.startTime, tzOffsetMinutes, ticket.sourceTimezone).date : null;
+      const storedWindowDate = matchedEvent ? utcToLocal(matchedEvent.startTime, tzOffsetMinutes, sourceTimezone).date : null;
       const newWindowDate = normDate(window.date);
 
       if (newWindowDate && storedWindowDate !== newWindowDate) {
@@ -314,7 +325,7 @@ export async function POST(req: NextRequest) {
   const storedSaleWindows = allSaleEvents
     .map((se) => {
       const label = extractLabelFromTitle(se.title) ?? se.title;
-      const local = utcToLocal(se.startTime, tzOffsetMinutes, ticket.sourceTimezone);
+      const local = utcToLocal(se.startTime, tzOffsetMinutes, sourceTimezone);
       return { label, date: local.date, time: local.time };
     })
     .sort((a, b) => a.date.localeCompare(b.date));

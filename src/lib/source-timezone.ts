@@ -20,9 +20,20 @@
  * ±HH:MM offset is derived per the *specific event date* via
  * Intl.DateTimeFormat, so DST-observing regions (Europe) resolve correctly
  * instead of being permanently wrong half the year.
+ *
+ * GLOBAL BRAND DOMAINS: domain/TLD resolution structurally cannot work for a
+ * site like pokemongo.com, which hosts events in dozens of countries under one
+ * .com domain — the country only appears in the event's title/location text
+ * ("Pokémon RUN 30 — Jakarta"). For that case, `detectTimezoneFromUrl` accepts
+ * an optional `context` (title/location) used ONLY when domain resolution
+ * yields nothing, via `detectLocationTag` (from `location-tags.ts`, the same
+ * consolidation this file's header already describes) + the same
+ * LOCATION_TAG_TIME_ZONE map — again, no fourth map. See `textZoneForContext`
+ * below for why city-level entries are needed on top of that.
  */
 import { detectCountry } from "./detect-country";
 import { LOCATION_TAG_TIME_ZONE } from "./event-timezone";
+import { detectLocationTag } from "./location-tags";
 
 // detectCountry's TLD map spells this "UK"; LOCATION_TAG_TIME_ZONE (shared with
 // the calendar's venue-time display) spells it "United Kingdom". Alias here
@@ -58,6 +69,49 @@ function countryZoneForUrl(url: string): string | null {
   return LOCATION_TAG_TIME_ZONE[COUNTRY_TO_LOCATION_TAG[country] ?? country] ?? null;
 }
 
+// City → IANA zone, for cities that pin a single zone inside a country that
+// `LOCATION_TAG_TIME_ZONE` deliberately leaves out for being multi-zone (US,
+// Canada, Australia, Indonesia — see that map's comment). A country-level tag
+// like "Indonesia" is rightly ambiguous, but a specific city named in the
+// title is NOT — "Jakarta" is unambiguously Asia/Jakarta even though other
+// Indonesian cities (e.g. Jayapura, WIT) sit in a different zone. Checked
+// BEFORE the country-tag fallback in `textZoneForContext`. Keep this list to
+// cities we're confident are unambiguous — do not add a bare country name
+// here as a shortcut, that's exactly the guess this table exists to avoid.
+const CITY_TIME_ZONE: Array<[RegExp, string]> = [
+  [/jakarta|雅加達/i, "Asia/Jakarta"],
+];
+
+/**
+ * Last-resort timezone fallback from an event's title/location text, used
+ * only when domain/TLD resolution (`legacyZoneForUrl` / `countryZoneForUrl`)
+ * finds nothing — see the file header comment re: global brand domains.
+ *
+ * Order matters: city-level matches are checked first because they can
+ * resolve a zone even when the only country mentioned is one of the
+ * deliberately-ambiguous multi-zone countries (US, Canada, Australia,
+ * Indonesia) that `LOCATION_TAG_TIME_ZONE` omits. If no city matches and the
+ * detected country tag is one of those omitted countries, this correctly
+ * returns null — guessing a zone for a multi-zone country is worse than no
+ * zone at all (the whole point of that omission, reused here rather than
+ * re-litigated).
+ */
+function textZoneForContext(context?: { title?: string | null; location?: string | null }): string | null {
+  if (!context) return null;
+  const title = context.title ?? "";
+  const location = context.location ?? null;
+  if (!title && !location) return null;
+
+  const haystack = `${title} ${location ?? ""}`;
+  for (const [re, zone] of CITY_TIME_ZONE) {
+    if (re.test(haystack)) return zone;
+  }
+
+  const tag = detectLocationTag(title, location);
+  if (!tag) return null;
+  return LOCATION_TAG_TIME_ZONE[tag] ?? null;
+}
+
 /**
  * Format the ±HH:MM UTC offset for an IANA zone at a given instant, via
  * Intl.DateTimeFormat's "shortOffset" — this is what makes DST correct (a
@@ -86,9 +140,17 @@ function offsetStringForZoneAt(timeZone: string, at: Date): string {
  * `eventDate` should be the actual event/sale-window date when known — the
  * offset is DST-sensitive for zones like Europe/London, so "now" (the
  * default) is only a safe stand-in when no event date is available yet.
+ *
+ * `context` (title/location) is an OPTIONAL last-resort fallback, used only
+ * when the domain/TLD yields nothing — see `textZoneForContext` above. Every
+ * existing caller that omits it keeps behaving exactly as before.
  */
-export function detectTimezoneFromUrl(url: string, eventDate: Date = new Date()): string | null {
-  const zone = legacyZoneForUrl(url) ?? countryZoneForUrl(url);
+export function detectTimezoneFromUrl(
+  url: string,
+  eventDate: Date = new Date(),
+  context?: { title?: string | null; location?: string | null },
+): string | null {
+  const zone = legacyZoneForUrl(url) ?? countryZoneForUrl(url) ?? textZoneForContext(context);
   if (!zone) return null;
   return offsetStringForZoneAt(zone, eventDate);
 }

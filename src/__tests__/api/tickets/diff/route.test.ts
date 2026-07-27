@@ -115,7 +115,17 @@ describe("POST /api/tickets/diff — venue-timezone-aware comparison", () => {
     };
     prismaMock.event.findMany.mockResolvedValue([event]);
 
-    const ticketNoTz = { ...baseTicket, time: "12:00", sourceTimezone: null };
+    // sourceUrl (used for the domain/title fallback) must itself be genuinely
+    // unresolvable here — reusing TICKET_URL (a .co.jp domain) would no longer
+    // exercise "unknown", now that the route re-derives from the domain too.
+    // `url`/the stored event's "Ticket URL:" line stay on TICKET_URL so the
+    // lookup still matches; only the ticket's own sourceUrl changes.
+    const ticketNoTz = {
+      ...baseTicket,
+      time: "12:00",
+      sourceTimezone: null,
+      sourceUrl: "https://www.some-random-ticket-site.com/event/1",
+    };
     const res = await POST(
       makeReq({ url: TICKET_URL, ticket: ticketNoTz, tzOffsetMinutes: -480 })
     );

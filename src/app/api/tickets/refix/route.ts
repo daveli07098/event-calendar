@@ -13,7 +13,10 @@ function extractTzFromIso(isoStr: string): string | null {
 }
 
 /** Fetch HTML and extract the main event's start date, time, and timezone from JSON-LD. */
-async function scrapeEventTime(url: string): Promise<{
+async function scrapeEventTime(
+  url: string,
+  context?: { title?: string | null; location?: string | null },
+): Promise<{
   date: string | null;
   time: string | null;
   sourceTimezone: string | null;
@@ -66,8 +69,11 @@ async function scrapeEventTime(url: string): Promise<{
   const time = parts[1] ? parts[1].slice(0, 5) : null;
   let sourceTimezone = parts[1] ? extractTzFromIso(main.startDate) : null;
   // Anchor on the concert's own date so a DST-observing venue zone (e.g. Europe)
-  // resolves the offset that actually applies to this event, not "now".
-  if (!sourceTimezone) sourceTimezone = detectTimezoneFromUrl(url, main.dateObj);
+  // resolves the offset that actually applies to this event, not "now". Pass
+  // the existing calendar event's title/location as a last-resort fallback
+  // for global-brand domains (e.g. pokemongo.com) where the country only
+  // appears in that text, never in the URL — domain resolution still wins.
+  if (!sourceTimezone) sourceTimezone = detectTimezoneFromUrl(url, main.dateObj, context);
 
   return { date, time, sourceTimezone };
 }
@@ -126,7 +132,7 @@ export async function POST(req: NextRequest) {
       description: { contains: "Ticket URL:" },
       ...(filterIds ? { id: { in: Array.from(filterIds) } } : {}),
     },
-    select: { id: true, description: true, startTime: true, endTime: true },
+    select: { id: true, title: true, location: true, description: true, startTime: true, endTime: true },
   });
 
   const results: Array<{
@@ -144,7 +150,7 @@ export async function POST(req: NextRequest) {
       continue;
     }
 
-    const scraped = await scrapeEventTime(ticketUrl);
+    const scraped = await scrapeEventTime(ticketUrl, { title: event.title, location: event.location });
     if (!scraped || !scraped.date || !scraped.sourceTimezone) {
       results.push({ eventId: event.id, status: "skipped", reason: "scrape returned no date/timezone" });
       continue;

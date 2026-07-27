@@ -55,4 +55,55 @@ describe("detectTimezoneFromUrl", () => {
   it("returns null for an invalid URL", () => {
     expect(detectTimezoneFromUrl("not a url")).toBeNull();
   });
+
+  // Global brand domains (e.g. pokemongo.com) host events in many countries
+  // under one .com — the country only appears in the title, never the URL.
+  // Nine real production events from this exact domain hit this gap.
+  describe("title/location context fallback (global brand domains)", () => {
+    const pokemonGoUrl = "https://pokemongo.com/en-us/events/some-event";
+
+    it('resolves "Pokémon RUN 30 — Jakarta" to +07:00 via the city table (Indonesia is otherwise ambiguous)', () => {
+      expect(
+        detectTimezoneFromUrl(pokemonGoUrl, new Date(), { title: "Pokémon RUN 30 — Jakarta" })
+      ).toBe("+07:00");
+    });
+
+    it('resolves a "— Thailand" title to +07:00 via the country tag', () => {
+      expect(
+        detectTimezoneFromUrl(pokemonGoUrl, new Date(), { title: "Pokémon RUN 30 — Thailand" })
+      ).toBe("+07:00");
+    });
+
+    it.each([
+      ["— New Taipei", "New Taipei"],
+      ["— Singapore", "Singapore"],
+      ["— Hong Kong", "Hong Kong"],
+    ])('resolves a "%s" title to +08:00 via the country tag', (_desc, place) => {
+      expect(
+        detectTimezoneFromUrl(pokemonGoUrl, new Date(), { title: `Pokémon RUN 30 — ${place}` })
+      ).toBe("+08:00");
+    });
+
+    it('does NOT guess a zone for an ambiguous multi-timezone country with no recognisable city ("— United States")', () => {
+      expect(
+        detectTimezoneFromUrl(pokemonGoUrl, new Date(), { title: "Pokémon RUN 30 — United States" })
+      ).toBeNull();
+    });
+
+    it("a domain that already resolves (livenationhip.co.jp) is unaffected by a conflicting title — domain still wins", () => {
+      expect(
+        detectTimezoneFromUrl("https://www.livenationhip.co.jp/some-show", new Date("2026-07-31T12:00:00Z"), {
+          title: "Some Show — Jakarta",
+        })
+      ).toBe("+09:00");
+    });
+
+    it("no-context calls behave exactly as before (regression guard) — unknown domain still returns null", () => {
+      expect(detectTimezoneFromUrl("https://www.some-random-ticket-site.com/event/1")).toBeNull();
+    });
+
+    it("no-context calls behave exactly as before (regression guard) — legacy HK domain still resolves via domain alone", () => {
+      expect(detectTimezoneFromUrl("https://www.timable.com/event/456")).toBe("+08:00");
+    });
+  });
 });
