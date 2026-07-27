@@ -19,6 +19,7 @@ interface ScrapedTicket {
   sourceUrl: string;
   category?: string | null;
   country?: string | null;
+  sourceTimezone?: string | null; // ±HH:MM offset from scrape route (e.g. "+09:00" for JST)
 }
 
 // ---------------------------------------------------------------------------
@@ -51,8 +52,18 @@ function buildSaleDescription(ticket: ScrapedTicket): string {
   ].filter(Boolean).join("\n\n");
 }
 
-/** Parse date+time as user-local time and return a UTC Date using tzOffsetMinutes. */
-function parseLocalToUTC(date: string | null, time: string | null, tzOffsetMinutes: number): Date | null {
+/** Parse date+time into a UTC Date.
+ *  Priority: sourceTimezone (from JSON-LD/URL, resolved by the scrape route) >
+ *  tzOffsetMinutes (client) > naive UTC. Mirrors add/route.ts's
+ *  parseSingleDateTime — sourceTimezone must win or a non-HK venue's wall-clock
+ *  time gets interpreted in the *viewer's* zone instead of the venue's, which is
+ *  exactly the timezone data-corruption bug this route needs to not reintroduce. */
+function parseLocalToUTC(
+  date: string | null,
+  time: string | null,
+  tzOffsetMinutes: number,
+  sourceTimezone?: string | null,
+): Date | null {
   if (!date) return null;
   const isoMatch = date.match(/(\d{4})-(\d{2})-(\d{2})/);
   if (!isoMatch) {
@@ -61,6 +72,13 @@ function parseLocalToUTC(date: string | null, time: string | null, tzOffsetMinut
   }
   const [, y, m, d] = isoMatch;
   const [h = "12", min = "00"] = (time ?? "12:00").split(":");
+  if (time && sourceTimezone) {
+    // Reconstruct a timezone-aware ISO string and let JS parse it to UTC.
+    const iso = `${y}-${m}-${d}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00${sourceTimezone}`;
+    const parsed = new Date(iso);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+  // Fall back to the client offset only when the source zone is genuinely unknown.
   // Use Date.UTC() so the result is server-timezone-agnostic (avoids Vercel UTC vs localhost HKT drift).
   // offsetMinutes = getTimezoneOffset() — negative for UTC+ zones (e.g. -480 for HKT).
   // UTC = localNumbers_as_UTC + offsetMinutes  →  12:00 HKT: Date.UTC(…,12,0) + (-480min) = 04:00 UTC
@@ -148,10 +166,15 @@ export async function PATCH(req: NextRequest) {
     const timeSrc = apply.has("time") ? ticket.time : null;
     let newStart: Date | null;
     if (timeSrc !== null) {
-      // ticket.time is local — convert to UTC using client offset
-      newStart = parseLocalToUTC(dateSrc, timeSrc, tzOffsetMinutes);
+      // ticket.time is local (venue wall-clock) — sourceTimezone takes priority
+      // over the client offset, same precedence as add/route.ts.
+      newStart = parseLocalToUTC(dateSrc, timeSrc, tzOffsetMinutes, ticket.sourceTimezone);
     } else {
-      // Keep the existing stored time, only change the date
+      // Keep the existing stored time, only change the date. existingTimeUTC is
+      // already a UTC hh:mm (sliced straight off the stored UTC timestamp), NOT a
+      // venue-local wall-clock time — do NOT pass sourceTimezone here, or it would
+      // be re-interpreted as local time and re-offset a second time (corrupting an
+      // already-correct stored time). offset stays 0 on purpose.
       const existingTimeUTC = existingEvent.startTime.toISOString().slice(11, 16);
       newStart = parseLocalToUTC(dateSrc, existingTimeUTC, 0); // already UTC
     }
@@ -216,7 +239,7 @@ export async function PATCH(req: NextRequest) {
     const window = ticket.saleDates?.find((w) => w.label === label);
     if (!window) continue;
 
-    const winStart = parseLocalToUTC(window.date, window.time ?? null, tzOffsetMinutes);
+    const winStart = parseLocalToUTC(window.date, window.time ?? null, tzOffsetMinutes, ticket.sourceTimezone);
     if (!winStart) continue;
     // Ranged windows span open → close; a window without an explicit close is
     // the on-sale DAY, covered as a 1-day reminder (open → 23:59) — mirrors the
@@ -225,6 +248,7 @@ export async function PATCH(req: NextRequest) {
       window.endDate ?? window.date,
       window.endTime ?? "23:59",
       tzOffsetMinutes,
+      ticket.sourceTimezone,
     );
     if (!winEnd || winEnd <= winStart) winEnd = new Date(winStart.getTime() + 3_600_000);
 
@@ -280,7 +304,7 @@ export async function PATCH(req: NextRequest) {
   if (saleEventId && saleFieldsChanged && !apply.has("saleWin::" + "Public Sale") && !apply.has("saleWin::" + "Sale Opens")) {
     const saleUpdateData: Record<string, unknown> = { description: buildSaleDescription(ticket) };
     if (apply.has("saleDate") && ticket.saleDate) {
-      const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes);
+      const saleStart = parseLocalToUTC(ticket.saleDate, null, tzOffsetMinutes, ticket.sourceTimezone);
       if (saleStart) {
         const saleEnd = new Date(saleStart);
         saleEnd.setHours(saleEnd.getHours() + 1);
@@ -301,7 +325,7 @@ export async function PATCH(req: NextRequest) {
       ].filter(Boolean).join("\n\n"),
     };
     if (apply.has("saleFirstDate") && ticket.saleFirstDate) {
-      const presaleStart = parseLocalToUTC(ticket.saleFirstDate, null, tzOffsetMinutes);
+      const presaleStart = parseLocalToUTC(ticket.saleFirstDate, null, tzOffsetMinutes, ticket.sourceTimezone);
       if (presaleStart) {
         const presaleEnd = new Date(presaleStart);
         presaleEnd.setHours(presaleEnd.getHours() + 1);

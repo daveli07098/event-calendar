@@ -19,6 +19,7 @@ interface ScrapedTicket {
   saleDates: Array<{ date: string; time: string | null; label: string }> | null;
   sourceUrl: string;
   category?: string | null;
+  sourceTimezone?: string | null; // ±HH:MM offset from scrape route (e.g. "+09:00" for JST)
 }
 
 export interface FieldChange {
@@ -89,10 +90,38 @@ function extractLabelFromTitle(title: string): string | null {
 }
 
 /**
+ * Convert a stored UTC instant to a date/time string for comparison against the
+ * freshly-scraped wall-clock value.
+ *
+ * When `sourceTimezone` (a ±HH:MM offset resolved for the VENUE, e.g. "+09:00"
+ * for JST) is available, convert into that zone instead of the viewer's. This
+ * is the diff route's half of the timezone data-corruption bug fix: comparing
+ * the stored instant against `ticket.date`/`ticket.time` (which are venue
+ * wall-clock, not viewer wall-clock) only makes sense if both sides are in the
+ * same zone. Converting with the client's `offsetMinutes` instead had two
+ * failure modes:
+ *  - false positive: a correctly-stored non-HK event reported a spurious
+ *    "changed" on every sync (viewer zone != venue zone).
+ *  - false negative: an already-corrupted row (wrong offset baked into the
+ *    stored instant) diffed as "no change", because the same wrong offset was
+ *    applied on both sides and canceled out — this is why Sync couldn't
+ *    self-heal a corrupted row. With the venue offset now used consistently,
+ *    a corrupted stored instant surfaces as a real diff instead.
+ *
+ * Falls back to the viewer's `offsetMinutes` (original behavior) when
+ * sourceTimezone is unknown — e.g. events with no detectable source timezone.
+ *
  * offsetMinutes = new Date().getTimezoneOffset() from the client
  * (negative for UTC+ zones, e.g. -480 for HKT)
  */
-function utcToLocal(utcDate: Date, offsetMinutes: number): { date: string; time: string } {
+function utcToLocal(utcDate: Date, offsetMinutes: number, sourceTimezone?: string | null): { date: string; time: string } {
+  if (sourceTimezone) {
+    const sign = sourceTimezone.startsWith("-") ? -1 : 1;
+    const [hh = "0", mm = "0"] = sourceTimezone.replace(/[+-]/, "").split(":");
+    const offsetMs = sign * (parseInt(hh, 10) * 60 + parseInt(mm, 10)) * 60_000;
+    const local = new Date(utcDate.getTime() + offsetMs);
+    return { date: local.toISOString().slice(0, 10), time: local.toISOString().slice(11, 16) };
+  }
   // localMs = utcMs - offsetMinutes * 60000
   // For HKT (offset=-480): utcMs - (-480*60000) = utcMs + 8h ✓
   const localMs = utcDate.getTime() - offsetMinutes * 60_000;
@@ -197,7 +226,7 @@ export async function POST(req: NextRequest) {
   const storedPresale = parseStored(presaleEvent?.description ?? null);
 
   // Convert stored UTC timestamp to user-local date/time for comparison
-  const localStart = utcToLocal(mainEvent.startTime, tzOffsetMinutes);
+  const localStart = utcToLocal(mainEvent.startTime, tzOffsetMinutes, ticket.sourceTimezone);
 
   // Build diff
   const changes: FieldChange[] = [];
@@ -236,7 +265,7 @@ export async function POST(req: NextRequest) {
   if (ticket.saleDates?.length) {
     for (const window of ticket.saleDates) {
       const matchedEvent = allSaleEvents.find((se) => extractLabelFromTitle(se.title) === window.label);
-      const storedWindowDate = matchedEvent ? utcToLocal(matchedEvent.startTime, tzOffsetMinutes).date : null;
+      const storedWindowDate = matchedEvent ? utcToLocal(matchedEvent.startTime, tzOffsetMinutes, ticket.sourceTimezone).date : null;
       const newWindowDate = normDate(window.date);
 
       if (newWindowDate && storedWindowDate !== newWindowDate) {
@@ -285,7 +314,7 @@ export async function POST(req: NextRequest) {
   const storedSaleWindows = allSaleEvents
     .map((se) => {
       const label = extractLabelFromTitle(se.title) ?? se.title;
-      const local = utcToLocal(se.startTime, tzOffsetMinutes);
+      const local = utcToLocal(se.startTime, tzOffsetMinutes, ticket.sourceTimezone);
       return { label, date: local.date, time: local.time };
     })
     .sort((a, b) => a.date.localeCompare(b.date));

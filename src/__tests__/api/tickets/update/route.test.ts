@@ -223,4 +223,95 @@ describe("PATCH /api/tickets/update", () => {
     expect(await res.json()).toEqual({ error: "Event not found or access denied" });
     expect(prismaMock.event.update).not.toHaveBeenCalled();
   });
+
+  // --- Timezone data-corruption fix: sourceTimezone must win over tzOffsetMinutes ---
+  describe("sourceTimezone precedence (Cause B fix)", () => {
+    it("uses ticket.sourceTimezone, not the client's tzOffsetMinutes, when applying a date/time change", async () => {
+      const ownEvent = withCalendar(
+        mockEvent({ id: "evt-own", calendarId: "cal-1" }),
+        { userId: "user-1" }
+      );
+      prismaMock.event.findMany.mockResolvedValue([ownEvent]);
+      prismaMock.event.update.mockResolvedValue(mockEvent({ id: "evt-own", calendarId: "cal-1" }));
+
+      const jstTicket = { ...baseTicket, date: "2026-07-31", time: "12:00", sourceTimezone: "+09:00" };
+
+      await PATCH(
+        makeReq({
+          eventId: "evt-own",
+          appliedFields: ["date", "time"],
+          ticket: jstTicket,
+          // Client is on HKT (+08:00) → getTimezoneOffset() = -480. If this were
+          // used instead of sourceTimezone, 12:00 would wrongly become 04:00Z
+          // (the exact reported bug) instead of the correct 03:00Z.
+          tzOffsetMinutes: -480,
+        })
+      );
+
+      expect(prismaMock.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "evt-own" },
+          data: expect.objectContaining({ startTime: new Date("2026-07-31T03:00:00.000Z") }),
+        })
+      );
+    });
+
+    it("falls back to tzOffsetMinutes when sourceTimezone is unknown (no regression)", async () => {
+      const ownEvent = withCalendar(
+        mockEvent({ id: "evt-own", calendarId: "cal-1" }),
+        { userId: "user-1" }
+      );
+      prismaMock.event.findMany.mockResolvedValue([ownEvent]);
+      prismaMock.event.update.mockResolvedValue(mockEvent({ id: "evt-own", calendarId: "cal-1" }));
+
+      const unresolvedTicket = { ...baseTicket, date: "2026-07-31", time: "12:00", sourceTimezone: null };
+
+      await PATCH(
+        makeReq({
+          eventId: "evt-own",
+          appliedFields: ["date", "time"],
+          ticket: unresolvedTicket,
+          tzOffsetMinutes: -480, // HKT
+        })
+      );
+
+      // 12:00 HKT (client) with no known source timezone → 04:00Z, unchanged behavior.
+      expect(prismaMock.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "evt-own" },
+          data: expect.objectContaining({ startTime: new Date("2026-07-31T04:00:00.000Z") }),
+        })
+      );
+    });
+
+    it("does not re-offset an unchanged stored time when only the date is applied", async () => {
+      // Existing stored startTime is 2025-01-15T10:00:00Z (from mockEvent default).
+      const ownEvent = withCalendar(
+        mockEvent({ id: "evt-own", calendarId: "cal-1", startTime: new Date("2025-01-15T10:00:00.000Z") }),
+        { userId: "user-1" }
+      );
+      prismaMock.event.findMany.mockResolvedValue([ownEvent]);
+      prismaMock.event.update.mockResolvedValue(mockEvent({ id: "evt-own", calendarId: "cal-1" }));
+
+      const jstTicket = { ...baseTicket, date: "2026-07-31", time: "12:00", sourceTimezone: "+09:00" };
+
+      await PATCH(
+        makeReq({
+          eventId: "evt-own",
+          appliedFields: ["date"], // date only — time is NOT applied
+          ticket: jstTicket,
+          tzOffsetMinutes: -480,
+        })
+      );
+
+      // Date changes to 2026-07-31 but the stored 10:00 UTC time-of-day must be
+      // preserved verbatim — NOT reinterpreted as venue-local time and re-offset.
+      expect(prismaMock.event.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "evt-own" },
+          data: expect.objectContaining({ startTime: new Date("2026-07-31T10:00:00.000Z") }),
+        })
+      );
+    });
+  });
 });

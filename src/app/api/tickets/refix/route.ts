@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { safeFetch } from "@/lib/safe-fetch";
+import { detectTimezoneFromUrl } from "@/lib/source-timezone";
 
 // ---------------------------------------------------------------------------
 // Lightweight JSON-LD extractor (og-meta only, no AI — fast, no quota)
@@ -9,19 +10,6 @@ import { safeFetch } from "@/lib/safe-fetch";
 function extractTzFromIso(isoStr: string): string | null {
   const m = isoStr.match(/([+-]\d{2}:?\d{2}|Z)$/);
   return m ? m[1] : null;
-}
-
-function detectTimezoneFromUrl(url: string): string | null {
-  try {
-    const { hostname } = new URL(url);
-    const h = hostname.toLowerCase();
-    const hktDomains = [
-      "timable.com", "cityline.com", "hkticketing.com", "ticketmaster.com.hk",
-      "urbtix.hk", "ticketflap.com", "klook.com", "kktix.com",
-    ];
-    if (hktDomains.some((d) => h === d || h.endsWith(`.${d}`))) return "+08:00";
-  } catch { /* ignore */ }
-  return null;
 }
 
 /** Fetch HTML and extract the main event's start date, time, and timezone from JSON-LD. */
@@ -77,7 +65,9 @@ async function scrapeEventTime(url: string): Promise<{
   const date = parts[0] ?? null;
   const time = parts[1] ? parts[1].slice(0, 5) : null;
   let sourceTimezone = parts[1] ? extractTzFromIso(main.startDate) : null;
-  if (!sourceTimezone) sourceTimezone = detectTimezoneFromUrl(url);
+  // Anchor on the concert's own date so a DST-observing venue zone (e.g. Europe)
+  // resolves the offset that actually applies to this event, not "now".
+  if (!sourceTimezone) sourceTimezone = detectTimezoneFromUrl(url, main.dateObj);
 
   return { date, time, sourceTimezone };
 }
@@ -118,9 +108,14 @@ export async function POST(req: NextRequest) {
 
   const uid = session.user.id;
 
-  // Find all the user's own calendar events that have a Ticket URL in description
+  // Find all the user's own calendar events that have a Ticket URL in description.
+  // Exclude the "sale-ticket" calendar: its rows also contain a "Ticket URL:" line
+  // (sale-window reminder events, not concerts) but this route always applies the
+  // re-scraped CONCERT time — running it against a sale-window row would stomp a
+  // correct sale-open reminder with the show's start time. Skip at the calendar
+  // level (cheap — one extra name check, no per-row query) rather than corrupting.
   const calendars = await prisma.calendar.findMany({
-    where: { userId: uid },
+    where: { userId: uid, name: { not: "sale-ticket" } },
     select: { id: true },
   });
   const calendarIds = calendars.map((c) => c.id);

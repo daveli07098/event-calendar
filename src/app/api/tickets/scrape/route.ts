@@ -26,6 +26,7 @@ import {
   scrapeCacheKey,
 } from "@/lib/ai/scrape-cache";
 import { parseJsonLoose } from "@/lib/ai/client";
+import { detectTimezoneFromUrl } from "@/lib/source-timezone";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -413,20 +414,6 @@ function utcToLocalStrings(d: Date, tz: string, originalIso?: string): { date: s
     date: local.toISOString().slice(0, 10),
     time: `${String(local.getUTCHours()).padStart(2, "0")}:${String(local.getUTCMinutes()).padStart(2, "0")}`,
   };
-}
-
-/** Map known event-ticketing domains to their local timezone offset string. */
-function detectTimezoneFromUrl(url: string): string | null {
-  try {
-    const { hostname } = new URL(url);
-    const h = hostname.toLowerCase();
-    const hktDomains = [
-      "timable.com", "cityline.com", "hkticketing.com", "ticketmaster.com.hk",
-      "urbtix.hk", "ticketflap.com", "klook.com", "kktix.com",
-    ];
-    if (hktDomains.some((d) => h === d || h.endsWith(`.${d}`))) return "+08:00";
-  } catch { /* ignore invalid URL */ }
-  return null;
 }
 
 /**
@@ -986,8 +973,12 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     }
   }
 
-  // URL-based timezone was already set at the start; this keeps the override from JSON-LD if set
-  if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl);
+  // URL-based timezone was already set at the start; this restores it if a JSON-LD
+  // block with a timezone-naive startDate (no Z/±offset suffix) clobbered it back to
+  // null above. schemaDate is known by now, so pass it as the anchor date — the
+  // resolved offset is DST-sensitive for zones like Europe/London, so re-deriving it
+  // "now" instead of for the actual event date would be wrong outside the current DST period.
+  if (!sourceTz) sourceTz = detectTimezoneFromUrl(pageUrl, schemaDate ? new Date(`${schemaDate}T12:00:00Z`) : undefined);
 
   // ---------------------------------------------------------------------------
   // Ticket platform extraction
