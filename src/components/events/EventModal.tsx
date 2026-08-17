@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +34,18 @@ import type { CalendarType, EventType, EventFormData, EventCategory } from "@/ty
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 import { useEventFormState } from "@/hooks/useEventFormState";
 import { describeVenueTime } from "@/lib/event-timezone";
+import { parseSeat } from "@/lib/seat-parse";
+import { SeatBreakdown } from "@/components/events/SeatBreakdown";
+import dynamic from "next/dynamic";
+
+// Lazy-loaded: the SVG bowl and the per-venue geometry tables are only needed
+// once someone actually enters a seat, and that table grows with every venue
+// added. ssr: false is valid here because EventModal is a Client Component
+// (see node_modules/next/dist/docs/01-app/02-guides/lazy-loading.md).
+const SeatMap = dynamic(
+  () => import("@/components/venue/SeatMap").then((m) => m.SeatMap),
+  { ssr: false },
+);
 
 interface RelatedEvent {
   id: string;
@@ -100,6 +112,7 @@ export function EventModal({
     artist, setArtist,
     referenceUrl, setReferenceUrl,
     seatingPlanUrl, setSeatingPlanUrl,
+    seat, setSeat,
     swapStartEnd,
     applyServerFields,
     isDirty,
@@ -166,11 +179,35 @@ export function EventModal({
   const applySeatingPlan = (desc: string, url: string): string => {
     const line = url.trim() ? `Seating Plan: ${url.trim()}` : null;
     const replaced = desc.replace(/^Seating Plan: https?:\/\/[^\n]*/m, line ?? "").replace(/\n{3,}/g, "\n\n");
-    if (line && !replaced.includes("Seating Plan:")) {
+    // Anchored test, not includes(): a description containing prose like
+    // "the Seating Plan: will be emailed" would otherwise suppress the append.
+    if (line && !/^Seating Plan: /m.test(replaced)) {
       return replaced.trimEnd() + (replaced ? "\n\n" : "") + line;
     }
     return replaced;
   };
+
+  // Helper: update description to include/replace the manually-entered Seat
+  // line — mirrors applySeatingPlan above, same "Seat: <raw>" convention.
+  // Manual entry only: scraped sale pages never contain a buyer's seat, so
+  // this never touches the scrape pipeline.
+  const applySeat = (desc: string, seatValue: string): string => {
+    const line = seatValue.trim() ? `Seat: ${seatValue.trim()}` : null;
+    const replaced = desc.replace(/^Seat: [^\n]*/m, line ?? "").replace(/\n{3,}/g, "\n\n");
+    // Anchored, per the note in applySeatingPlan — prose such as
+    // "your Seat: assigned at the gate" must not suppress the append.
+    if (line && !/^Seat: /m.test(replaced)) {
+      return replaced.trimEnd() + (replaced ? "\n\n" : "") + line;
+    }
+    return replaced;
+  };
+
+  // Live structured breakdown of the Seat field, re-parsed on every keystroke
+  // (the parser is synchronous and dependency-free — see seat-parse.ts).
+  // Deliberately no `inferLevelFromBlock` option: level inference is
+  // venue-specific and the per-venue config lives in the seat-map worker's
+  // files, not here — see seat-parse.ts header point 1.
+  const seatParseResult = useMemo(() => (seat.trim() ? parseSeat(seat) : null), [seat]);
 
   // Related events — events sharing this one's Ticket URL, shown above the
   // description so the user can jump between them. Re-derived whenever the
@@ -349,10 +386,18 @@ export function EventModal({
     if (hasInvalidDateRange) return;
     setSaving(true);
     try {
-      // Merge seatingPlanUrl back into description before saving
-      const finalDescription = seatingPlanUrl.trim()
+      // Merge seatingPlanUrl and seat back into description before saving.
+      // Each helper also runs when the field is EMPTY but its line still exists,
+      // so clearing the field actually removes the line — otherwise a cleared
+      // seat silently reappears on reopen. Still skipped entirely when there's
+      // neither a value nor an existing line, because the helpers collapse
+      // blank-line runs and shouldn't rewrite descriptions they don't own.
+      const descriptionWithSeatingPlan = seatingPlanUrl.trim() || /^Seating Plan: /m.test(description)
         ? applySeatingPlan(description, seatingPlanUrl)
         : description;
+      const finalDescription = seat.trim() || /^Seat: /m.test(descriptionWithSeatingPlan)
+        ? applySeat(descriptionWithSeatingPlan, seat)
+        : descriptionWithSeatingPlan;
       await onSave({
         title: title.trim(),
         description: finalDescription || undefined,
@@ -768,6 +813,35 @@ export function EventModal({
               <p className="text-xs text-muted-foreground/60">No seating plan attached</p>
             )}
           </div>
+
+          {/* Seat — manual entry off the buyer's printed/e-ticket, e.g. "Gate F
+              Level 2 Block 225 Row BB Seat 101". Deliberately manual: scraped
+              sale pages never contain a buyer's specific seat, so this never
+              touches the scrape pipeline. Stored as a "Seat: <raw>" line inside
+              description via applySeat (mirrors Seating Plan above); parsed
+              client-side on every keystroke for the live breakdown below. */}
+          {(!readOnly || seat) && (
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="seat" className="text-xs text-muted-foreground">
+                Seat 座位
+              </Label>
+              <Input
+                id="seat"
+                placeholder="Paste seat line from e-ticket, e.g. Gate F Level 2 Block 225 Row BB Seat 101"
+                value={seat}
+                onChange={(e) => setSeat(e.target.value)}
+                readOnly={readOnly}
+                className={`h-8 text-sm${readOnly ? " cursor-default select-text" : ""}`}
+              />
+              {seatParseResult && <SeatBreakdown result={seatParseResult} />}
+              {/* Renders nothing unless the venue has a seat-map config AND the
+                  block resolves — an unknown venue deliberately shows no map
+                  rather than a generic bowl with a guessed marker. */}
+              {seatParseResult && (
+                <SeatMap venue={location} seat={seatParseResult} />
+              )}
+            </div>
+          )}
           </div>{/* end dimmed wrapper */}
         </form>
 

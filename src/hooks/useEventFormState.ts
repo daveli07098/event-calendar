@@ -29,6 +29,7 @@ interface FormSnapshot {
   artist: string;
   referenceUrl: string;
   seatingPlanUrl: string;
+  seat: string;
 }
 
 const toLocalDateInput = (value: string) => {
@@ -74,6 +75,11 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
   // ticketing) that Sync prefers over the description's Ticket URL when set
   const [referenceUrl, setReferenceUrl] = useState("");
   const [seatingPlanUrl, setSeatingPlanUrl] = useState("");
+  // Manually-entered seat line off the buyer's e-ticket (e.g. "Gate F Level 2
+  // Block 225 Row BB Seat 101") — stored as a "Seat: <raw>" line inside
+  // `description`, same convention as seatingPlanUrl above. Never scraped;
+  // sale pages don't contain a buyer's seat.
+  const [seat, setSeat] = useState("");
 
   // Dirty-check baseline — snapshotted whenever we genuinely (re)initialize,
   // and refreshed for individual fields after an in-place server sync so
@@ -128,6 +134,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
     if (event) {
       const eventDescription = event.description ?? "";
       const seating = eventDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
+      const seatLine = eventDescription.match(/^Seat: (.+)$/m)?.[1]?.trim() ?? "";
       const start = event.allDay ? toLocalDateInput(event.startTime) : toLocalDateTimeInput(event.startTime);
       const end = event.allDay ? toLocalDateInput(event.endTime) : toLocalDateTimeInput(event.endTime);
       next = {
@@ -142,10 +149,12 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
         artist: event.artist ?? "",
         referenceUrl: event.referenceUrl ?? "",
         seatingPlanUrl: seating,
+        seat: seatLine,
       };
     } else if (initialData) {
       const copiedDescription = initialData.description ?? "";
       const seating = copiedDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
+      const seatLine = copiedDescription.match(/^Seat: (.+)$/m)?.[1]?.trim() ?? "";
       const start = initialData.allDay ? toLocalDateInput(initialData.startTime) : toLocalDateTimeInput(initialData.startTime);
       const end = initialData.allDay ? toLocalDateInput(initialData.endTime) : toLocalDateTimeInput(initialData.endTime);
       next = {
@@ -160,6 +169,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
         artist: initialData.artist ?? "",
         referenceUrl: initialData.referenceUrl ?? "",
         seatingPlanUrl: seating,
+        seat: seatLine,
       };
     } else if (initialRange) {
       const start = initialRange.allDay ? initialRange.start.slice(0, 10) : toLocalDateTimeInput(initialRange.start);
@@ -176,6 +186,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
         artist: "",
         referenceUrl: "",
         seatingPlanUrl: "",
+        seat: "",
       };
     } else {
       next = {
@@ -190,6 +201,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
         artist: "",
         referenceUrl: "",
         seatingPlanUrl: "",
+        seat: "",
       };
     }
 
@@ -204,6 +216,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
     setArtist(next.artist);
     setReferenceUrl(next.referenceUrl);
     setSeatingPlanUrl(next.seatingPlanUrl);
+    setSeat(next.seat);
     setBaseline(next);
     setInitVersion((v) => v + 1);
 
@@ -295,7 +308,8 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
         category !== baseline.category ||
         artist !== baseline.artist ||
         referenceUrl !== baseline.referenceUrl ||
-        seatingPlanUrl !== baseline.seatingPlanUrl),
+        seatingPlanUrl !== baseline.seatingPlanUrl ||
+        seat !== baseline.seat),
   );
 
   return {
@@ -310,6 +324,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
     artist, setArtist,
     referenceUrl, setReferenceUrl,
     seatingPlanUrl, setSeatingPlanUrl,
+    seat, setSeat,
     swapStartEnd,
     applyServerFields,
     isDirty,

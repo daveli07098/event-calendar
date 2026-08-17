@@ -212,4 +212,120 @@ describe("EventModal", () => {
       expect(baseProps.onDelete).toHaveBeenCalledTimes(1);
     });
   });
+
+  // Phase 0 seat feature — manual seat entry, stored as a "Seat: <raw>" line
+  // inside description (same convention as Seating Plan), with a live
+  // client-side parsed breakdown.
+  describe("Seat field", () => {
+    it("round-trips a seat through the description: set, save, reopen", async () => {
+      const user = userEvent.setup();
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      const { rerender } = render(
+        <EventModal {...baseProps} onSave={onSave} event={existingEvent} initialRange={null} />
+      );
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Team Standup")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByLabelText("Seat 座位"), "Gate F Level 2 Block 225 Row BB Seat 101");
+      await user.click(screen.getByRole("button", { name: /^update$/i }));
+
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledTimes(1);
+      });
+      const saved = onSave.mock.calls[0][0];
+      expect(saved.description).toContain("Seat: Gate F Level 2 Block 225 Row BB Seat 101");
+
+      // Reopen with the saved description — the seat line should populate the input again.
+      const savedEvent: EventType = { ...existingEvent, description: saved.description };
+      rerender(
+        <EventModal {...baseProps} onSave={onSave} event={null} initialRange={null} />
+      );
+      rerender(
+        <EventModal {...baseProps} onSave={onSave} event={savedEvent} initialRange={null} />
+      );
+      await waitFor(() => {
+        expect(screen.getByLabelText("Seat 座位")).toHaveValue("Gate F Level 2 Block 225 Row BB Seat 101");
+      });
+    });
+
+    it("removes the Seat line when the field is cleared", async () => {
+      const user = userEvent.setup();
+      const onSave = vi.fn().mockResolvedValue(undefined);
+      // An event that already carries a seat line alongside other content.
+      const seated: EventType = {
+        ...existingEvent,
+        description: "Daily sync\n\nSeat: Gate F Level 2 Block 225 Row BB Seat 101",
+      };
+      render(
+        <EventModal {...baseProps} onSave={onSave} event={seated} initialRange={null} />
+      );
+      await waitFor(() => {
+        expect(screen.getByLabelText("Seat 座位")).toHaveValue(
+          "Gate F Level 2 Block 225 Row BB Seat 101"
+        );
+      });
+
+      await user.clear(screen.getByLabelText("Seat 座位"));
+      await user.click(screen.getByRole("button", { name: /^update$/i }));
+
+      await waitFor(() => {
+        expect(onSave).toHaveBeenCalledTimes(1);
+      });
+      const saved = onSave.mock.calls[0][0];
+      // The line is gone, and the rest of the description survives.
+      expect(saved.description).not.toContain("Seat:");
+      expect(saved.description).toContain("Daily sync");
+    });
+
+    it("renders a partial parse as visibly partial, not a completed breakdown", async () => {
+      const user = userEvent.setup();
+      render(
+        <EventModal {...baseProps} event={existingEvent} initialRange={null} />
+      );
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Team Standup")).toBeInTheDocument();
+      });
+
+      // "Block 225 Row BB" has no seat — classify() marks this "partial".
+      await user.type(screen.getByLabelText("Seat 座位"), "Block 225 Row BB");
+
+      const breakdown = await screen.findByTestId("seat-breakdown");
+      expect(within(breakdown).getByText(/partial/i)).toBeInTheDocument();
+      expect(within(breakdown).getByText(/Block 225/)).toBeInTheDocument();
+      expect(within(breakdown).getByText(/Row BB/)).toBeInTheDocument();
+    });
+
+    it("shows the raw text plainly for an unparseable seat string", async () => {
+      const user = userEvent.setup();
+      render(
+        <EventModal {...baseProps} event={existingEvent} initialRange={null} />
+      );
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Team Standup")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByLabelText("Seat 座位"), "asdkfjhasdkfj12345!!!");
+
+      const breakdown = await screen.findByTestId("seat-breakdown");
+      expect(within(breakdown).getByText(/not recognized/i)).toBeInTheDocument();
+      expect(within(breakdown).getByText("asdkfjhasdkfj12345!!!")).toBeInTheDocument();
+    });
+
+    it("participates in dirty-tracking: typing a seat then closing prompts the discard confirmation", async () => {
+      const user = userEvent.setup();
+      render(
+        <EventModal {...baseProps} event={existingEvent} initialRange={null} />
+      );
+      await waitFor(() => {
+        expect(screen.getByDisplayValue("Team Standup")).toBeInTheDocument();
+      });
+
+      await user.type(screen.getByLabelText("Seat 座位"), "Seat 101");
+      await user.click(screen.getByRole("button", { name: /cancel/i }));
+
+      expect(screen.getByText(/discard unsaved changes/i)).toBeInTheDocument();
+      expect(baseProps.onOpenChange).not.toHaveBeenCalled();
+    });
+  });
 });
