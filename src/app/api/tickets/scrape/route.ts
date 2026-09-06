@@ -406,9 +406,10 @@ function utcToLocalStrings(d: Date, tz: string, originalIso?: string): { date: s
       return { date: datePart!, time: timePart.slice(0, 5) };
     }
   }
-  const sign = tz.startsWith("-") ? -1 : 1;
-  const [hh = "0", mm = "0"] = tz.replace(/[+-]/, "").split(":");
-  const offsetMs = sign * (parseInt(hh, 10) * 60 + parseInt(mm, 10)) * 60_000;
+  // "Z" (and anything that isn't ±HH:MM) means UTC — parseInt("Z") would be NaN
+  // and every date built from it would throw on toISOString().
+  const m = /^([+-])(\d{2}):?(\d{2})$/.exec(tz.trim());
+  const offsetMs = m ? (m[1] === "-" ? -1 : 1) * (parseInt(m[2]!, 10) * 60 + parseInt(m[3]!, 10)) * 60_000 : 0;
   const local = new Date(d.getTime() + offsetMs);
   return {
     date: local.toISOString().slice(0, 10),
