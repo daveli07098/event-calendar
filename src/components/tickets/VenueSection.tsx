@@ -1,11 +1,22 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, Building2, Loader2, FolderSync, MapPin, ImagePlus, X, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Plus, Trash2, Building2, Loader2, FolderSync, MapPin, ImagePlus, X, ChevronDown, ChevronUp, Armchair, Ticket, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import type { VenueEventSummary, VenueEventsResponse } from "@/app/api/venues/events/route";
 
 interface Venue {
   id: string;
@@ -17,6 +28,20 @@ interface Venue {
   tags: string[];
   imageUrls: string[];
   createdAt: string;
+}
+
+// Per-venue slice of the /api/venues/events payload, keyed by venueId in state.
+type VenueActivity = VenueEventsResponse["venues"][number];
+type UnmatchedLocation = VenueEventsResponse["unmatched"][number];
+
+/** Device-timezone date/time for the venue events disclosure: date only for
+ * all-day events, date + time otherwise. */
+function formatEventWhen(ev: VenueEventSummary): string {
+  const start = new Date(ev.start);
+  if (ev.allDay) {
+    return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(start);
+  }
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(start);
 }
 
 export function VenueSection() {
@@ -32,6 +57,30 @@ export function VenueSection() {
   const [expandedImages, setExpandedImages] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingUploadVenueId, setPendingUploadVenueId] = useState<string | null>(null);
+  // Venue delete requires human confirmation — this directory is shared across all users.
+  const [venueToDelete, setVenueToDelete] = useState<Venue | null>(null);
+
+  // Per-venue event activity (badges + disclosure) from /api/venues/events, fetched in
+  // parallel with the venue list itself so the directory stays usable if this one fails.
+  const [eventsByVenue, setEventsByVenue] = useState<Map<string, VenueActivity>>(new Map());
+  const [unmatched, setUnmatched] = useState<UnmatchedLocation[]>([]);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+  const [addingLocation, setAddingLocation] = useState<string | null>(null);
+
+  const refreshVenueEvents = useCallback(() => {
+    return fetch("/api/venues/events")
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load venue event activity");
+        return r.json() as Promise<VenueEventsResponse>;
+      })
+      .then((d) => {
+        setEventsByVenue(new Map((d.venues ?? []).map((v) => [v.venueId, v])));
+        setUnmatched(Array.isArray(d.unmatched) ? d.unmatched : []);
+        setEventsError(null);
+      })
+      .catch(() => setEventsError("Failed to load venue event activity"));
+  }, []);
 
   useEffect(() => {
     fetch("/api/venues")
@@ -39,7 +88,9 @@ export function VenueSection() {
       .then((d) => setVenues(Array.isArray(d) ? d : []))
       .catch(() => toast.error("Failed to load venues"))
       .finally(() => setLoading(false));
-  }, []);
+    // Fetched in parallel with the venue list above, not chained after it.
+    refreshVenueEvents();
+  }, [refreshVenueEvents]);
 
   const handleAdd = async () => {
     if (!form.name.trim()) return;
@@ -152,6 +203,44 @@ export function VenueSection() {
     }
   };
 
+  const toggleEventsExpanded = (venueId: string) => {
+    setExpandedEvents((prev) => {
+      const next = new Set(prev);
+      if (next.has(venueId)) {
+        next.delete(venueId);
+      } else {
+        next.add(venueId);
+      }
+      return next;
+    });
+  };
+
+  // Human-confirmed path for turning an unmatched event location into a directory
+  // entry — never auto-created. Refreshes both fetches so the new venue and the
+  // (now smaller) unmatched list show up immediately.
+  const handleAddUnmatched = async (location: string) => {
+    setAddingLocation(location);
+    try {
+      const res = await fetch("/api/venues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: location }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? "Failed to add venue");
+      const venue: Venue = await res.json();
+      toast.success(`"${venue.name}" added to the directory`);
+      const [refreshedVenues] = await Promise.all([
+        fetch("/api/venues").then((r) => r.json()),
+        refreshVenueEvents(),
+      ]);
+      setVenues(Array.isArray(refreshedVenues) ? refreshedVenues : []);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to add venue");
+    } finally {
+      setAddingLocation(null);
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
       <div className="flex items-center justify-between">
@@ -161,6 +250,7 @@ export function VenueSection() {
             A reference list of venues for your events. Use this to track building names,
             aliases, and tags for future matching.
           </p>
+          {eventsError && <p className="text-xs text-destructive mt-1">{eventsError}</p>}
         </div>
         <div className="flex gap-2 shrink-0">
           <Button variant="outline" size="sm" onClick={handleBackfillHKLocations} disabled={backfilling} className="gap-1.5" title="Add 'Hong Kong' to imported events missing location">
@@ -254,6 +344,10 @@ export function VenueSection() {
 
           {venues.map((v) => {
             const imagesExpanded = expandedImages.has(v.id);
+            const activity = eventsByVenue.get(v.id);
+            const upcoming = activity?.upcoming ?? [];
+            const ticketedCount = upcoming.filter((e) => e.isTicket).length;
+            const eventsExpanded = expandedEvents.has(v.id);
             return (
               <div key={v.id} className="rounded-lg border border-border bg-card overflow-hidden">
                 {/* Venue header row */}
@@ -272,6 +366,36 @@ export function VenueSection() {
                         ))}
                       </div>
                     )}
+                    {/* Event activity badges — from /api/venues/events, keyed by venue id */}
+                    {activity && (upcoming.length > 0 || ticketedCount > 0 || activity.hasSeatMap || activity.pastCount > 0) && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {upcoming.length > 0 && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{upcoming.length} upcoming</Badge>
+                        )}
+                        {ticketedCount > 0 && (
+                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                            <Ticket /> {ticketedCount} ticketed
+                          </Badge>
+                        )}
+                        {activity.hasSeatMap && (
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                            <Armchair /> Seat map
+                          </Badge>
+                        )}
+                        {activity.pastCount > 0 && (
+                          <span className="text-[10px] text-muted-foreground">{activity.pastCount} past</span>
+                        )}
+                        {upcoming.length > 0 && (
+                          <button
+                            onClick={() => toggleEventsExpanded(v.id)}
+                            className="text-[10px] text-primary hover:underline ml-0.5"
+                            aria-label={eventsExpanded ? `Hide events for ${v.name}` : `Show events for ${v.name}`}
+                          >
+                            {eventsExpanded ? "Hide events" : "Show events"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0">
@@ -281,6 +405,7 @@ export function VenueSection() {
                       disabled={uploadingFor === v.id}
                       className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
                       title="Upload venue images"
+                      aria-label={`Upload images for ${v.name}`}
                     >
                       {uploadingFor === v.id
                         ? <Loader2 className="size-3.5 animate-spin" />
@@ -297,21 +422,57 @@ export function VenueSection() {
                         })}
                         className="p-1.5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors text-xs flex items-center gap-0.5"
                         title="Toggle images"
+                        aria-label={imagesExpanded ? `Hide images for ${v.name}` : `Show images for ${v.name}`}
                       >
                         <span>{v.imageUrls.length}</span>
                         {imagesExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                       </button>
                     )}
-                    {/* Delete venue */}
+                    {/* Delete venue — visible on touch/small screens (no hover there), and
+                        guarded by a confirmation dialog since this directory is shared. */}
                     <button
-                      onClick={() => handleDelete(v.id, v.name)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                      onClick={() => setVenueToDelete(v)}
+                      className="opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 transition-opacity p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
                       title="Remove venue"
+                      aria-label={`Remove ${v.name}`}
                     >
                       <Trash2 className="size-3.5" />
                     </button>
                   </div>
                 </div>
+
+                {/* Event activity — collapsible, mirrors the image gallery's disclosure pattern */}
+                {eventsExpanded && upcoming.length > 0 && (
+                  <div className="border-t border-border px-4 py-3 bg-muted/10 space-y-2">
+                    {upcoming.map((ev) => (
+                      <div key={ev.id} className="flex items-start justify-between gap-3 text-xs">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-muted-foreground shrink-0">{formatEventWhen(ev)}</span>
+                            <span className="font-medium truncate">{ev.title}</span>
+                            <Badge variant="secondary" className="text-[9px] px-1 py-0 shrink-0">{ev.calendarName}</Badge>
+                          </div>
+                          {ev.seat && <p className="text-muted-foreground mt-0.5">Seat {ev.seat}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {ev.ticketUrl && (
+                            <a
+                              href={ev.ticketUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-primary hover:underline inline-flex items-center gap-0.5"
+                            >
+                              <ExternalLink className="size-3" /> Ticket
+                            </a>
+                          )}
+                          {/* Deep-links into the main calendar via the ?event= param it reads on mount
+                              (see CalendarPageClient's mount effect) — no ?date= equivalent exists there. */}
+                          <a href={`/?event=${ev.id}`} className="text-primary hover:underline">Open</a>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Image gallery — collapsible */}
                 {imagesExpanded && v.imageUrls.length > 0 && (
@@ -327,8 +488,9 @@ export function VenueSection() {
                           />
                           <button
                             onClick={() => handleImageDelete(v.id, url)}
-                            className="absolute top-1 right-1 size-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity hover:bg-destructive"
+                            className="absolute top-1 right-1 size-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-100 md:opacity-0 md:group-hover/img:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-destructive"
                             title="Remove image"
+                            aria-label={`Remove image ${i + 1} of ${v.name}`}
                           >
                             <X className="size-3" />
                           </button>
@@ -342,6 +504,66 @@ export function VenueSection() {
           })}
         </div>
       )}
+
+      {/* Locations seen on events that don't match any directory entry — human-confirmed
+          add only, never auto-created into the shared directory. */}
+      {!loading && unmatched.length > 0 && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/10 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-medium">Locations in your events not in the directory</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              These appear on your events but don&apos;t match any venue above.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            {unmatched.map((u) => (
+              <div key={u.location} className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm truncate">{u.location}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {u.count} event{u.count > 1 ? "s" : ""} · e.g. &ldquo;{u.sampleTitle}&rdquo;
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={addingLocation === u.location}
+                  onClick={() => handleAddUnmatched(u.location)}
+                  className="gap-1 shrink-0"
+                >
+                  {addingLocation === u.location ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                  Add to directory
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation — this directory is shared by all users, so a hover-only
+          delete with no confirmation would be too easy to trigger by accident. */}
+      <AlertDialog open={!!venueToDelete} onOpenChange={(next) => { if (!next) setVenueToDelete(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {venueToDelete?.name} from the shared venue directory?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This affects everyone using this directory.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (venueToDelete) handleDelete(venueToDelete.id, venueToDelete.name);
+                setVenueToDelete(null);
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
