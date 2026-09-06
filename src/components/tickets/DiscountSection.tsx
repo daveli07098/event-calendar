@@ -15,33 +15,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAbortableRequest } from "@/lib/use-abortable-request";
 import type { CalendarType } from "@/types";
-
-interface DiscountOffer {
-  label: string;
-  detail: string | null;
-  discountPercent: string | null;
-  promoCode: string | null;
-  minSpend: string | null;
-  audience: "all" | "members" | "new" | null;
-}
-
-interface DiscountResult {
-  hasDiscount: boolean;
-  confidence: "high" | "medium" | "low" | null;
-  title: string | null;
-  discountSummary: string | null;
-  discountPercent: string | null;
-  promoCode: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  categories: string[];
-  offers: DiscountOffer[];
-  evidence: string[];
-  items: Array<{ name: string; price: string | null; originalPrice: string | null }>;
-  sourceUrl: string;
-  aiUsed: string;
-  tokensUsed: number | null;
-}
+import type { DiscountScanResult } from "@/lib/discounts/types";
 
 const AUDIENCE_LABEL: Record<string, string> = {
   all: "Everyone",
@@ -56,6 +30,54 @@ function daysUntil(endDate: string | null): number | null {
   if (Number.isNaN(end)) return null;
   const diff = Math.ceil((end - Date.now()) / 86_400_000);
   return diff >= 0 ? diff : null;
+}
+
+/**
+ * Parses a "YYYY-MM-DD" as a date-only value in the device's local timezone.
+ * `new Date("YYYY-MM-DD")` parses as UTC midnight, which shifts a day
+ * backwards in any timezone west of UTC — split the string instead.
+ */
+function parseDateOnly(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
+const CHIP_DATE_FORMAT: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+
+/** "Until 30 Sep" / "15–30 Sep" validity chip from a startDate/endDate pair. */
+function formatValidity(startDate: string | null, endDate: string | null): string | null {
+  if (!startDate && !endDate) return null;
+  const fmt = new Intl.DateTimeFormat(undefined, CHIP_DATE_FORMAT);
+  if (startDate && endDate && startDate !== endDate) {
+    const start = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
+    if (typeof fmt.formatRange === "function") return fmt.formatRange(start, end);
+    return `${fmt.format(start)} – ${fmt.format(end)}`;
+  }
+  const only = endDate ?? startDate;
+  if (!only) return null;
+  return `Until ${fmt.format(parseDateOnly(only))}`;
+}
+
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Whether a scan result is old enough to show its badge muted. */
+function isStale(checkedAt: string): boolean {
+  return Date.now() - Date.parse(checkedAt) > STALE_AFTER_MS;
+}
+
+/** "Checked 2h ago" / "Checked just now" relative-time label for a scan timestamp. */
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return "";
+  const diffMs = Date.now() - then;
+  const minutes = Math.round(diffMs / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
 }
 
 /** Small copy-to-clipboard button for promo codes. */
@@ -84,7 +106,7 @@ function CopyCode({ code }: { code: string }) {
 type SourceStatus =
   | { state: "idle" }
   | { state: "scanning" }
-  | { state: "done"; result: DiscountResult }
+  | { state: "done"; result: DiscountScanResult; checkedAt: string /* ISO */ }
   | { state: "error"; message: string };
 
 const DEFAULT_SOURCES = [
@@ -95,6 +117,31 @@ const DEFAULT_SOURCES = [
 ];
 
 const CUSTOM_SOURCES_KEY = "discount-sources";
+/** Persisted scan results, keyed by source URL, so a reload doesn't wipe them. */
+const RESULTS_KEY = "discount-results";
+type StoredResults = Record<string, { result: DiscountScanResult; checkedAt: string }>;
+
+/**
+ * Narrows an unknown localStorage-parsed value to a `DiscountScanResult`.
+ * Storage can hold a stale shape from a previous schema (or arbitrary junk if
+ * tampered with), and the render path indexes straight into `.offers.length`
+ * etc. without further checks — a malformed entry here would otherwise throw
+ * and take down the whole section, so entries that fail this are dropped.
+ */
+function isDiscountScanResult(v: unknown): v is DiscountScanResult {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.hasDiscount === "boolean" &&
+    typeof r.sourceUrl === "string" &&
+    typeof r.aiUsed === "string" &&
+    Array.isArray(r.offers) &&
+    Array.isArray(r.items) &&
+    Array.isArray(r.categories) &&
+    Array.isArray(r.evidence) &&
+    (r.url === null || r.url === undefined || typeof r.url === "string")
+  );
+}
 
 function domainOf(url: string): string {
   try {
@@ -121,25 +168,81 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const [calendars, setCalendars] = useState<CalendarType[]>([]);
   const [selectedCalendar, setSelectedCalendar] = useState<Record<string, string>>({});
   const [addingFor, setAddingFor] = useState<string | null>(null);
-  const [preview, setPreview] = useState<DiscountResult | null>(null);
+  const [preview, setPreview] = useState<DiscountScanResult | null>(null);
   const [previewStart, setPreviewStart] = useState(""); // YYYY-MM-DD, editable in the dialog
   const [previewEnd, setPreviewEnd] = useState("");
   const [addedFor, setAddedFor] = useState<Set<string>>(new Set());
+  // Screen-reader-only status line for scan lifecycle transitions.
+  const [announcement, setAnnouncement] = useState("");
+  // Guards the results-persistence effect from firing (and clobbering storage
+  // with an empty `statuses`) before the post-mount restore below has run.
+  const hydratedResultsRef = useRef(false);
 
   const sources = [...DEFAULT_SOURCES, ...customSources];
 
-  // Load persisted custom sources after mount — localStorage isn't available
-  // during SSR and reading it in a useState initializer would cause a
-  // hydration mismatch, so the post-mount setState is intentional here.
+  // Load persisted custom sources + prior scan results after mount —
+  // localStorage isn't available during SSR and reading it in a useState
+  // initializer would cause a hydration mismatch, so the post-mount setState
+  // is intentional here. Both are restored together so the results restore
+  // can be filtered against the final source list.
   useEffect(() => {
+    let loadedCustom: string[] = [];
     try {
       const saved = localStorage.getItem(CUSTOM_SOURCES_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved) setCustomSources(JSON.parse(saved));
+      if (saved) loadedCustom = JSON.parse(saved);
     } catch {
       // Corrupt storage — start with defaults only
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (loadedCustom.length) setCustomSources(loadedCustom);
+
+    try {
+      const savedResults = localStorage.getItem(RESULTS_KEY);
+      if (savedResults) {
+        // Untrusted until each entry passes isDiscountScanResult() below —
+        // storage can hold a stale/foreign schema or tampered JSON.
+        const parsed: Record<string, { result?: unknown; checkedAt?: unknown }> = JSON.parse(savedResults);
+        const knownSources = new Set([...DEFAULT_SOURCES, ...loadedCustom]);
+        const restored: Record<string, SourceStatus> = {};
+        for (const [url, entry] of Object.entries(parsed)) {
+          const checkedAt = entry?.checkedAt;
+          const validCheckedAt = typeof checkedAt === "string" && !Number.isNaN(Date.parse(checkedAt));
+          if (knownSources.has(url) && validCheckedAt && isDiscountScanResult(entry?.result)) {
+            // Normalise a missing/undefined `url` to null rather than leaking
+            // `undefined` past the type boundary into the rest of the component.
+            const result: DiscountScanResult = { ...entry.result, url: entry.result.url ?? null };
+            restored[url] = { state: "done", result, checkedAt };
+          }
+        }
+        if (Object.keys(restored).length) {
+          setStatuses((prev) => ({ ...restored, ...prev }));
+        }
+      }
+    } catch {
+      // Corrupt storage — start with no restored results
+    }
+    hydratedResultsRef.current = true;
   }, []);
+
+  // Persist scan results per source so a reload doesn't wipe them — only
+  // "done" entries, and only for sources still in the list, keeping storage
+  // bounded as sources are added/removed.
+  useEffect(() => {
+    if (!hydratedResultsRef.current) return;
+    try {
+      const toStore: StoredResults = {};
+      for (const url of sources) {
+        const status = statuses[url];
+        if (status?.state === "done") {
+          toStore[url] = { result: status.result, checkedAt: status.checkedAt };
+        }
+      }
+      localStorage.setItem(RESULTS_KEY, JSON.stringify(toStore));
+    } catch {
+      // Storage unavailable — results last for the session only
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statuses, customSources]);
 
   // Writable calendars for the "add to calendar" picker
   useEffect(() => {
@@ -193,6 +296,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
 
   const scanSource = async (url: string): Promise<void> => {
     setStatuses((prev) => ({ ...prev, [url]: { state: "scanning" } }));
+    setAnnouncement(`Scanning ${domainOf(url)}…`);
     const signal = startAbortable(url);
     try {
       const res = await fetch("/api/discounts/scan", {
@@ -204,9 +308,12 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       const data = await res.json();
       if (!res.ok) {
         setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: data.error ?? `HTTP ${res.status}` } }));
+        setAnnouncement(`Scan failed for ${domainOf(url)}`);
         return;
       }
-      setStatuses((prev) => ({ ...prev, [url]: { state: "done", result: data.result } }));
+      const result: DiscountScanResult = data.result;
+      setStatuses((prev) => ({ ...prev, [url]: { state: "done", result, checkedAt: new Date().toISOString() } }));
+      setAnnouncement(`Found ${result.offers.length} offers on ${domainOf(url)}`);
       if (data.aiQuota) onQuotaUpdate?.(data.aiQuota);
     } catch {
       if (signal.aborted && signal.reason === "cancel") {
@@ -216,9 +323,11 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       }
       if (signal.aborted && signal.reason === "timeout") {
         setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: "This took too long — the AI provider may be busy" } }));
+        setAnnouncement(`Scan failed for ${domainOf(url)}`);
         return;
       }
       setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: "Network error" } }));
+      setAnnouncement(`Scan failed for ${domainOf(url)}`);
     }
   };
 
@@ -250,7 +359,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
 
   // Build the full calendar-event payload + display fields for a discount,
   // using the (possibly user-edited) start/end dates from the preview dialog.
-  const buildEvent = (result: DiscountResult, startDate: string, endDate: string) => {
+  const buildEvent = (result: DiscountScanResult, startDate: string, endDate: string) => {
     const domain = domainOf(result.sourceUrl);
     const fmtD = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     const period = startDate === endDate ? `🗓️ ${fmtD(startDate)} · all-day` : `🗓️ Valid ${fmtD(startDate)} – ${fmtD(endDate)}`;
@@ -276,7 +385,8 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         (it) =>
           `• ${it.name}${it.price ? ` — ${it.price}` : ""}${it.originalPrice ? ` (was ${it.originalPrice})` : ""}`
       ),
-      `\n🛒 Shop: ${result.sourceUrl}`,
+      `\n🛒 Shop: ${result.url ?? result.sourceUrl}`,
+      `🔗 Discount URL: ${result.url ?? result.sourceUrl}`,
     ].filter((l) => l !== null);
 
     return {
@@ -290,7 +400,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   };
 
   // Open the preview, seeding the editable dates from the detected period.
-  const openPreview = (result: DiscountResult) => {
+  const openPreview = (result: DiscountScanResult) => {
     const today = new Date().toISOString().slice(0, 10);
     const start = result.startDate ?? today;
     setPreviewStart(start);
@@ -341,6 +451,11 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
+      {/* Screen-reader-only announcement of scan lifecycle transitions — the
+          visual badges/spinners convey the same info sighted users. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
       <div className="space-y-1">
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <BadgePercent className="size-6" />
@@ -387,18 +502,25 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
             const status = statuses[url] ?? { state: "idle" };
             const isCustom = customSources.includes(url);
             const result = status.state === "done" ? status.result : null;
+            const stale = status.state === "done" && isStale(status.checkedAt);
             return (
               <div key={url} className="rounded-lg border border-border">
-                {/* Source row */}
-                <div className="flex items-center gap-2 p-3">
-                  <span className="font-medium text-sm flex-1 truncate" title={url}>
+                {/* Source row — wraps to a second line on narrow (≈390px) viewports
+                    instead of overflowing, since a badge + two buttons don't fit
+                    alongside a long hostname on one line. */}
+                <div className="flex flex-wrap items-center gap-2 p-3">
+                  <span className="font-medium text-sm min-w-0 flex-1 truncate" title={url}>
                     {domainOf(url)}
                   </span>
                   {status.state === "done" && !result?.hasDiscount && (
                     <Badge variant="secondary" className="text-xs">No discount found</Badge>
                   )}
                   {result?.hasDiscount && (
-                    <Badge className="text-xs gap-1" title={result.confidence ? `${result.confidence} confidence` : undefined}>
+                    <Badge
+                      variant={stale ? "secondary" : "default"}
+                      className={cn("text-xs gap-1", stale && "opacity-70")}
+                      title={result.confidence ? `${result.confidence} confidence` : undefined}
+                    >
                       <BadgePercent className="size-3" />
                       {result.discountPercent ?? "Sale"}
                       {result.offers.length > 1 && (
@@ -406,10 +528,15 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                       )}
                     </Badge>
                   )}
+                  {status.state === "done" && (
+                    <span className="text-[11px] text-muted-foreground" title={status.checkedAt}>
+                      Checked {relativeTime(status.checkedAt)}
+                    </span>
+                  )}
                   {status.state === "error" && (
-                    <span className="flex items-center gap-1 text-xs text-destructive" title={status.message}>
+                    <span className="flex items-center gap-1 text-xs text-destructive">
                       <AlertCircle className="size-3.5 shrink-0" />
-                      <span className="max-w-44 truncate">{status.message}</span>
+                      Failed
                     </span>
                   )}
                   <a
@@ -451,6 +578,12 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                   </Button>
                 </div>
 
+                {/* Full error text as its own row — touch users have no hover for a
+                    title tooltip, so this can no longer be truncated-with-title only. */}
+                {status.state === "error" && (
+                  <p className="break-words px-3 pb-3 text-xs text-destructive">{status.message}</p>
+                )}
+
                 {/* Discount preview — rich deal card */}
                 {result?.hasDiscount && (
                   <div className="border-t border-border bg-muted/20">
@@ -489,17 +622,18 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     {/* Meta row: dates / countdown / promo code / categories */}
                     <div className="flex flex-wrap items-center gap-2 px-3 pb-2 text-xs text-muted-foreground">
                       {result.promoCode && <CopyCode code={result.promoCode} />}
+                      {formatValidity(result.startDate, result.endDate) && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px]">
+                          <Clock className="size-3" />
+                          {formatValidity(result.startDate, result.endDate)}
+                        </span>
+                      )}
                       {(() => {
                         const d = daysUntil(result.endDate);
                         return d !== null ? (
                           <span className={cn("inline-flex items-center gap-1", d <= 3 && "text-amber-600 dark:text-amber-400 font-medium")}>
                             <Clock className="size-3" />
                             {d === 0 ? "Ends today" : `${d} day${d === 1 ? "" : "s"} left`}
-                          </span>
-                        ) : (result.startDate || result.endDate) ? (
-                          <span className="inline-flex items-center gap-1">
-                            <Clock className="size-3" />
-                            {result.startDate ?? "now"} → {result.endDate ?? "ongoing"}
                           </span>
                         ) : null;
                       })()}
@@ -538,6 +672,18 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                                     {AUDIENCE_LABEL[o.audience]}
                                   </span>
                                 )}
+                                {o.url && (
+                                  <a
+                                    href={o.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    aria-label={`Open ${o.label} page`}
+                                    className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                                  >
+                                    <ExternalLink className="size-3" />
+                                    View offer
+                                  </a>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -550,7 +696,19 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                       <ul className="px-3 pb-2 text-xs text-muted-foreground space-y-0.5">
                         {result.items.map((it, i) => (
                           <li key={i}>
-                            • {it.name}
+                            •{" "}
+                            {it.url ? (
+                              <a
+                                href={it.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-primary hover:underline"
+                              >
+                                {it.name}
+                              </a>
+                            ) : (
+                              it.name
+                            )}
                             {it.price && <span className="text-foreground font-medium"> {it.price}</span>}
                             {it.originalPrice && <s className="ml-1 opacity-60">{it.originalPrice}</s>}
                           </li>
@@ -677,17 +835,17 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                   </div>
                 </div>
 
-                {/* Clickable discount URL */}
+                {/* Clickable discount URL — prefer the headline deep link over the plain source */}
                 <div className="space-y-1">
                   <label className="text-xs text-muted-foreground">Discount link</label>
                   <a
-                    href={preview.sourceUrl}
+                    href={preview.url ?? preview.sourceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 truncate rounded-md border border-border bg-muted/30 px-2.5 py-1.5 text-xs text-primary hover:underline"
                   >
                     <ExternalLink className="size-3.5 shrink-0" />
-                    <span className="truncate">{preview.sourceUrl}</span>
+                    <span className="truncate">{preview.url ?? preview.sourceUrl}</span>
                   </a>
                 </div>
 
