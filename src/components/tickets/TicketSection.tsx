@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft, Ticket, Sparkles, ExternalLink, CalendarPlus,
-  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag, BadgePercent, Trophy, XCircle,
+  CheckCircle2, Loader2, AlertCircle, RefreshCw, ArrowRight, MapPin, Tag, BadgePercent, Trophy, XCircle, Armchair,
 } from "lucide-react";
 import { VenueSection } from "@/components/tickets/VenueSection";
 import { DiscountSection } from "@/components/tickets/DiscountSection";
@@ -17,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { EVENT_CATEGORIES, CATEGORY_LABELS, type EventCategory } from "@/types";
 import { useAbortableRequest } from "@/lib/use-abortable-request";
+import { matchVenueConfig } from "@/lib/venue-seatmap";
 
 interface AiQuota { used: number; limit: number; remaining: number; resetAt?: string }
 
@@ -108,6 +110,27 @@ function dateRange(date: string | null, endDate: string | null): string {
   return `${date} – ${endDate}`;
 }
 
+/**
+ * Small inline badge shown next to a "Venue 場地" row when the free-text venue string
+ * matches a venue with a built-in seat map config (currently Kai Tak Stadium only — see
+ * matchVenueConfig). Renders nothing when there's no match — a venue we don't recognise is
+ * not worth calling out, per the seat-map lib's "no config → no noise" design.
+ */
+function VenueSeatMapHint({ venueText, onViewSeatMap }: { venueText: string | null; onViewSeatMap: () => void }) {
+  const config = matchVenueConfig(venueText);
+  if (!config) return null;
+  return (
+    <button
+      type="button"
+      onClick={onViewSeatMap}
+      className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10 transition-colors"
+    >
+      <Armchair className="size-3" />
+      Seat map available · {config.name}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Diff table sub-component
 // ---------------------------------------------------------------------------
@@ -159,17 +182,28 @@ function DiffTable({
 }
 
 export function TicketSection() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [section, setSection] = useState<"import" | "venues" | "classify" | "discounts" | "worldcup">("import");
 
   // Deep-link support: /tickets?section=worldcup opens that section (e.g. from
-  // the World Cup banner's "View matches" CTA).
+  // the World Cup banner's "View matches" CTA). Also re-syncs on browser
+  // back/forward, since useSearchParams re-renders with the new query string.
   useEffect(() => {
-    const s = new URLSearchParams(window.location.search).get("section");
+    const s = searchParams.get("section");
     if (s === "worldcup" || s === "venues" || s === "classify" || s === "discounts" || s === "import") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing URL → state on mount
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing URL → state on mount/back-forward
       setSection(s);
     }
-  }, []);
+  }, [searchParams]);
+
+  // Local state is the source of truth for rendering; clicking a tab updates
+  // it immediately and mirrors the choice into the URL (replace, not push, so
+  // tab-switching doesn't spam browser history) so reload/back/share keep it.
+  const handleSectionChange = (id: "import" | "venues" | "classify" | "discounts" | "worldcup") => {
+    setSection(id);
+    router.replace(`/tickets?section=${id}`, { scroll: false });
+  };
 
   // Is the World Cup on right now? Drives the pulsing "LIVE" badge on the nav
   // item so the section reads as a live event during the tournament window.
@@ -216,6 +250,9 @@ export function TicketSection() {
 
   // ── Category Classification state ──────────────────────────────
   const [classifyCalendars, setClassifyCalendars] = useState<ClassifyCalOption[]>([]);
+  const [classifyCalLoading, setClassifyCalLoading] = useState(false);
+  const [classifyCalLoaded, setClassifyCalLoaded] = useState(false);
+  const [classifyCalError, setClassifyCalError] = useState(false);
   const [selectedClassifyCalIds, setSelectedClassifyCalIds] = useState<Set<string>>(new Set());
   const [classifying, setClassifying] = useState(false);
   const [classifyOnlyUnclassified, setClassifyOnlyUnclassified] = useState(true);
@@ -238,12 +275,15 @@ export function TicketSection() {
       .catch(() => null);
   }, []);
 
-  // Load calendar list when classify section opens
-  useEffect(() => {
-    if (section !== "classify") return;
-    if (classifyCalendars.length > 0) return; // already loaded
+  /** Fetches the classify-target calendar list. Used on section-open and by the Retry button. */
+  const loadClassifyCalendars = () => {
+    setClassifyCalLoading(true);
+    setClassifyCalError(false);
     fetch("/api/calendars")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load calendars");
+        return r.json();
+      })
       .then((data: Array<{ id: string; name: string; color: string }>) => {
         // Exclude sale-ticket calendar from classification targets
         const filtered = data.filter((c) => c.name !== SALE_CALENDAR_NAME);
@@ -253,10 +293,21 @@ export function TicketSection() {
           .filter((c) => c.name === "event-reminders")
           .map((c) => c.id);
         setSelectedClassifyCalIds(new Set(defaultIds.length ? defaultIds : filtered.map((c) => c.id)));
+        setClassifyCalLoaded(true);
       })
-      .catch(() => null);
+      .catch(() => setClassifyCalError(true))
+      .finally(() => setClassifyCalLoading(false));
+  };
 
-    // Also fetch category counts
+  // Load calendar list when classify section opens
+  useEffect(() => {
+    if (section !== "classify") return;
+    if (classifyCalLoaded || classifyCalLoading) return; // already loaded / in flight
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kicks off a one-time fetch when the section opens
+    loadClassifyCalendars();
+
+    // Also fetch category counts (best-effort — no dedicated error UI, distribution
+    // card just stays hidden if this fails)
     fetch("/api/events/classify")
       .then((r) => r.json())
       .then((d) => { if (d.counts) setClassifyCounts(d.counts); })
@@ -665,6 +716,24 @@ export function TicketSection() {
     }
   };
 
+  // Mobile nav scroll-fade: hides the right-edge gradient hint once the strip
+  // is scrolled all the way to its last tab (or doesn't overflow at all).
+  // Starts as "not at end" (fade visible) so the hint doesn't default to
+  // hidden before the first real measurement has run.
+  const navRef = useRef<HTMLElement | null>(null);
+  const [navScrolledToEnd, setNavScrolledToEnd] = useState(false);
+  const checkNavScrollEnd = () => {
+    const el = navRef.current;
+    if (!el) return;
+    const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1; // 1px threshold for sub-pixel rounding
+    setNavScrolledToEnd(atEnd);
+  };
+  useEffect(() => {
+    checkNavScrollEnd();
+    window.addEventListener("resize", checkNavScrollEnd);
+    return () => window.removeEventListener("resize", checkNavScrollEnd);
+  }, []);
+
   const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
 
   return (
@@ -672,7 +741,7 @@ export function TicketSection() {
       {/* Header */}
       <header className="border-b border-border bg-card px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
         <a href="/">
-          <Button variant="ghost" size="icon" className="size-8">
+          <Button variant="ghost" size="icon" className="size-8" aria-label="Back to calendar">
             <ArrowLeft className="size-4" />
           </Button>
         </a>
@@ -685,6 +754,7 @@ export function TicketSection() {
           <div className="flex items-center rounded-md border border-border overflow-hidden text-xs">
             <button
               onClick={() => setExtractMethod("auto")}
+              aria-pressed={extractMethod === "auto"}
               className={`px-2.5 py-1.5 transition-colors ${
                 extractMethod === "auto"
                   ? "bg-primary text-primary-foreground font-medium"
@@ -696,6 +766,7 @@ export function TicketSection() {
             </button>
             <button
               onClick={() => setExtractMethod("og-meta")}
+              aria-pressed={extractMethod === "og-meta"}
               className={`px-2.5 py-1.5 transition-colors ${
                 extractMethod === "og-meta"
                   ? "bg-primary text-primary-foreground font-medium"
@@ -736,11 +807,25 @@ export function TicketSection() {
 
       {/* Body: nav (top bar on mobile, left sidebar on desktop) + main content */}
       <div className="flex flex-col md:flex-row flex-1 overflow-hidden">
-        {/* Nav — horizontal scrollable strip on mobile, vertical sidebar on md+ */}
-        <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-x-visible border-b md:border-b-0 md:border-r shrink-0 p-2 md:w-52 md:space-y-0.5">
+        {/* Nav — horizontal scrollable strip on mobile, vertical sidebar on md+.
+            Wrapped in a "relative" box (sized to the nav's own height) so the
+            mobile scroll-fade can be positioned against it; "md:contents"
+            makes the wrapper disappear from the desktop layout so <nav> sits
+            directly in the flex row. "bg-background" is set explicitly on
+            both the wrapper and the nav so the fade's "from-background" is
+            guaranteed to match the strip's actual painted colour rather than
+            relying on inheritance. */}
+        <div className="relative shrink-0 bg-background md:contents">
+          <nav
+            ref={navRef}
+            onScroll={checkNavScrollEnd}
+            aria-label="Event section tabs"
+            className="flex md:flex-col gap-1 overflow-x-auto md:overflow-x-visible border-b md:border-b-0 md:border-r shrink-0 bg-background p-2 pr-10 md:pr-2 md:w-52 md:space-y-0.5 snap-x snap-proximity md:snap-none"
+          >
           <button
-            onClick={() => setSection("import")}
-            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            onClick={() => handleSectionChange("import")}
+            aria-current={section === "import" ? "page" : undefined}
+            className={`shrink-0 snap-start whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "import"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -750,8 +835,9 @@ export function TicketSection() {
             Import Event
           </button>
           <button
-            onClick={() => setSection("classify")}
-            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            onClick={() => handleSectionChange("classify")}
+            aria-current={section === "classify" ? "page" : undefined}
+            className={`shrink-0 snap-start whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "classify"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -761,8 +847,9 @@ export function TicketSection() {
             Category Detection
           </button>
           <button
-            onClick={() => setSection("discounts")}
-            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            onClick={() => handleSectionChange("discounts")}
+            aria-current={section === "discounts" ? "page" : undefined}
+            className={`shrink-0 snap-start whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "discounts"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -772,8 +859,9 @@ export function TicketSection() {
             Discount Sale
           </button>
           <button
-            onClick={() => setSection("venues")}
-            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            onClick={() => handleSectionChange("venues")}
+            aria-current={section === "venues" ? "page" : undefined}
+            className={`shrink-0 snap-start whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "venues"
                 ? "bg-primary/10 text-primary font-medium"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -783,8 +871,9 @@ export function TicketSection() {
             Venues
           </button>
           <button
-            onClick={() => setSection("worldcup")}
-            className={`shrink-0 whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+            onClick={() => handleSectionChange("worldcup")}
+            aria-current={section === "worldcup" ? "page" : undefined}
+            className={`shrink-0 snap-start whitespace-nowrap md:w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
               section === "worldcup"
                 ? "bg-primary/10 text-primary font-medium"
                 : wcLive
@@ -804,7 +893,18 @@ export function TicketSection() {
               </span>
             )}
           </button>
-        </nav>
+          </nav>
+          {/* Right-edge fade hinting there are more tabs to scroll to on mobile;
+              hidden once scrolled to the end, and not rendered at all on md+
+              where the nav is a vertical sidebar with no horizontal scroll. */}
+          {!navScrolledToEnd && (
+            <div
+              data-testid="nav-scroll-fade"
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-background to-transparent md:hidden"
+            />
+          )}
+        </div>
 
         {/* Main content */}
         <div className="flex-1 overflow-auto">
@@ -866,8 +966,21 @@ export function TicketSection() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {classifyCalendars.length === 0 ? (
+                  {classifyCalLoading ? (
                     <p className="text-sm text-muted-foreground">Loading calendars…</p>
+                  ) : classifyCalError ? (
+                    <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm">
+                      <span className="flex items-center gap-1.5 text-destructive">
+                        <AlertCircle className="size-4 shrink-0" />
+                        Couldn&apos;t load calendars.
+                      </span>
+                      <Button variant="outline" size="sm" onClick={loadClassifyCalendars}>
+                        <RefreshCw className="size-3.5 mr-1.5" />
+                        Retry
+                      </Button>
+                    </div>
+                  ) : classifyCalendars.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No calendars to classify yet.</p>
                   ) : (
                     <>
                       <div className="flex gap-3 text-xs mb-3">
@@ -1149,7 +1262,7 @@ export function TicketSection() {
                   </CardDescription>
                 </div>
                 <a href={ticket.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                  <Button variant="ghost" size="icon" className="size-7">
+                  <Button variant="ghost" size="icon" className="size-7" aria-label="Open ticket source in a new tab">
                     <ExternalLink className="size-3.5" />
                   </Button>
                 </a>
@@ -1175,6 +1288,10 @@ export function TicketSection() {
                     <div className="col-span-2">
                       <p className="text-xs text-muted-foreground">Venue 場地</p>
                       <p className="font-medium">{diffResult.storedVenue}</p>
+                      <VenueSeatMapHint
+                        venueText={ticket.venue ?? ticket.location}
+                        onViewSeatMap={() => handleSectionChange("venues")}
+                      />
                     </div>
                   )}
                   {diffResult.storedSaleWindows?.length > 0 && (
@@ -1242,6 +1359,10 @@ export function TicketSection() {
                   <div className="col-span-2">
                     <p className="text-xs text-muted-foreground">Venue 場地</p>
                     <p className="font-medium">{ticket.venue}</p>
+                    <VenueSeatMapHint
+                      venueText={ticket.venue ?? ticket.location}
+                      onViewSeatMap={() => handleSectionChange("venues")}
+                    />
                   </div>
                 )}
                 {ticket.ticketPrices?.length ? (
@@ -1317,7 +1438,7 @@ export function TicketSection() {
                   </CardDescription>
                 </div>
                 <a href={ticket.sourceUrl} target="_blank" rel="noopener noreferrer" className="shrink-0">
-                  <Button variant="ghost" size="icon" className="size-7">
+                  <Button variant="ghost" size="icon" className="size-7" aria-label="Open ticket source in a new tab">
                     <ExternalLink className="size-3.5" />
                   </Button>
                 </a>
