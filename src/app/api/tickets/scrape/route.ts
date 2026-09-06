@@ -605,7 +605,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
   let schemaLocation: string | null = null;
   // Initialise sourceTz early from URL domain so Strategy A + B can use it even
   // when the concert JSON-LD block has no embedded tz offset. JSON-LD processing
-  // below may override this with a more precise value. og:title is passed as a
+  // below only re-anchors this on the event date (DST) or, when the domain is
+  // unmapped, falls back to the ISO string's own suffix — it never replaces a
+  // known venue offset with the JSON-LD frame. og:title is passed as a
   // last-resort text fallback for global-brand domains (e.g. pokemongo.com)
   // whose country only appears in the title, never the URL — schemaLocation
   // isn't parsed yet at this point, only og:title is available this early.
@@ -696,15 +698,45 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       const lastNight = concertEvents[concertEvents.length - 1]!;
 
       const firstParts = firstNight.startDate.split("T");
-      schemaDate = firstParts[0] ?? null;
-      schemaTime = firstParts[1] ? firstParts[1].slice(0, 5) : null;
-      if (firstParts[1]) sourceTz = extractTzFromIso(firstNight.startDate);
+      // Venue-local wall clock, NOT the raw JSON-LD frame. Timable & co. publish the
+      // instant in UTC ("2027-05-07T12:00:00.000Z" = 20:00 HKT) while the page — and
+      // therefore the AI extraction — shows the venue's wall clock ("20:00"). Since the
+      // final merge takes `time` from the AI first but `sourceTimezone` always from meta,
+      // meta.time MUST live in the same frame as sourceTz or add/route.ts stamps a local
+      // time as UTC (an 8 h error for HK). Re-anchor the offset on the event date first:
+      // the top-of-function detection had no date to anchor on, so DST zones (Europe)
+      // would otherwise resolve to today's offset instead of the event's.
+      const venueTz =
+        detectTimezoneFromUrl(pageUrl, firstNight.dateObj, { title: ogTitle }) ?? sourceTz;
+      if (venueTz) {
+        sourceTz = venueTz;
+        const firstLocal = utcToLocalStrings(firstNight.dateObj, venueTz, firstNight.startDate);
+        // A date-only startDate ("2027-05-07") is already a venue-frame calendar date —
+        // converting it would shift it a day for negative offsets (midnight UTC − 5 h).
+        schemaDate = firstParts[1] ? firstLocal.date : firstParts[0] ?? null;
+        schemaTime = firstParts[1] ? firstLocal.time : null;
+      } else {
+        // Venue offset unknown (unmapped domain): keep the JSON-LD's own frame — date,
+        // time and sourceTimezone all come from the ISO string itself, so they stay
+        // mutually consistent even though the venue's real zone is unknown.
+        schemaDate = firstParts[0] ?? null;
+        schemaTime = firstParts[1] ? firstParts[1].slice(0, 5) : null;
+        if (firstParts[1]) sourceTz = extractTzFromIso(firstNight.startDate);
+      }
 
-      // Multi-night: record endDate as the last night (different from first)
-      if (concertEvents.length > 1 && lastNight.startDate.slice(0, 10) !== firstNight.startDate.slice(0, 10)) {
-        const lastParts = lastNight.startDate.split("T");
-        schemaEndDate = lastParts[0] ?? null;
-        schemaEndTime = lastParts[1] ? lastParts[1].slice(0, 5) : null;
+      // Multi-night: record endDate as the last night (different from first).
+      // Compare in the venue's frame — an instant near midnight belongs to a different
+      // local date than its UTC date.
+      // Date-only strings stay as-is, same reasoning as schemaDate above.
+      const lastLocal = venueTz && lastNight.startDate.includes("T")
+        ? utcToLocalStrings(lastNight.dateObj, venueTz, lastNight.startDate)
+        : {
+            date: lastNight.startDate.slice(0, 10),
+            time: lastNight.startDate.split("T")[1]?.slice(0, 5) ?? "",
+          };
+      if (concertEvents.length > 1 && schemaDate && lastLocal.date !== schemaDate) {
+        schemaEndDate = lastLocal.date;
+        schemaEndTime = lastNight.startDate.includes("T") ? lastLocal.time : null;
       }
 
       // Single-night or any concert: extract end time from JSON-LD endDate field when available.
@@ -712,8 +744,13 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       if (!schemaEndTime) {
         const firstConcertRawEnd = typeof firstNight.raw.endDate === "string" ? firstNight.raw.endDate : null;
         if (firstConcertRawEnd?.includes("T")) {
-          const endDateOnly = firstConcertRawEnd.slice(0, 10);
-          const endT = firstConcertRawEnd.split("T")[1]?.slice(0, 5) ?? null;
+          // Convert to the same venue frame as schemaDate before comparing the two.
+          const endObj = new Date(firstConcertRawEnd);
+          const endLocal = venueTz && !isNaN(endObj.getTime())
+            ? utcToLocalStrings(endObj, venueTz, firstConcertRawEnd)
+            : null;
+          const endDateOnly = endLocal?.date ?? firstConcertRawEnd.slice(0, 10);
+          const endT = endLocal?.time ?? firstConcertRawEnd.split("T")[1]?.slice(0, 5) ?? null;
           if (endDateOnly === schemaDate) {
             // Same-day end — capture the end time
             schemaEndTime = endT;
@@ -774,9 +811,22 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
       allJsonLdEvents.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
       const mainEvt = allJsonLdEvents[0]!;
       const mainParts = mainEvt.startDate.split("T");
-      schemaDate = mainParts[0] ?? null;
-      schemaTime = mainParts[1] ? mainParts[1].slice(0, 5) : null;
-      if (mainParts[1]) sourceTz = extractTzFromIso(mainEvt.startDate);
+      // Same venue-local rule as the concert branch above: date/time must be in the
+      // venue's frame so they pair with sourceTimezone whichever side wins the merge.
+      const mainVenueTz =
+        detectTimezoneFromUrl(pageUrl, mainEvt.dateObj, { title: ogTitle }) ?? sourceTz;
+      if (mainVenueTz) {
+        sourceTz = mainVenueTz;
+        const mainLocal = utcToLocalStrings(mainEvt.dateObj, mainVenueTz, mainEvt.startDate);
+        // Date-only startDate is already a venue-frame calendar date (see concert branch).
+        schemaDate = mainParts[1] ? mainLocal.date : mainParts[0] ?? null;
+        schemaTime = mainParts[1] ? mainLocal.time : null;
+      } else {
+        // Venue offset unknown — stay in the JSON-LD's own frame (see concert branch).
+        schemaDate = mainParts[0] ?? null;
+        schemaTime = mainParts[1] ? mainParts[1].slice(0, 5) : null;
+        if (mainParts[1]) sourceTz = extractTzFromIso(mainEvt.startDate);
+      }
       // Can't distinguish concert vs sale without location — skip Strategy A
     }
   }
@@ -976,9 +1026,11 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     }
   }
 
-  // URL-based timezone was already set at the start; this restores it if a JSON-LD
-  // block with a timezone-naive startDate (no Z/±offset suffix) clobbered it back to
-  // null above. schemaDate is known by now, so pass it as the anchor date — the
+  // URL-based timezone was already set at the start; this is the last chance to
+  // resolve it when the domain alone gave nothing AND the JSON-LD had no usable tz
+  // suffix (timezone-naive startDate, or no JSON-LD Event at all) — location text
+  // has been parsed by now, so detection can succeed here where it failed at the
+  // top. schemaDate is known by now, so pass it as the anchor date — the
   // resolved offset is DST-sensitive for zones like Europe/London, so re-deriving it
   // "now" instead of for the actual event date would be wrong outside the current DST period.
   // title/location are now fully resolved too, so pass the same last-resort
