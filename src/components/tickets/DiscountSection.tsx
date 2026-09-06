@@ -42,6 +42,12 @@ function parseDateOnly(dateStr: string): Date {
   return new Date(y, (m ?? 1) - 1, d ?? 1);
 }
 
+/** YYYY-MM-DD in the device's local calendar, for seeding date-only inputs. */
+function localDateOnly(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const CHIP_DATE_FORMAT: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
 
 /** "Until 30 Sep" / "15–30 Sep" validity chip from a startDate/endDate pair. */
@@ -385,8 +391,10 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         (it) =>
           `• ${it.name}${it.price ? ` — ${it.price}` : ""}${it.originalPrice ? ` (was ${it.originalPrice})` : ""}`
       ),
-      `\n🛒 Shop: ${result.url ?? result.sourceUrl}`,
-      `🔗 Discount URL: ${result.url ?? result.sourceUrl}`,
+      `\n🛒 Shop: ${result.sourceUrl}`,
+      // Only worth a second line when the detected deep link differs from the
+      // scanned source; otherwise the two would just repeat each other.
+      result.url && result.url !== result.sourceUrl ? `🔗 Discount URL: ${result.url}` : null,
     ].filter((l) => l !== null);
 
     return {
@@ -401,7 +409,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
 
   // Open the preview, seeding the editable dates from the detected period.
   const openPreview = (result: DiscountScanResult) => {
-    const today = new Date().toISOString().slice(0, 10);
+    // Local calendar date, not toISOString() — that is the UTC date, which is
+    // still "yesterday" for a Hong Kong user until 08:00.
+    const today = localDateOnly(new Date());
     const start = result.startDate ?? today;
     setPreviewStart(start);
     setPreviewEnd(result.endDate ?? start);
