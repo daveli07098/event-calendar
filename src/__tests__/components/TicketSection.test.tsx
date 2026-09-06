@@ -243,6 +243,63 @@ describe("TicketSection — venue seat-map hint", () => {
     await scanAndAwaitUpToDateCard("MOM Livehouse");
     expect(screen.queryByText(/seat map available/i)).not.toBeInTheDocument();
   });
+
+  /** No existing event for this URL — routes the scan to the editable "Review &
+   * adjust before adding" card, whose Venue field is a plain textbox. */
+  const newEventDiff = {
+    hasExisting: false,
+    hasChanges: false,
+    eventId: null,
+    saleEventIds: {},
+    saleEventId: null,
+    presaleEventId: null,
+    changes: [],
+    storedDate: null,
+    storedTime: null,
+    storedVenue: null,
+    storedSaleWindows: [],
+  };
+
+  async function scanAndAwaitReviewCard(venue: string | null) {
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url === "/api/tickets/scrape" && init?.method === "POST") {
+        return okJson(scrapedTicket(venue));
+      }
+      if (url === "/api/tickets/diff" && init?.method === "POST") {
+        return okJson(newEventDiff);
+      }
+      if (url === "/api/tickets/calendars") {
+        return okJson({ eventReminders: [], saleTicket: [] });
+      }
+      return okJson({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<TicketSection />);
+    fireEvent.change(screen.getByPlaceholderText(/timable\.com/i), { target: { value: TEST_URL } });
+    fireEvent.click(screen.getByRole("button", { name: /^scan$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/review & adjust before adding/i)).toBeInTheDocument();
+    });
+  }
+
+  it("shows the seat map badge under the Venue textbox in the editable review card", async () => {
+    await scanAndAwaitReviewCard("啟德體育園主場館");
+    expect(screen.getByText(/seat map available · kai tak stadium/i)).toBeInTheDocument();
+  });
+
+  it("updates the review-card badge live as the user edits the Venue textbox", async () => {
+    await scanAndAwaitReviewCard("MOM Livehouse");
+    expect(screen.queryByText(/seat map available/i)).not.toBeInTheDocument();
+
+    const venueInput = screen.getByPlaceholderText(/venue name/i);
+    fireEvent.change(venueInput, { target: { value: "啟德體育園主場館" } });
+    expect(screen.getByText(/seat map available · kai tak stadium/i)).toBeInTheDocument();
+
+    fireEvent.change(venueInput, { target: { value: "MOM Livehouse" } });
+    expect(screen.queryByText(/seat map available/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("TicketSection — Category Detection calendar list", () => {

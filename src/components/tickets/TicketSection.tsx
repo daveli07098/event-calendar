@@ -1615,6 +1615,10 @@ export function TicketSection() {
                     placeholder="Venue name"
                     disabled={status === "adding"}
                   />
+                  <VenueSeatMapHint
+                    venueText={editVenue.trim() || ticket.location}
+                    onViewSeatMap={() => handleSectionChange("venues")}
+                  />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground font-medium uppercase tracking-wide block mb-1">Artist 演出者</label>
