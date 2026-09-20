@@ -5,7 +5,7 @@ import {
   BadgePercent, RefreshCw, Loader2, Plus, Trash2, ExternalLink,
   CalendarPlus, CheckCircle2, AlertCircle, Copy, Check, Quote, Tag, Users, Sparkles, Clock, XCircle,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,8 +14,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useAbortableRequest } from "@/lib/use-abortable-request";
+import { mutate } from "@/lib/mutate";
 import type { CalendarType } from "@/types";
-import type { DiscountScanResult } from "@/lib/discounts/types";
+import type { DiscountScanResult, DiscountScanErrorReason } from "@/lib/discounts/types";
 
 const AUDIENCE_LABEL: Record<string, string> = {
   all: "Everyone",
@@ -113,12 +114,24 @@ type SourceStatus =
   | { state: "idle" }
   | { state: "scanning" }
   | { state: "done"; result: DiscountScanResult; checkedAt: string /* ISO */ }
-  | { state: "error"; message: string };
+  // `reason` is optional — older cached errors / a server that hasn't
+  // deployed it yet never had one; always treat its absence as "unknown,
+  // generic failure" (see DiscountScanErrorReason in lib/discounts/types).
+  | { state: "error"; message: string; reason?: DiscountScanErrorReason };
 
+// Region-appropriate defaults for a Hong Kong viewer — verified live:
+//   - nike.com/hk/w/sale-3yaep: www.nike.com alone serves the generic
+//     US/global landing page here (vague copy, no concrete numbers to
+//     extract), so we point straight at the HK sale page instead.
+//   - hk.puma.com: www.puma.com 301-redirects to the corporate
+//     about.puma.com, which has no offers at all — the HK storefront does.
+//   - marathonsports.hkstore.com: already HK-specific.
+// adidas.com / adidas.com.hk and fanatics are deliberately omitted — both are
+// permanently blocked by Akamai bot protection from any server-side fetch, so
+// no default URL for them could ever succeed.
 const DEFAULT_SOURCES = [
-  "https://www.nike.com",
-  "https://www.adidas.com",
-  "https://www.puma.com",
+  "https://www.nike.com/hk/w/sale-3yaep",
+  "https://hk.puma.com/",
   "https://marathonsports.hkstore.com/marathon_tc_hk/",
 ];
 
@@ -157,6 +170,27 @@ function domainOf(url: string): string {
   }
 }
 
+/**
+ * Short muted path hint ("/hk/w/sale-3yaep") for a source row. `domainOf()`
+ * alone renders two sources on the same host identically (e.g. a custom
+ * "https://www.nike.com/" root alongside the "nike.com/hk/w/sale-3yaep"
+ * default) — this makes them visually distinguishable. Omitted when the path
+ * is just "/", and truncated so a long query string doesn't blow out the row.
+ */
+function pathHintOf(url: string): string | null {
+  try {
+    const { pathname, search } = new URL(url);
+    const full = `${pathname}${search}`;
+    if (!full || full === "/") return null;
+    return full.length > 20 ? `${full.slice(0, 20)}…` : full;
+  } catch {
+    return null;
+  }
+}
+
+/** Account-backed store for custom sources — GET on mount, PUT on add/remove. */
+const SOURCES_API = "/api/discounts/sources";
+
 export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used: number; limit: number; remaining: number }) => void }) {
   const [customSources, setCustomSources] = useState<string[]>([]);
   const [newSource, setNewSource] = useState("");
@@ -180,17 +214,23 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const [addedFor, setAddedFor] = useState<Set<string>>(new Set());
   // Screen-reader-only status line for scan lifecycle transitions.
   const [announcement, setAnnouncement] = useState("");
+  // True once the mount-time GET to the account-backed sources API has failed
+  // (offline/401/500) and we've fallen back to the localStorage copy — drives
+  // the small "Saved on this device only" note near the Add-source input.
+  const [sourcesLocalOnly, setSourcesLocalOnly] = useState(false);
   // Guards the results-persistence effect from firing (and clobbering storage
   // with an empty `statuses`) before the post-mount restore below has run.
   const hydratedResultsRef = useRef(false);
 
   const sources = [...DEFAULT_SOURCES, ...customSources];
 
-  // Load persisted custom sources + prior scan results after mount —
-  // localStorage isn't available during SSR and reading it in a useState
-  // initializer would cause a hydration mismatch, so the post-mount setState
-  // is intentional here. Both are restored together so the results restore
-  // can be filtered against the final source list.
+  // Load prior scan results after mount — localStorage isn't available during
+  // SSR and reading it in a useState initializer would cause a hydration
+  // mismatch, so the post-mount setState is intentional here. Filtered
+  // against this device's last-known custom sources (defaults + whatever was
+  // in localStorage); the account-backed sources effect below may broaden
+  // `customSources` further once its GET resolves, which only ever *adds* to
+  // the known-source set, so it can't orphan anything restored here.
   useEffect(() => {
     let loadedCustom: string[] = [];
     try {
@@ -199,8 +239,6 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     } catch {
       // Corrupt storage — start with defaults only
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (loadedCustom.length) setCustomSources(loadedCustom);
 
     try {
       const savedResults = localStorage.getItem(RESULTS_KEY);
@@ -221,6 +259,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
           }
         }
         if (Object.keys(restored).length) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
           setStatuses((prev) => ({ ...restored, ...prev }));
         }
       }
@@ -228,6 +267,86 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       // Corrupt storage — start with no restored results
     }
     hydratedResultsRef.current = true;
+  }, []);
+
+  // Custom sources are account-backed (`GET`/`PUT` SOURCES_API) so they survive
+  // a different browser/device — localStorage is only an offline mirror now.
+  // On mount: GET the server list. If this device's localStorage held custom
+  // sources the server doesn't know about (added before this migration, or on
+  // a device that never synced), PUT the union up once so they aren't
+  // silently dropped, then use whatever the server confirms. On failure
+  // (offline/401/500) fall back to the localStorage list exactly as before.
+  useEffect(() => {
+    let cancelled = false;
+    let localSources: string[] = [];
+    try {
+      const saved = localStorage.getItem(CUSTOM_SOURCES_KEY);
+      if (saved) localSources = JSON.parse(saved);
+    } catch {
+      // Corrupt storage — start with [] below
+    }
+    // Show the localStorage copy immediately so the list isn't empty while
+    // the network round-trip is in flight; superseded below once it resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (localSources.length) setCustomSources(localSources);
+
+    (async () => {
+      try {
+        const res = await fetch(SOURCES_API);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: { sources?: unknown } = await res.json();
+        const serverSources = Array.isArray(data.sources)
+          ? data.sources.filter((s): s is string => typeof s === "string")
+          : [];
+        const missing = localSources.filter((s) => !serverSources.includes(s));
+        let finalSources = serverSources;
+        let migrationFailed = false;
+        if (missing.length) {
+          const union = [...serverSources, ...missing];
+          try {
+            const putRes = await fetch(SOURCES_API, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sources: union }),
+            });
+            if (!putRes.ok) throw new Error(`HTTP ${putRes.status}`);
+            const putData: { sources?: unknown } = await putRes.json();
+            finalSources = Array.isArray(putData.sources)
+              ? putData.sources.filter((s): s is string => typeof s === "string")
+              : union;
+          } catch {
+            // Migration PUT failed after a successful GET — this is exactly
+            // the "why didn't my source save?" bug the user hit, just at
+            // mount time instead of on add/remove. Don't swallow it: fall
+            // back to the union locally (so it still renders this session)
+            // and surface it the same way an offline GET would.
+            finalSources = union;
+            migrationFailed = true;
+          }
+        }
+        if (cancelled) return;
+        setCustomSources(finalSources);
+        if (migrationFailed) {
+          setSourcesLocalOnly(true);
+          toast.error("Couldn't save your sources");
+        } else {
+          setSourcesLocalOnly(false);
+        }
+        try {
+          localStorage.setItem(CUSTOM_SOURCES_KEY, JSON.stringify(finalSources));
+        } catch {
+          // Storage unavailable — sources last for the session only
+        }
+      } catch {
+        // Offline / unauthenticated / server error — the localStorage list
+        // applied above (if any) is all we have this session.
+        if (!cancelled) setSourcesLocalOnly(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Persist scan results per source so a reload doesn't wipe them — only
@@ -264,8 +383,10 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const defaultCalendarId =
     calendars.find((c) => c.isDefault)?.id ?? calendars[0]?.id ?? "";
 
-  const persistCustomSources = (next: string[]) => {
-    setCustomSources(next);
+  // localStorage is now only an offline mirror of the account-backed list —
+  // does not touch React state itself, so callers control the optimistic
+  // update (see addSource/removeSource below).
+  const persistCustomSourcesLocally = (next: string[]) => {
     try {
       localStorage.setItem(CUSTOM_SOURCES_KEY, JSON.stringify(next));
     } catch {
@@ -273,7 +394,16 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     }
   };
 
-  const addSource = () => {
+  /** `new URL(u).toString()`, or the raw string if it doesn't parse. */
+  const normalizeUrl = (u: string): string => {
+    try {
+      return new URL(u).toString();
+    } catch {
+      return u;
+    }
+  };
+
+  const addSource = async () => {
     const url = newSource.trim();
     if (!url) return;
     let normalized: string;
@@ -283,21 +413,56 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       toast.error("Invalid URL");
       return;
     }
-    if (sources.includes(normalized)) {
+    // Compare normalised forms against both defaults and custom sources, so
+    // e.g. adding "nike.com" when "https://www.nike.com/" is already a source
+    // is caught as a duplicate even though the raw strings differ (missing
+    // scheme, trailing slash, etc).
+    const normalizedExisting = new Set(sources.map(normalizeUrl));
+    if (normalizedExisting.has(normalized)) {
       toast.info("Source already in the list");
       return;
     }
-    persistCustomSources([...customSources, normalized]);
+    const previous = customSources;
+    const next = [...customSources, normalized];
     setNewSource("");
+    const { ok } = await mutate(SOURCES_API, {
+      method: "PUT",
+      body: { sources: next },
+      optimisticUpdate: () => {
+        setCustomSources(next);
+        persistCustomSourcesLocally(next);
+      },
+      rollback: () => {
+        setCustomSources(previous);
+        persistCustomSourcesLocally(previous);
+      },
+      silent: true,
+    });
+    if (!ok) toast.error("Couldn't save your sources");
   };
 
-  const removeSource = (url: string) => {
-    persistCustomSources(customSources.filter((s) => s !== url));
-    setStatuses((prev) => {
-      const next = { ...prev };
-      delete next[url];
-      return next;
+  const removeSource = async (url: string) => {
+    const previous = customSources;
+    const next = customSources.filter((s) => s !== url);
+    const { ok } = await mutate(SOURCES_API, {
+      method: "PUT",
+      body: { sources: next },
+      optimisticUpdate: () => {
+        setCustomSources(next);
+        persistCustomSourcesLocally(next);
+        setStatuses((prev) => {
+          const n = { ...prev };
+          delete n[url];
+          return n;
+        });
+      },
+      rollback: () => {
+        setCustomSources(previous);
+        persistCustomSourcesLocally(previous);
+      },
+      silent: true,
     });
+    if (!ok) toast.error("Couldn't save your sources");
   };
 
   const scanSource = async (url: string): Promise<void> => {
@@ -313,7 +478,10 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       });
       const data = await res.json();
       if (!res.ok) {
-        setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: data.error ?? `HTTP ${res.status}` } }));
+        // `reason` is a newer, optional field — tolerate its absence for
+        // older cached responses or a server that hasn't deployed it yet.
+        const reason: DiscountScanErrorReason | undefined = typeof data?.reason === "string" ? data.reason : undefined;
+        setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: data.error ?? `HTTP ${res.status}`, reason } }));
         setAnnouncement(`Scan failed for ${domainOf(url)}`);
         return;
       }
@@ -513,6 +681,14 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
             const isCustom = customSources.includes(url);
             const result = status.state === "done" ? status.result : null;
             const stale = status.state === "done" && isStale(status.checkedAt);
+            const pathHint = pathHintOf(url);
+            // "bot_protected" / "corporate_redirect" are permanent, server-side
+            // facts about the site (Akamai, a corporate redirect), not a
+            // transient bug — render them muted/amber, never as an alarming
+            // red "Failed". Re-checking either can never succeed — a bot wall
+            // still blocks the next request, and a corporate redirect just
+            // redirects again — so both get "Open site" instead of Re-check.
+            const cantScan = status.state === "error" && (status.reason === "bot_protected" || status.reason === "corporate_redirect");
             return (
               <div key={url} className="rounded-lg border border-border">
                 {/* Source row — wraps to a second line on narrow (≈390px) viewports
@@ -520,7 +696,8 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     alongside a long hostname on one line. */}
                 <div className="flex flex-wrap items-center gap-2 p-3">
                   <span className="font-medium text-sm min-w-0 flex-1 truncate" title={url}>
-                    {domainOf(url)}
+                    <span>{domainOf(url)}</span>
+                    {pathHint && <span className="ml-1 font-normal text-muted-foreground">{pathHint}</span>}
                   </span>
                   {status.state === "done" && !result?.hasDiscount && (
                     <Badge variant="secondary" className="text-xs">No discount found</Badge>
@@ -544,9 +721,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     </span>
                   )}
                   {status.state === "error" && (
-                    <span className="flex items-center gap-1 text-xs text-destructive">
+                    <span className={cn("flex items-center gap-1 text-xs", cantScan ? "text-amber-600 dark:text-amber-400" : "text-destructive")}>
                       <AlertCircle className="size-3.5 shrink-0" />
-                      Failed
+                      {cantScan ? "Can't scan" : "Failed"}
                     </span>
                   )}
                   <a
@@ -570,28 +747,42 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                       <Trash2 className="size-3.5" />
                     </Button>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => (status.state === "scanning" ? cancelScan(url) : scanSource(url))}
-                    disabled={status.state !== "scanning" && checkingAll}
-                  >
-                    {status.state === "scanning" ? (
-                      <><Loader2 className="size-3.5 animate-spin" />Cancel</>
-                    ) : (
-                      <>
-                        <RefreshCw className="size-3.5" />
-                        {status.state === "done" || status.state === "error" ? "Re-check" : "Check"}
-                      </>
-                    )}
-                  </Button>
+                  {cantScan ? (
+                    // Re-checking can never succeed for either reason — link
+                    // straight to the site instead of offering a dead-end button.
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+                    >
+                      <ExternalLink className="size-3.5" />
+                      Open site
+                    </a>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => (status.state === "scanning" ? cancelScan(url) : scanSource(url))}
+                      disabled={status.state !== "scanning" && checkingAll}
+                    >
+                      {status.state === "scanning" ? (
+                        <><Loader2 className="size-3.5 animate-spin" />Cancel</>
+                      ) : (
+                        <>
+                          <RefreshCw className="size-3.5" />
+                          {status.state === "done" || status.state === "error" ? "Re-check" : "Check"}
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
 
                 {/* Full error text as its own row — touch users have no hover for a
                     title tooltip, so this can no longer be truncated-with-title only. */}
                 {status.state === "error" && (
-                  <p className="break-words px-3 pb-3 text-xs text-destructive">{status.message}</p>
+                  <p className={cn("break-words px-3 pb-3 text-xs", cantScan ? "text-amber-600 dark:text-amber-400" : "text-destructive")}>{status.message}</p>
                 )}
 
                 {/* Discount preview — rich deal card */}
@@ -809,6 +1000,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
               <Plus className="size-4" /> Add source
             </Button>
           </div>
+          {sourcesLocalOnly && (
+            <p className="text-xs text-muted-foreground">Saved on this device only</p>
+          )}
         </CardContent>
       </Card>
 

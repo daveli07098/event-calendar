@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { DiscountSection } from "@/components/tickets/DiscountSection";
+import { toast } from "sonner";
 import type { DiscountScanResult } from "@/lib/discounts/types";
 
 // vi.mock must live in this file so Vitest hoists it above the sonner import below.
@@ -24,7 +26,9 @@ vi.mock("@/components/ui/select", () => ({
   SelectItem: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
-const NIKE = "https://www.nike.com";
+// Matches the current DEFAULT_SOURCES[0] (the HK sale page, not the bare
+// nike.com root — see DiscountSection's DEFAULT_SOURCES comment).
+const NIKE = "https://www.nike.com/hk/w/sale-3yaep";
 
 const CALENDARS = [
   { id: "cal-1", userId: "u1", name: "Personal", color: "#f00", isDefault: true, isVisible: true, googleCalendarId: null, shareToken: null, shareMode: null, createdAt: "", updatedAt: "" },
@@ -52,11 +56,23 @@ function baseResult(overrides: Partial<DiscountScanResult> = {}): DiscountScanRe
   };
 }
 
-/** Bare-minimum GET handler for the mount-time calendars fetch. */
-function fetchStub() {
-  return vi.fn((url: string) => {
+type FetchHandler = () => Promise<Response> | Response;
+
+/**
+ * Bare-minimum handler for the mount-time calendars + sources fetches, with
+ * per-endpoint overrides keyed by "METHOD path" (e.g. "PUT /api/discounts/sources")
+ * for tests that need to simulate a specific server response.
+ */
+function fetchStub(overrides: Record<string, FetchHandler> = {}) {
+  return vi.fn((url: string, init?: RequestInit) => {
+    const method = (init?.method ?? "GET").toUpperCase();
+    const key = `${method} ${url}`;
+    if (overrides[key]) return Promise.resolve(overrides[key]());
     if (url === "/api/calendars") {
       return Promise.resolve({ ok: true, json: async () => CALENDARS } as Response);
+    }
+    if (url === "/api/discounts/sources") {
+      return Promise.resolve({ ok: true, json: async () => ({ sources: [] }) } as Response);
     }
     return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
   });
@@ -120,10 +136,10 @@ describe("DiscountSection", () => {
 
     render(<DiscountSection />);
 
-    // The section renders fine (all 4 default sources still show their idle
+    // The section renders fine (all 3 default sources still show their idle
     // "Check" button) and the malformed entry left no "Checked …" trace.
     await screen.findByText("nike.com");
-    expect(screen.getAllByRole("button", { name: /^check$/i })).toHaveLength(4);
+    expect(screen.getAllByRole("button", { name: /^check$/i })).toHaveLength(3);
     expect(screen.queryByText(/^checked /i)).not.toBeInTheDocument();
   });
 
@@ -250,5 +266,157 @@ describe("DiscountSection", () => {
     } finally {
       process.env.TZ = originalTz;
     }
+  });
+
+  it("renders the three region-appropriate HK default sources, not the old global ones", async () => {
+    vi.stubGlobal("fetch", fetchStub());
+
+    render(<DiscountSection />);
+
+    // "nike.com" and "marathonsports.hkstore.com" are exact-matched via their
+    // own nested <span> — sibling to a separate path-hint span — so this also
+    // guards against the path hint leaking into the domain's own text node.
+    await screen.findByText("hk.puma.com");
+    expect(screen.getByText("nike.com")).toBeInTheDocument();
+    expect(screen.getByText("marathonsports.hkstore.com")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^check$/i })).toHaveLength(3);
+  });
+
+  it("renders a bot_protected scan error as a muted 'Can't scan' state with an Open-site link, no Re-check", async () => {
+    const fetchMock = fetchStub({
+      "POST /api/discounts/scan": () =>
+        ({
+          ok: false,
+          status: 403,
+          json: async () => ({ error: "Nike blocks automated requests", reason: "bot_protected" }),
+        }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    const user = userEvent.setup();
+    const [firstCheck] = await screen.findAllByRole("button", { name: /^check$/i });
+    await user.click(firstCheck);
+
+    await screen.findByText("Can't scan");
+    expect(screen.getByText("Nike blocks automated requests")).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    const openSite = screen.getByRole("link", { name: /open site/i });
+    expect(openSite).toHaveAttribute("href", NIKE);
+    expect(screen.queryByRole("button", { name: /re-check/i })).not.toBeInTheDocument();
+  });
+
+  it("loads custom sources from the account-backed sources API on mount, not from localStorage", async () => {
+    // No "discount-sources" localStorage entry — the server list alone should
+    // populate a 4th row.
+    const fetchMock = fetchStub({
+      "GET /api/discounts/sources": () =>
+        ({ ok: true, json: async () => ({ sources: ["https://outlet.example.com/"] }) }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+
+    await screen.findByText("outlet.example.com");
+    // Nothing local to migrate, so no PUT should have fired.
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/discounts/sources",
+      expect.objectContaining({ method: "PUT" })
+    );
+  });
+
+  it("rolls back and shows an error toast when saving a newly added source fails", async () => {
+    const fetchMock = fetchStub({
+      "PUT /api/discounts/sources": () =>
+        ({ ok: false, json: async () => ({ error: "Server exploded" }) }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    await screen.findByText("hk.puma.com"); // wait for mount-time sources fetch to settle
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Add discount source URL"), "https://shop.example.com");
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Couldn't save your sources");
+    });
+    // The optimistic add was rolled back — the source never sticks around.
+    expect(screen.queryByText("shop.example.com")).not.toBeInTheDocument();
+  });
+
+  it("rejects a new source that differs from an existing custom source only by a trailing slash", async () => {
+    const fetchMock = fetchStub({
+      "GET /api/discounts/sources": () =>
+        ({ ok: true, json: async () => ({ sources: ["https://www.nike.com"] }) }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    // Two rows now render "nike.com": the HK-sale default and the bare-root custom source.
+    await waitFor(() => expect(screen.getAllByText("nike.com")).toHaveLength(2));
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("Add discount source URL"), "https://www.nike.com/");
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+
+    expect(toast.info).toHaveBeenCalledWith("Source already in the list");
+    // Rejected client-side before any save attempt.
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/discounts/sources",
+      expect.objectContaining({ method: "PUT" })
+    );
+  });
+
+  it("surfaces a failed one-time migration PUT instead of swallowing it: local-only sources still render, the device-only note appears, and it toasts once", async () => {
+    // This device has a custom source the server has never seen — the mount
+    // effect's GET succeeds (empty server list) but the one-time union PUT
+    // that would sync it up fails.
+    localStorage.setItem("discount-sources", JSON.stringify(["https://shop.example.com/"]));
+    const fetchMock = fetchStub({
+      "GET /api/discounts/sources": () => ({ ok: true, json: async () => ({ sources: [] }) }) as Response,
+      "PUT /api/discounts/sources": () => ({ ok: false, json: async () => ({ error: "Server exploded" }) }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+
+    // The local-only source still renders even though syncing it failed —
+    // this is exactly what "silently vanished" looked like before the fix.
+    await screen.findByText("shop.example.com");
+    await waitFor(() => {
+      expect(screen.getByText("Saved on this device only")).toBeInTheDocument();
+    });
+    expect(toast.error).toHaveBeenCalledWith("Couldn't save your sources");
+    expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a corporate_redirect scan error as a muted 'Can't scan' state with an Open-site link, no Re-check", async () => {
+    const fetchMock = fetchStub({
+      "POST /api/discounts/scan": () =>
+        ({
+          ok: false,
+          status: 422,
+          json: async () => ({
+            error: "This redirects to the corporate site — use the regional store URL instead",
+            reason: "corporate_redirect",
+          }),
+        }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    const user = userEvent.setup();
+    // DEFAULT_SOURCES[1] — https://hk.puma.com/
+    const [, pumaCheck] = await screen.findAllByRole("button", { name: /^check$/i });
+    await user.click(pumaCheck);
+
+    await screen.findByText("Can't scan");
+    expect(screen.getByText(/use the regional store url instead/i)).toBeInTheDocument();
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    const openSite = screen.getByRole("link", { name: /open site/i });
+    expect(openSite).toHaveAttribute("href", "https://hk.puma.com/");
+    expect(screen.queryByRole("button", { name: /re-check/i })).not.toBeInTheDocument();
   });
 });
