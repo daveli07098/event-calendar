@@ -47,6 +47,7 @@ model User {
   themeSettings  Json?            // persisted Theme object { mode, accent, radius, density, font }
   aiQuotaDate    String?          // "YYYY-MM-DD" day key for AI rate limiting
   aiQuotaCount   Int              @default(0) // AI scrape calls used on aiQuotaDate
+  discountSources Json?           // user's custom Discount Sale source URLs (string[])
   accounts       Account[]
   sessions       Session[]
   calendars      Calendar[]
