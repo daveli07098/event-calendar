@@ -156,6 +156,8 @@ describe("safeFetch", () => {
     await expect(res.text()).resolves.toBe("hello world");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0]![1]).toMatchObject({ redirect: "manual" });
+    // No redirect happened — finalUrl equals the requested URL.
+    expect(res.finalUrl).toBe("http://example.com/page");
   });
 
   it("follows a redirect to another public URL", async () => {
@@ -170,6 +172,9 @@ describe("safeFetch", () => {
     expect(res.status).toBe(200);
     await expect(res.text()).resolves.toBe("final page");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    // finalUrl reflects the post-redirect location, not the requested URL —
+    // this is what lets callers detect e.g. a corporate-site redirect.
+    expect(res.finalUrl).toBe("http://example.com/final");
   });
 
   it("blocks a redirect whose target resolves to an internal address", async () => {

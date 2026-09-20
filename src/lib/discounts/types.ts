@@ -62,3 +62,19 @@ export interface DiscountScanResult {
   aiUsed: string;
   tokensUsed: number | null;
 }
+
+/**
+ * Machine-readable reason code accompanying every scan-route error response,
+ * alongside the existing human-readable `error` string. Consumers (the
+ * DiscountSection UI) branch on this instead of pattern-matching `error` text.
+ */
+export type DiscountScanErrorReason =
+  | "bot_protected"
+  | "corporate_redirect"
+  | "thin_content"
+  | "fetch_failed"
+  | "invalid_url"
+  | "private_url"
+  | "no_ai"
+  | "quota"
+  | "ai_failed";

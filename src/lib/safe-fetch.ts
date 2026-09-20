@@ -48,6 +48,21 @@ export interface SafeFetchOptions extends RequestInit {
   maxBytes?: number;
 }
 
+/**
+ * `safeFetch`'s return value, with `finalUrl` added. Plain `fetch()` exposes
+ * the post-redirect URL via `Response.url`, but `readCapped` below returns a
+ * manually-constructed `new Response(...)` (needed to buffer + size-cap the
+ * body), which does NOT carry `.url` — it reads back as `""`. Callers that
+ * need to know where a URL redirected to (e.g. discounts/scan detecting a
+ * corporate-site redirect) must read `finalUrl` instead of `.url`.
+ */
+export interface SafeFetchResponse extends Response {
+  /** The URL actually fetched for the response returned — after following
+   * any redirects, still re-validated per-hop by `assertPublicUrl`. Equal to
+   * the input URL when there were no redirects. */
+  finalUrl: string;
+}
+
 const DEFAULT_MAX_REDIRECTS = 5;
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -262,8 +277,11 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
  *
  * All other init options (headers, signal/timeout, cache, ...) are passed
  * through unchanged — callers keep their existing timeout/UA/cache behavior.
+ *
+ * The returned `SafeFetchResponse` additionally carries `finalUrl` — see its
+ * doc comment for why `.url` itself can't be relied on here.
  */
-export async function safeFetch(input: string, init: SafeFetchOptions = {}): Promise<Response> {
+export async function safeFetch(input: string, init: SafeFetchOptions = {}): Promise<SafeFetchResponse> {
   const { maxRedirects = DEFAULT_MAX_REDIRECTS, maxBytes = DEFAULT_MAX_BYTES, ...fetchInit } = init;
 
   let currentUrl = input;
@@ -275,11 +293,16 @@ export async function safeFetch(input: string, init: SafeFetchOptions = {}): Pro
 
     if (REDIRECT_STATUSES.has(res.status)) {
       const location = res.headers.get("location");
-      if (!location) return res;
+      if (!location) return withFinalUrl(res, currentUrl);
       currentUrl = new URL(location, currentUrl).toString();
       continue;
     }
 
-    return readCapped(res, maxBytes);
+    return withFinalUrl(await readCapped(res, maxBytes), currentUrl);
   }
+}
+
+/** Attaches `finalUrl` (see `SafeFetchResponse`) to a `Response` in place. */
+function withFinalUrl(res: Response, finalUrl: string): SafeFetchResponse {
+  return Object.assign(res, { finalUrl });
 }
