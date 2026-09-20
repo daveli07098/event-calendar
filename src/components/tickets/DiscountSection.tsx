@@ -1128,9 +1128,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Detection works best on pages that render promotions in HTML. Heavily
-        JavaScript-rendered or bot-protected sites may return errors or miss deals —
-        try a specific sale/landing page URL for those.
+        Detection works best on pages that render promotions in HTML. Sites that
+        build themselves with JavaScript, or block automated requests, can&apos;t be read
+        from a server at all — open one in your browser and use Paste page instead.
       </p>
 
       {/* Preview the event before adding it to the calendar */}

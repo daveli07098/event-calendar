@@ -37,9 +37,9 @@ authenticated session and a configured AI provider (`hasAiProvider()`).
 There is no headless browser — the scanner reads whatever a plain server-side `fetch`
 returns, so **a site is only scannable if its promo text is present in the raw HTML
 response**, not injected client-side after load. This one fact decides the default
-source list and most of the error taxonomy below. Measured directly against the app's
-own text extraction (`extractTextFromHtml`) — readable characters left after tag-stripping,
-i.e. how much promo text an AI prompt would actually see:
+source list and most of the error taxonomy below — "Paste page" below is the escape
+hatch for the sites it rules out. Measured directly against the app's own text extraction
+(`extractTextFromHtml`) — readable characters left after tag-stripping:
 
 | Site | Readable chars | Usable? |
 |---|---|---|
@@ -48,7 +48,7 @@ i.e. how much promo text an AI prompt would actually see:
 | Skechers HK | ~5.5k | Yes — default source |
 | nike.com (global) | ~2.3k | No — US-facing, near-textless |
 | nike.com/hk | ~76 | No — JS-rendered shell |
-| hk.puma.com | ~36 | No — JS-rendered shell |
+| hk.puma.com | ~36 | No — JS-rendered shell, **not bot-blocked** (see "Paste page" below) |
 
 adidas.com, adidas.com.hk and fanatics.com aren't in the table at all: they sit behind
 Akamai Bot Manager and are unfetchable from any server, full stop (`src/lib/discounts/blocked.ts`).
@@ -59,7 +59,11 @@ detect by status code alone — which is exactly why the scan route deliberately
 **not** send those headers, and why a Googlebot UA is never used as a fallback either:
 spoofing a crawler identity doesn't bypass the sensor challenge, it just trades one
 detectable signature for another. GigaSports (same `hkstore.com` platform as Marathon
-Sports) is the one route that still surfaces real adidas markdowns.
+Sports) is the one route that still surfaces real adidas markdowns. Verified directly in
+a browser: all three block **a real, automation-controlled Chrome instance** too, not
+just a plain `fetch` — so a headless-browser fallback on the server would be caught the
+same way; this is not a fetching problem to solve better (see "Paste page" below).
+hk.puma.com is the opposite case: not bot-blocked at all, purely client-rendered.
 
 ### Pipeline
 
@@ -89,13 +93,54 @@ Sports) is the one route that still surfaces real adidas markdowns.
    every offer through the **offer concreteness gate** (`src/lib/discounts/offers.ts`,
    see below) before the result is returned.
 
+### Paste page — the escape hatch for bot-walled / JS-rendered sites
+
+`POST /api/discounts/scan` also accepts an optional `pageContent` alongside the existing
+`url` (still required/validated as on a normal scan — it labels the result and is the
+base URL pasted-HTML relative links resolve against). Non-blank `pageContent` skips the
+fetch pipeline **entirely**: no `assertPublicUrl`/`safeFetch`/`detectBlockReason` — nothing
+is fetched, so there's nothing to validate or inspect for a block signature; the user's
+own browser already got past whatever blocks the server.
+
+`looksLikeHtml()` (`src/lib/discounts/text.ts` — requires a real open/close tag on a
+bounded 4000-char sample, so a stray "<"/">" in plain text like "price < $50" isn't
+misclassified) picks the path: **HTML** runs `extractLinksFromHtml` →
+`selectDiscountCandidates` → `extractTextFromHtml`, same as a fetched page, so deep links
+still resolve to real URLs. **Plain text** has no links, so every `url` in the result is
+`null`; it still gets `prioritizeAndTruncate()` — a deliberate local duplicate of
+`extractTextFromHtml`'s keyword-priority truncation (`src/lib/ai/html.ts`), not an import,
+because the pasted-content feature's allowed scope excluded that file and the algorithm
+is short enough to duplicate cheaply.
+
+Two error reasons guard the paste (full table below): `content_too_large` (over 400,000
+characters, checked *before* the quota check so an oversized paste costs nothing) and
+`empty_content` (under 100 characters extracted, mirrors `thin_content`'s floor).
+`DiscountSection` treats both as fixable input, not a scan failure: the dialog stays open
+and shows the server message inline (`pasteError`) so the paste can be corrected.
+
+A pasted scan is otherwise identical to a fetched one — same prompt, normalisation, and
+concreteness gate — and it **still consumes AI quota**. The only marker is
+`DiscountScanResult.fromPastedContent`, optional so a result persisted before the field
+existed still satisfies the type; `DiscountSection` renders it as "· from pasted page"
+beside "Checked Nh ago". Pasted content is untrusted exactly like fetched HTML — it only
+ever becomes prompt text and extracted strings, never rendered markup.
+
+**Verified end-to-end**: pasting hk.puma.com's rendered text produced three offers — the
+headline "🍂AUTUMN SPECIAL! 3件6折" read as **40% off** (pay 60% for 3 items), "正價2件8折"
+as **20% off**, and "滿$1500減$200" as a separate minimum-spend offer.
+
+Every row has an always-available small paste icon regardless of status, plus a primary
+"Paste page" button on `bot_protected`/`corporate_redirect` rows (replacing Re-check) and
+`thin_content` rows (alongside Re-check).
+
 ### `DiscountScanResult` contract
 
 Defined once in `src/lib/discounts/types.ts` and imported by both the route (producer)
 and `DiscountSection` (consumer) so they can't drift. Key shape: `hasDiscount`,
 `confidence`, `title`, `discountSummary`, `discountPercent`, `promoCode`, `startDate`/
 `endDate`, `categories`, `offers: DiscountOffer[]`, `evidence`, `items: DiscountItem[]`,
-`sourceUrl`, `url`, `aiUsed`, `tokensUsed` — see the file for full field docs.
+`sourceUrl`, `url`, `aiUsed`, `tokensUsed`, `fromPastedContent` (optional — see "Paste
+page" above) — see the file for full field docs.
 
 **Deep links are index-based**: the AI is never trusted to author a URL. The prompt asks
 for `url` (top-level and per-offer) as the **number** of an entry in the "Links on the
@@ -139,9 +184,11 @@ instead of pattern-matching text:
 
 | Reason | Meaning | UI treatment |
 |---|---|---|
-| `bot_protected` | 403/429, or a 200 whose body matches a known challenge-page signature (`detectBlockReason`) | Amber "Can't scan", **Open-site** link instead of Re-check (re-checking can never succeed — the wall still blocks the next request) |
-| `corporate_redirect` | Final URL lands on a different host that's a corporate/investor subdomain (`about.`/`corporate.` prefix) | Amber "Can't scan", **Open-site** link instead of Re-check |
-| `thin_content` | Extracted page text < 100 characters — likely JS-rendered | Amber "Can't scan", but **keeps Re-check** (a different path on the same site, or a future server-rendered version, may work) |
+| `bot_protected` | 403/429, or a 200 whose body matches a known challenge-page signature (`detectBlockReason`) | Amber "Can't scan", **Open-site** link + primary **Paste page** button instead of Re-check (re-checking can never succeed — the wall still blocks the next request) |
+| `corporate_redirect` | Final URL lands on a different host that's a corporate/investor subdomain (`about.`/`corporate.` prefix) | Amber "Can't scan", **Open-site** link + primary **Paste page** button instead of Re-check |
+| `thin_content` | Extracted page text < 100 characters — likely JS-rendered | Amber "Can't scan", but **keeps Re-check** alongside a **Paste page** button (a different path on the same site, or a future server-rendered version, may work) |
+| `content_too_large` | Pasted `pageContent` over 400,000 characters — checked before the AI-provider/quota checks, so it never costs a quota call | Paste dialog stays open, server message shown inline (`pasteError`); no error row written over the source |
+| `empty_content` | Pasted `pageContent` yielded under 100 characters of extracted text — mirrors `thin_content` for the paste path | Paste dialog stays open, server message shown inline; no error row written over the source |
 | `fetch_failed` / `invalid_url` / `private_url` / `no_ai` / `quota` / `ai_failed` | Everything else — network error, bad input, SSRF block, no AI provider, daily quota exhausted, AI extraction failure | Red "Failed", keeps Re-check |
 
 `detectBlockReason` catches the `www.puma.com` → `about.puma.com` case specifically: a
@@ -149,7 +196,8 @@ final-URL host differing from the requested host AND starting with `about.`/`cor
 is `corporate_redirect`, not ordinary empty content — otherwise it would silently report
 "no discount found" instead of pointing at `hk.puma.com`. In `DiscountSection`, `cantScan`
 (amber, no red) covers all three of `bot_protected`/`corporate_redirect`/`thin_content`;
-`unfetchable` (Open-site, no Re-check) is the narrower `bot_protected`/`corporate_redirect` pair.
+`unfetchable` (Open-site, no Re-check) is the narrower `bot_protected`/`corporate_redirect`
+pair — see "Paste page" above for which rows get the Paste page button.
 
 ### Offer concreteness gate
 
@@ -205,7 +253,8 @@ with `resetAt`, surfaced to the client via `onQuotaUpdate`.
 
 **Known limits**:
 - **JS-rendered / bot-protected sites** — the governing constraint above; such sites fail
-  with `422` and a `bot_protected`/`thin_content` reason.
+  `422` with `bot_protected`/`corporate_redirect`/`thin_content` on a normal scan.
+  "Paste page" (above) is the standing workaround for all three.
 - **Prompt size** — ≤40 candidate links are listed (`selectDiscountCandidates(...,
   max = 40)`); pages with far more promo-shaped links have some silently dropped
   (same-origin ones prioritised).
@@ -308,7 +357,9 @@ can't silently drift apart.
 |---|---|
 | `TicketSection.test.tsx` | Tab click → `router.replace` with `?section=`; only the active tab gets `aria-current="page"` (default `import`); opening directly on `?section=<x>`; the nav's accessible label; re-syncing on `searchParams` change (back/forward). |
 | `TicketSection.abort.test.tsx` | Cancel aborts the in-flight scrape and preserves the typed URL; a timeout shows a distinct message; Retry re-issues the same request. |
-| `components/DiscountSection.test.tsx` | Restoring a persisted result from `localStorage` verbatim; not restoring a result for a source no longer in the list; an offer's/item's link rendering only when its `url` is set; validity-chip formatting (`D – D Mon` / `Until D Mon`); no timezone day-shift for date-only strings; the three server-rendered HK defaults render (not the JS-rendered/blocked ones); `bot_protected`/`corporate_redirect` render amber "Can't scan" with an Open-site link and no Re-check button; custom sources load from the account-backed API on mount, not localStorage; a failed add rolls back with an error toast; a trailing-slash-only duplicate is rejected client-side; a failed one-time local→server migration still renders the local-only source, shows the device-only note, and toasts once. |
+| `components/DiscountSection.test.tsx` | Restoring a persisted result from `localStorage` verbatim; not restoring a result for a source no longer in the list; an offer's/item's link rendering only when its `url` is set; validity-chip formatting (`D – D Mon` / `Until D Mon`); no timezone day-shift for date-only strings; the three server-rendered HK defaults render (not the JS-rendered/blocked ones); `bot_protected`/`corporate_redirect` render amber "Can't scan" with an Open-site link and no Re-check button; custom sources load from the account-backed API on mount, not localStorage; a failed add rolls back with an error toast; a trailing-slash-only duplicate is rejected client-side; a failed one-time local→server migration still renders the local-only source, shows the device-only note, and toasts once. **Paste page**: opening the dialog from a `bot_protected` row posts `{ url, pageContent }` to the scan endpoint; a successful pasted scan renders offers plus a "from pasted page" marker; an `empty_content` response keeps the dialog open and shows the server's message inline instead of writing an error row. |
+| `api/discounts/scan/route.test.ts` | Pasted-content path: skips `safeFetch`/`assertPublicUrl` entirely; an HTML paste extracts offers and resolves a relative deep link against `url`; a plain-text paste yields offers with every `url` field `null`; a too-short paste returns `422`/`empty_content`; an oversized paste returns `413`/`content_too_large` before any quota check; a pasted scan still calls `checkRemainingAiLimit`/`incrementAiLimit`; `fromPastedContent` is `false` on a normal fetched scan. |
+| `lib/discounts/text.test.ts` | `looksLikeHtml`: detects real tag pairs with and without attributes; does not misclassify a stray "<"/">" comparison or arrow (e.g. "price < $50", "10% -> 20%") in plain text as markup. `prioritizeAndTruncate`: reorders keyword-matching sentences to the front; truncates to `maxLen` after reordering. |
 | `lib/discounts/percent.test.ts` | `normalizeDiscountPercent`: bare/two-digit/decimal `折` conversion; finding `折` embedded in other text or only in context; the "up to" prefix and its "immediately before the number" restriction (vs. unrelated markers like 最低消費); pass-through of ranges/"as low as" with no `折`; headline evidence-fallback ordering. |
 | `lib/discounts/links.test.ts` | `extractLinksFromHtml`: relative-href resolution, keeping nav links, dedup-by-href, dropping `#`/`javascript:`/`mailto:` hrefs, entity decoding, cross-origin links. `selectDiscountCandidates`: keyword matching (Chinese/English/`折`) in text or URL, same-origin-first ordering, the `max` cap. `matchItemLink`: name↔link-text overlap and its ≥6-character/short-anchor-rejection rules. |
 | `lib/discounts/blocked.test.ts` | `detectBlockReason`: 403/429 always flag `bot_protected`; a sub-8KB Akamai sensor stub served as 200 flags `bot_protected`; a large page merely containing "Access Denied" text does NOT false-positive; a small 200 body containing `customdeny` flags `bot_protected`; a `www.puma.com` → `about.puma.com` redirect flags `corporate_redirect`; a same-host 200 or a same-brand regional-subdomain redirect does not flag either reason. |
