@@ -119,20 +119,20 @@ type SourceStatus =
   // generic failure" (see DiscountScanErrorReason in lib/discounts/types).
   | { state: "error"; message: string; reason?: DiscountScanErrorReason };
 
-// Region-appropriate defaults for a Hong Kong viewer — verified live:
-//   - nike.com/hk/w/sale-3yaep: www.nike.com alone serves the generic
-//     US/global landing page here (vague copy, no concrete numbers to
-//     extract), so we point straight at the HK sale page instead.
-//   - hk.puma.com: www.puma.com 301-redirects to the corporate
-//     about.puma.com, which has no offers at all — the HK storefront does.
-//   - marathonsports.hkstore.com: already HK-specific.
-// adidas.com / adidas.com.hk and fanatics are deliberately omitted — both are
-// permanently blocked by Akamai bot protection from any server-side fetch, so
-// no default URL for them could ever succeed.
+// The scanner reads server-rendered HTML only — a storefront is only useful
+// as a default if its promo text is actually present in the markup, not
+// injected client-side after load. Measured against the app's own text
+// extraction: nike.com's global page is US-facing and nearly textless;
+// nike.com/hk and hk.puma.com are JavaScript-rendered shells with no
+// readable server-side text; adidas.com / adidas.com.hk and fanatics.com are
+// permanently Akamai-blocked. The three below all extracted real, readable
+// promo text — GigaSports (same hkstore.com platform as Marathon Sports) is
+// the one route that still surfaces adidas markdowns despite adidas.com
+// itself being unreachable.
 const DEFAULT_SOURCES = [
-  "https://www.nike.com/hk/w/sale-3yaep",
-  "https://hk.puma.com/",
   "https://marathonsports.hkstore.com/marathon_tc_hk/",
+  "https://gigasports.hkstore.com/gigasports_tc_hk/",
+  "https://www.skechers.com.hk/",
 ];
 
 const CUSTOM_SOURCES_KEY = "discount-sources";

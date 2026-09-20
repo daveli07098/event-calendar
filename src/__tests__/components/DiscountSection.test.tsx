@@ -26,9 +26,10 @@ vi.mock("@/components/ui/select", () => ({
   SelectItem: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
 }));
 
-// Matches the current DEFAULT_SOURCES[0] (the HK sale page, not the bare
-// nike.com root — see DiscountSection's DEFAULT_SOURCES comment).
-const NIKE = "https://www.nike.com/hk/w/sale-3yaep";
+// Matches the current DEFAULT_SOURCES[0] — see DiscountSection's
+// DEFAULT_SOURCES comment for why these three (server-rendered promo text)
+// replaced the earlier nike.com/hk + hk.puma.com defaults (JS-rendered shells).
+const MARATHON = "https://marathonsports.hkstore.com/marathon_tc_hk/";
 
 const CALENDARS = [
   { id: "cal-1", userId: "u1", name: "Personal", color: "#f00", isDefault: true, isVisible: true, googleCalendarId: null, shareToken: null, shareMode: null, createdAt: "", updatedAt: "" },
@@ -48,7 +49,7 @@ function baseResult(overrides: Partial<DiscountScanResult> = {}): DiscountScanRe
     offers: [],
     evidence: [],
     items: [],
-    sourceUrl: NIKE,
+    sourceUrl: MARATHON,
     url: null,
     aiUsed: "gemini",
     tokensUsed: 100,
@@ -92,7 +93,7 @@ describe("DiscountSection", () => {
     const checkedAt = new Date().toISOString();
     localStorage.setItem(
       "discount-results",
-      JSON.stringify({ [NIKE]: { result: baseResult(), checkedAt } })
+      JSON.stringify({ [MARATHON]: { result: baseResult(), checkedAt } })
     );
     vi.stubGlobal("fetch", fetchStub());
 
@@ -115,7 +116,7 @@ describe("DiscountSection", () => {
 
     render(<DiscountSection />);
 
-    await screen.findByText("nike.com");
+    await screen.findByText("marathonsports.hkstore.com");
     expect(screen.queryByText("up to 70%")).not.toBeInTheDocument();
   });
 
@@ -126,8 +127,8 @@ describe("DiscountSection", () => {
     localStorage.setItem(
       "discount-results",
       JSON.stringify({
-        [NIKE]: {
-          result: { hasDiscount: "yes", sourceUrl: NIKE, offers: "not-an-array" },
+        [MARATHON]: {
+          result: { hasDiscount: "yes", sourceUrl: MARATHON, offers: "not-an-array" },
           checkedAt: new Date().toISOString(),
         },
       })
@@ -138,7 +139,7 @@ describe("DiscountSection", () => {
 
     // The section renders fine (all 3 default sources still show their idle
     // "Check" button) and the malformed entry left no "Checked …" trace.
-    await screen.findByText("nike.com");
+    await screen.findByText("marathonsports.hkstore.com");
     expect(screen.getAllByRole("button", { name: /^check$/i })).toHaveLength(3);
     expect(screen.queryByText(/^checked /i)).not.toBeInTheDocument();
   });
@@ -146,13 +147,13 @@ describe("DiscountSection", () => {
   it("drops a stored entry with an invalid checkedAt timestamp", async () => {
     localStorage.setItem(
       "discount-results",
-      JSON.stringify({ [NIKE]: { result: baseResult(), checkedAt: "not-a-date" } })
+      JSON.stringify({ [MARATHON]: { result: baseResult(), checkedAt: "not-a-date" } })
     );
     vi.stubGlobal("fetch", fetchStub());
 
     render(<DiscountSection />);
 
-    await screen.findByText("nike.com");
+    await screen.findByText("marathonsports.hkstore.com");
     expect(screen.queryByText("up to 70%")).not.toBeInTheDocument();
   });
 
@@ -165,7 +166,7 @@ describe("DiscountSection", () => {
     });
     localStorage.setItem(
       "discount-results",
-      JSON.stringify({ [NIKE]: { result, checkedAt: new Date().toISOString() } })
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
     );
     vi.stubGlobal("fetch", fetchStub());
 
@@ -188,7 +189,7 @@ describe("DiscountSection", () => {
     });
     localStorage.setItem(
       "discount-results",
-      JSON.stringify({ [NIKE]: { result, checkedAt: new Date().toISOString() } })
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
     );
     vi.stubGlobal("fetch", fetchStub());
 
@@ -211,7 +212,7 @@ describe("DiscountSection", () => {
     const result = baseResult({ startDate: "2026-09-15", endDate: "2026-09-30" });
     localStorage.setItem(
       "discount-results",
-      JSON.stringify({ [NIKE]: { result, checkedAt: new Date().toISOString() } })
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
     );
     vi.stubGlobal("fetch", fetchStub());
 
@@ -230,7 +231,7 @@ describe("DiscountSection", () => {
     const result = baseResult({ startDate: null, endDate: "2026-09-30" });
     localStorage.setItem(
       "discount-results",
-      JSON.stringify({ [NIKE]: { result, checkedAt: new Date().toISOString() } })
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
     );
     vi.stubGlobal("fetch", fetchStub());
 
@@ -251,7 +252,7 @@ describe("DiscountSection", () => {
       const result = baseResult({ startDate: null, endDate: "2026-09-30" });
       localStorage.setItem(
         "discount-results",
-        JSON.stringify({ [NIKE]: { result, checkedAt: new Date().toISOString() } })
+        JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
       );
       vi.stubGlobal("fetch", fetchStub());
 
@@ -268,18 +269,25 @@ describe("DiscountSection", () => {
     }
   });
 
-  it("renders the three region-appropriate HK default sources, not the old global ones", async () => {
+  it("renders the three server-rendered HK default sources, not the JS-rendered/blocked ones", async () => {
     vi.stubGlobal("fetch", fetchStub());
 
     render(<DiscountSection />);
 
-    // "nike.com" and "marathonsports.hkstore.com" are exact-matched via their
-    // own nested <span> — sibling to a separate path-hint span — so this also
-    // guards against the path hint leaking into the domain's own text node.
-    await screen.findByText("hk.puma.com");
-    expect(screen.getByText("nike.com")).toBeInTheDocument();
+    // Each domain is exact-matched via its own nested <span> — sibling to a
+    // separate path-hint span — so this also guards against a path hint
+    // leaking into the domain's own text node.
+    await screen.findByText("skechers.com.hk");
     expect(screen.getByText("marathonsports.hkstore.com")).toBeInTheDocument();
+    expect(screen.getByText("gigasports.hkstore.com")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^check$/i })).toHaveLength(3);
+
+    // marathonsports.hkstore.com and gigasports.hkstore.com share the same
+    // "hkstore.com" platform and a similarly-shaped path — confirm the path
+    // hints themselves are distinct (not truncated down to an identical
+    // string), so the two rows stay tell-apart-able even at a glance.
+    expect(screen.getByText("/marathon_tc_hk/")).toBeInTheDocument();
+    expect(screen.getByText("/gigasports_tc_hk/")).toBeInTheDocument();
   });
 
   it("renders a bot_protected scan error as a muted 'Can't scan' state with an Open-site link, no Re-check", async () => {
@@ -288,21 +296,22 @@ describe("DiscountSection", () => {
         ({
           ok: false,
           status: 403,
-          json: async () => ({ error: "Nike blocks automated requests", reason: "bot_protected" }),
+          json: async () => ({ error: "This site blocks automated requests", reason: "bot_protected" }),
         }) as Response,
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<DiscountSection />);
     const user = userEvent.setup();
+    // DEFAULT_SOURCES[0] — MARATHON
     const [firstCheck] = await screen.findAllByRole("button", { name: /^check$/i });
     await user.click(firstCheck);
 
     await screen.findByText("Can't scan");
-    expect(screen.getByText("Nike blocks automated requests")).toBeInTheDocument();
+    expect(screen.getByText("This site blocks automated requests")).toBeInTheDocument();
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     const openSite = screen.getByRole("link", { name: /open site/i });
-    expect(openSite).toHaveAttribute("href", NIKE);
+    expect(openSite).toHaveAttribute("href", MARATHON);
     expect(screen.queryByRole("button", { name: /re-check/i })).not.toBeInTheDocument();
   });
 
@@ -333,7 +342,7 @@ describe("DiscountSection", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<DiscountSection />);
-    await screen.findByText("hk.puma.com"); // wait for mount-time sources fetch to settle
+    await screen.findByText("skechers.com.hk"); // wait for mount-time sources fetch to settle
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Add discount source URL"), "https://shop.example.com");
@@ -354,8 +363,8 @@ describe("DiscountSection", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<DiscountSection />);
-    // Two rows now render "nike.com": the HK-sale default and the bare-root custom source.
-    await waitFor(() => expect(screen.getAllByText("nike.com")).toHaveLength(2));
+    // nike.com isn't a default anymore, so this is purely a custom-source row.
+    await screen.findByText("nike.com");
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText("Add discount source URL"), "https://www.nike.com/");
@@ -408,15 +417,15 @@ describe("DiscountSection", () => {
 
     render(<DiscountSection />);
     const user = userEvent.setup();
-    // DEFAULT_SOURCES[1] — https://hk.puma.com/
-    const [, pumaCheck] = await screen.findAllByRole("button", { name: /^check$/i });
-    await user.click(pumaCheck);
+    // DEFAULT_SOURCES[1] — https://gigasports.hkstore.com/gigasports_tc_hk/
+    const [, gigasportsCheck] = await screen.findAllByRole("button", { name: /^check$/i });
+    await user.click(gigasportsCheck);
 
     await screen.findByText("Can't scan");
     expect(screen.getByText(/use the regional store url instead/i)).toBeInTheDocument();
     expect(screen.queryByText("Failed")).not.toBeInTheDocument();
     const openSite = screen.getByRole("link", { name: /open site/i });
-    expect(openSite).toHaveAttribute("href", "https://hk.puma.com/");
+    expect(openSite).toHaveAttribute("href", "https://gigasports.hkstore.com/gigasports_tc_hk/");
     expect(screen.queryByRole("button", { name: /re-check/i })).not.toBeInTheDocument();
   });
 });
