@@ -4,9 +4,12 @@ import { useState, useEffect, useRef } from "react";
 import {
   BadgePercent, RefreshCw, Loader2, Plus, Trash2, ExternalLink,
   CalendarPlus, CheckCircle2, AlertCircle, Copy, Check, Quote, Tag, Users, Sparkles, Clock, XCircle,
+  ClipboardPaste,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -135,6 +138,14 @@ const DEFAULT_SOURCES = [
   "https://www.skechers.com.hk/",
 ];
 
+// Mirrors the server's pasted-content cap (see DiscountScanErrorReason's
+// "content_too_large") — drives the dialog's live character count. Not
+// enforced client-side with a hard `maxLength`: a paste over the cap still
+// submits, the count just turns red, and the server's "content_too_large"
+// error surfaces inline (see scanSource) so the user knows exactly why and
+// can trim it, instead of a silent truncation they'd never notice.
+const PASTE_CONTENT_MAX_CHARS = 400_000;
+
 const CUSTOM_SOURCES_KEY = "discount-sources";
 /** Persisted scan results, keyed by source URL, so a reload doesn't wipe them. */
 const RESULTS_KEY = "discount-results";
@@ -212,6 +223,15 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const [previewStart, setPreviewStart] = useState(""); // YYYY-MM-DD, editable in the dialog
   const [previewEnd, setPreviewEnd] = useState("");
   const [addedFor, setAddedFor] = useState<Set<string>>(new Set());
+  // Source URL currently open in the "paste page" dialog (some sites block a
+  // server-side fetch entirely, or only render their content client-side —
+  // pasting lets the user's own browser stand in for the fetch).
+  const [pasteDialogFor, setPasteDialogFor] = useState<string | null>(null);
+  const [pasteContent, setPasteContent] = useState("");
+  // Inline message for a fixable paste problem ("content_too_large" /
+  // "empty_content") — shown in the dialog instead of closing it and writing
+  // an error row, so the user can trim/reselect the paste and resubmit.
+  const [pasteError, setPasteError] = useState<string | null>(null);
   // Screen-reader-only status line for scan lifecycle transitions.
   const [announcement, setAnnouncement] = useState("");
   // True once the mount-time GET to the account-backed sources API has failed
@@ -465,7 +485,18 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     if (!ok) toast.error("Couldn't save your sources");
   };
 
-  const scanSource = async (url: string): Promise<void> => {
+  // `pageContent`, when passed, is a user-pasted page (HTML or plain text) —
+  // the server skips its own fetch and runs the same AI extraction on it
+  // instead. Every other transition below (status shape, abortable/timeout
+  // plumbing, result rendering, quota callback, localStorage persistence via
+  // the `statuses` effect) is shared with a normal URL-only scan; the paste
+  // dialog is only special-cased for the two fixable input-problem reasons.
+  const scanSource = async (url: string, pageContent?: string): Promise<void> => {
+    const isPaste = pageContent !== undefined;
+    // What this row showed before this attempt — restored verbatim if the
+    // paste turns out to be too large/empty, so that failure never clobbers
+    // whatever the row previously displayed with a spurious error state.
+    const priorStatus = statuses[url] ?? { state: "idle" };
     setStatuses((prev) => ({ ...prev, [url]: { state: "scanning" } }));
     setAnnouncement(`Scanning ${domainOf(url)}…`);
     const signal = startAbortable(url);
@@ -473,7 +504,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       const res = await fetch("/api/discounts/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(isPaste ? { url, pageContent } : { url }),
         signal,
       });
       const data = await res.json();
@@ -481,6 +512,16 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         // `reason` is a newer, optional field — tolerate its absence for
         // older cached responses or a server that hasn't deployed it yet.
         const reason: DiscountScanErrorReason | undefined = typeof data?.reason === "string" ? data.reason : undefined;
+        // A paste that's too large or reads as empty is a fixable input
+        // problem, not a scan failure — keep the dialog open with the
+        // server's message inline so the user can fix the paste, instead of
+        // closing it and writing an error row over this source.
+        if (isPaste && (reason === "content_too_large" || reason === "empty_content")) {
+          setStatuses((prev) => ({ ...prev, [url]: priorStatus }));
+          setPasteError(data.error ?? "Couldn't read that paste");
+          setAnnouncement(data.error ?? `Couldn't read the pasted page for ${domainOf(url)}`);
+          return;
+        }
         setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: data.error ?? `HTTP ${res.status}`, reason } }));
         // A site we can never read isn't a failed scan — announce it the same
         // way the row renders it, so screen-reader users aren't told to retry.
@@ -489,12 +530,14 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
             ? `Can't scan ${domainOf(url)}`
             : `Scan failed for ${domainOf(url)}`
         );
+        if (isPaste) closePasteDialog();
         return;
       }
       const result: DiscountScanResult = data.result;
       setStatuses((prev) => ({ ...prev, [url]: { state: "done", result, checkedAt: new Date().toISOString() } }));
       setAnnouncement(`Found ${result.offers.length} offers on ${domainOf(url)}`);
       if (data.aiQuota) onQuotaUpdate?.(data.aiQuota);
+      if (isPaste) closePasteDialog();
     } catch {
       if (signal.aborted && signal.reason === "cancel") {
         // User cancelled — back to idle rather than showing an error state.
@@ -504,11 +547,26 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       if (signal.aborted && signal.reason === "timeout") {
         setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: "This took too long — the AI provider may be busy" } }));
         setAnnouncement(`Scan failed for ${domainOf(url)}`);
+        if (isPaste) closePasteDialog();
         return;
       }
       setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: "Network error" } }));
       setAnnouncement(`Scan failed for ${domainOf(url)}`);
+      if (isPaste) closePasteDialog();
     }
+  };
+
+  /** Opens the "paste page" dialog for `url`, clearing any previous paste. */
+  const openPasteDialog = (url: string) => {
+    setPasteDialogFor(url);
+    setPasteContent("");
+    setPasteError(null);
+  };
+
+  const closePasteDialog = () => {
+    setPasteDialogFor(null);
+    setPasteContent("");
+    setPasteError(null);
   };
 
   /** Cancel whichever source is currently scanning (single "Check" or "Check all" loop). */
@@ -734,6 +792,9 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                   {status.state === "done" && (
                     <span className="text-[11px] text-muted-foreground" title={status.checkedAt}>
                       Checked {relativeTime(status.checkedAt)}
+                      {status.result.fromPastedContent && (
+                        <span className="ml-1 italic">· from pasted page</span>
+                      )}
                     </span>
                   )}
                   {status.state === "error" && (
@@ -751,6 +812,21 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                   >
                     <ExternalLink className="size-3.5" />
                   </a>
+                  {/* Small, always-available paste affordance — separate from the
+                      primary "Paste page" button below (which only appears on a
+                      can't-scan row) so a source that merely returned a poor
+                      result (e.g. thin_content that technically "succeeded") can
+                      still be re-scanned from a pasted page, without a second
+                      button in every row's main action area. */}
+                  <button
+                    type="button"
+                    onClick={() => openPasteDialog(url)}
+                    aria-label={`Paste page content for ${domainOf(url)}`}
+                    title="Paste page content instead"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <ClipboardPaste className="size-3.5" />
+                  </button>
                   {isCustom && (
                     <Button
                       variant="ghost"
@@ -764,34 +840,63 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                     </Button>
                   )}
                   {unfetchable ? (
-                    // Re-checking can never succeed for either reason — link
-                    // straight to the site instead of offering a dead-end button.
-                    <a
-                      href={url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
-                    >
-                      <ExternalLink className="size-3.5" />
-                      Open site
-                    </a>
+                    <>
+                      {/* Re-checking can never succeed for either reason — link
+                          straight to the site instead of offering a dead-end button. */}
+                      <a
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+                      >
+                        <ExternalLink className="size-3.5" />
+                        Open site
+                      </a>
+                      {/* The primary way forward for a site we can never fetch
+                          server-side — paste it in instead. */}
+                      <Button
+                        variant="default"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => openPasteDialog(url)}
+                      >
+                        <ClipboardPaste className="size-3.5" />
+                        Paste page
+                      </Button>
+                    </>
                   ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-1.5"
-                      onClick={() => (status.state === "scanning" ? cancelScan(url) : scanSource(url))}
-                      disabled={status.state !== "scanning" && checkingAll}
-                    >
-                      {status.state === "scanning" ? (
-                        <><Loader2 className="size-3.5 animate-spin" />Cancel</>
-                      ) : (
-                        <>
-                          <RefreshCw className="size-3.5" />
-                          {status.state === "done" || status.state === "error" ? "Re-check" : "Check"}
-                        </>
+                    <>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => (status.state === "scanning" ? cancelScan(url) : scanSource(url))}
+                        disabled={status.state !== "scanning" && checkingAll}
+                      >
+                        {status.state === "scanning" ? (
+                          <><Loader2 className="size-3.5 animate-spin" />Cancel</>
+                        ) : (
+                          <>
+                            <RefreshCw className="size-3.5" />
+                            {status.state === "done" || status.state === "error" ? "Re-check" : "Check"}
+                          </>
+                        )}
+                      </Button>
+                      {/* thin_content keeps Re-check (see the comment above) but
+                          is still a can't-scan row — offer the same primary
+                          paste path alongside it. */}
+                      {cantScan && (
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => openPasteDialog(url)}
+                        >
+                          <ClipboardPaste className="size-3.5" />
+                          Paste page
+                        </Button>
                       )}
-                    </Button>
+                    </>
                   )}
                 </div>
 
@@ -1100,6 +1205,91 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
             <Button className="gap-1.5" onClick={confirmAdd} disabled={!!addingFor}>
               {addingFor ? <Loader2 className="size-3.5 animate-spin" /> : <CalendarPlus className="size-3.5" />}
               Add to calendar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Paste a page's content in for sites a server-side fetch can never read
+          (bot-protected, corporate-redirected) or only reads a client-rendered
+          shell of (thin_content) — mirrors the "Add discount to calendar"
+          preview dialog above: base-ui Dialog primitives, open/onOpenChange
+          driven by a single "which source" piece of state. */}
+      <Dialog open={!!pasteDialogFor} onOpenChange={(o) => { if (!o) closePasteDialog(); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Paste {pasteDialogFor ? domainOf(pasteDialogFor) : "page"}</DialogTitle>
+            <DialogDescription>
+              Some sites block automated requests, or only render their promos
+              after the page loads in a real browser — paste what you see
+              there and we&apos;ll scan that instead.
+            </DialogDescription>
+          </DialogHeader>
+          {pasteDialogFor && (() => {
+            const pasteUrl = pasteDialogFor;
+            const submitting = statuses[pasteUrl]?.state === "scanning";
+            const overCap = pasteContent.length > PASTE_CONTENT_MAX_CHARS;
+            return (
+              <div className="space-y-3 text-sm">
+                <ol className="list-decimal space-y-1 pl-4 text-xs text-muted-foreground">
+                  <li>
+                    <a
+                      href={pasteUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      Open the site in a new tab
+                      <ExternalLink className="size-3" />
+                    </a>
+                  </li>
+                  <li>Select all and copy</li>
+                  <li>Paste below</li>
+                </ol>
+
+                <div className="space-y-1">
+                  <Label htmlFor="paste-page-content">Page content</Label>
+                  <Textarea
+                    id="paste-page-content"
+                    value={pasteContent}
+                    onChange={(e) => {
+                      setPasteContent(e.target.value);
+                      if (pasteError) setPasteError(null);
+                    }}
+                    placeholder="Paste the page's HTML or its visible text here"
+                    className="h-40 resize-y font-mono text-xs"
+                    disabled={submitting}
+                  />
+                  <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>Pasting the page source keeps offer links — plain text works too.</span>
+                    <span className={cn("shrink-0 tabular-nums", overCap && "text-destructive")}>
+                      {pasteContent.length.toLocaleString()} / {PASTE_CONTENT_MAX_CHARS.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                {pasteError && (
+                  <p className="flex items-center gap-1.5 text-xs text-destructive">
+                    <AlertCircle className="size-3.5 shrink-0" />
+                    {pasteError}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="ghost" onClick={closePasteDialog}>Cancel</Button>
+            <Button
+              className="gap-1.5"
+              onClick={() => pasteDialogFor && scanSource(pasteDialogFor, pasteContent)}
+              disabled={!pasteContent.trim() || (pasteDialogFor ? statuses[pasteDialogFor]?.state === "scanning" : false)}
+            >
+              {pasteDialogFor && statuses[pasteDialogFor]?.state === "scanning" ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <ClipboardPaste className="size-3.5" />
+              )}
+              Scan pasted page
             </Button>
           </DialogFooter>
         </DialogContent>

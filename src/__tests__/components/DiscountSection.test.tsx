@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DiscountSection } from "@/components/tickets/DiscountSection";
 import { toast } from "sonner";
@@ -399,6 +399,104 @@ describe("DiscountSection", () => {
     });
     expect(toast.error).toHaveBeenCalledWith("Couldn't save your sources");
     expect(toast.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the paste dialog from a bot_protected row and posts pageContent to the scan endpoint", async () => {
+    const fetchMock = fetchStub({
+      "POST /api/discounts/scan": () =>
+        ({
+          ok: false,
+          status: 403,
+          json: async () => ({ error: "This site blocks automated requests", reason: "bot_protected" }),
+        }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    const user = userEvent.setup();
+    // DEFAULT_SOURCES[0] — MARATHON
+    const [firstCheck] = await screen.findAllByRole("button", { name: /^check$/i });
+    await user.click(firstCheck);
+    await screen.findByText("Can't scan");
+
+    // The primary paste action next to "Open site" on a can't-scan row.
+    await user.click(screen.getByRole("button", { name: /^paste page$/i }));
+    await screen.findByText(`Paste ${"marathonsports.hkstore.com"}`);
+
+    fireEvent.change(screen.getByLabelText("Page content"), { target: { value: "some raw pasted page markup" } });
+    await user.click(screen.getByRole("button", { name: /scan pasted page/i }));
+
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url, init]) => url === "/api/discounts/scan" && (init as RequestInit | undefined)?.method === "POST")
+      ).toBe(true);
+    });
+    const scanCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/discounts/scan");
+    const lastBody = JSON.parse((scanCalls.at(-1)![1] as RequestInit).body as string);
+    expect(lastBody).toEqual({ url: MARATHON, pageContent: "some raw pasted page markup" });
+  });
+
+  it("renders offers and a 'from pasted page' marker after a successful pasted scan", async () => {
+    const result = baseResult({
+      fromPastedContent: true,
+      offers: [
+        { label: "Storewide sale", detail: null, discountPercent: "20%", promoCode: null, minSpend: null, audience: "all", url: null },
+      ],
+    });
+    const fetchMock = fetchStub({
+      "POST /api/discounts/scan": () => ({ ok: true, json: async () => ({ result }) }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    const user = userEvent.setup();
+    // The small, always-available paste affordance next to the external-link icon.
+    const [pasteAffordance] = await screen.findAllByRole("button", { name: /paste page content for marathonsports\.hkstore\.com/i });
+    await user.click(pasteAffordance);
+
+    fireEvent.change(screen.getByLabelText("Page content"), { target: { value: "pasted markup with the sale text" } });
+    await user.click(screen.getByRole("button", { name: /scan pasted page/i }));
+
+    await screen.findByText("Storewide sale");
+    expect(screen.getByText(/from pasted page/i)).toBeInTheDocument();
+    // The dialog closes on success.
+    expect(screen.queryByLabelText("Page content")).not.toBeInTheDocument();
+  });
+
+  it("keeps the paste dialog open and shows the server message inline on empty_content", async () => {
+    const fetchMock = fetchStub({
+      "POST /api/discounts/scan": () =>
+        ({
+          ok: false,
+          status: 422,
+          json: async () => ({ error: "That paste doesn't contain any readable text", reason: "empty_content" }),
+        }) as Response,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    const user = userEvent.setup();
+    const [pasteAffordance] = await screen.findAllByRole("button", { name: /paste page content for marathonsports\.hkstore\.com/i });
+    await user.click(pasteAffordance);
+
+    fireEvent.change(screen.getByLabelText("Page content"), { target: { value: "just some pasted text" } });
+    await user.click(screen.getByRole("button", { name: /scan pasted page/i }));
+
+    // Appears twice: the sr-only aria-live announcement and the dialog's own
+    // inline message paragraph.
+    await waitFor(() => {
+      expect(screen.getAllByText("That paste doesn't contain any readable text").length).toBeGreaterThan(0);
+    });
+    // Dialog stayed open — the textarea and submit button are still there.
+    expect(screen.getByLabelText("Page content")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /scan pasted page/i })).toBeInTheDocument();
+
+    // Closing the dialog reveals the row untouched — nothing was written
+    // back as an error state on the source itself.
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Can't scan")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^check$/i })).toHaveLength(3);
   });
 
   it("renders a corporate_redirect scan error as a muted 'Can't scan' state with an Open-site link, no Re-check", async () => {

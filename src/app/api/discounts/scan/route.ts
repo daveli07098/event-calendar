@@ -11,10 +11,14 @@ import {
 } from "@/lib/ai/quota";
 import { extractTextFromHtml } from "@/lib/ai/html";
 import type { DiscountOffer, DiscountScanResult, DiscountItem, DiscountScanErrorReason } from "@/lib/discounts/types";
-import { extractLinksFromHtml, selectDiscountCandidates, matchItemLink, DISCOUNT_KEYWORDS } from "@/lib/discounts/links";
+import { extractLinksFromHtml, selectDiscountCandidates, matchItemLink, DISCOUNT_KEYWORDS, type CandidateLink } from "@/lib/discounts/links";
 import { normalizeDiscountPercent } from "@/lib/discounts/percent";
 import { detectBlockReason } from "@/lib/discounts/blocked";
 import { filterConcreteOffers, applyConcretenessGate } from "@/lib/discounts/offers";
+import { looksLikeHtml, prioritizeAndTruncate } from "@/lib/discounts/text";
+
+/** Hard cap on pasted `pageContent` — see the `pageContent` request field below. */
+const MAX_PASTED_CONTENT_CHARS = 400_000;
 
 // Re-exported so existing importers of the old locally-declared types keep working.
 export type { DiscountOffer, DiscountScanResult };
@@ -37,7 +41,7 @@ function safeHost(urlStr: string): string {
 function blockErrorResponse(reason: "bot_protected" | "corporate_redirect", url: string, finalUrl: string) {
   if (reason === "bot_protected") {
     return errorResponse(
-      "This site uses interactive bot protection that blocks server-side scanning. Open it yourself and paste a specific sale/landing page URL, or add the deal manually.",
+      "This site blocks automated access, so it can't be read from a server. Open it yourself, copy the page, and use Paste page.",
       reason,
       422
     );
@@ -103,14 +107,14 @@ export async function POST(req: NextRequest) {
   }
   const uid = session.user.id;
 
-  let body: { url?: string };
+  let body: { url?: string; pageContent?: string };
   try {
     body = await req.json();
   } catch {
     return errorResponse("Invalid JSON body", "invalid_url", 400);
   }
 
-  const { url } = body;
+  const { url, pageContent } = body;
   if (!url || typeof url !== "string") {
     return errorResponse("url is required", "invalid_url", 400);
   }
@@ -122,11 +126,35 @@ export async function POST(req: NextRequest) {
     return errorResponse("Invalid URL", "invalid_url", 400);
   }
 
-  // Block private network requests (SSRF protection) — see src/lib/safe-fetch.ts.
-  try {
-    await assertPublicUrl(url);
-  } catch {
-    return errorResponse("Private URLs are not allowed", "private_url", 400);
+  // Optional pasted page content: some sites — adidas.com/.hk, fanatics.com —
+  // block server-side fetches outright (bot protection), and others
+  // (hk.puma.com) are client-rendered so a fetch sees almost none of the
+  // real page. The user's own browser is the one thing that reliably sees
+  // the rendered page, so this lets them paste it in instead. Present and
+  // non-blank means "skip the network entirely" for the rest of this
+  // handler. Whitespace-only `pageContent` is treated as absent and falls
+  // through to the normal fetch path below.
+  const pastedContent =
+    typeof pageContent === "string" && pageContent.trim() !== "" ? pageContent : null;
+
+  if (pastedContent === null) {
+    // Block private network requests (SSRF protection) — see
+    // src/lib/safe-fetch.ts. Only relevant on the fetch path: the pasted-
+    // content path never makes a request, so there's nothing to validate.
+    try {
+      await assertPublicUrl(url);
+    } catch {
+      return errorResponse("Private URLs are not allowed", "private_url", 400);
+    }
+  } else if (pastedContent.length > MAX_PASTED_CONTENT_CHARS) {
+    // Reject oversized pastes up front — before the AI-provider/quota checks
+    // below, so a too-large paste doesn't cost a DB round-trip (and a
+    // no-provider deployment still answers 413, not 503, for it).
+    return errorResponse(
+      `Pasted content is too large (max ${MAX_PASTED_CONTENT_CHARS.toLocaleString()} characters) — copy a smaller section of the page.`,
+      "content_too_large",
+      413
+    );
   }
 
   if (!hasAiProvider()) {
@@ -138,79 +166,125 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Fetch the page server-side. Browser-like UA — large retail sites
-  // (Nike/adidas) reject obvious bot user agents. NOTE: deliberately NOT
-  // adding full Chrome sec-ch-ua/sec-fetch-* headers — empirically, on sites
-  // behind Akamai Bot Manager (adidas.com, adidas.com.hk, fanatics.com) that
-  // flips the status from 403 to 200 but the body is still the ~2.5KB
-  // JS-sensor block page, just harder to detect. detectBlockReason() below
-  // catches that case by body shape instead of chasing headers.
-  let html: string;
-  let finalUrl: string;
-  try {
-    // SSRF guard: resolves + validates the hostname (and every redirect hop)
-    // before fetching — see src/lib/safe-fetch.ts.
-    const fetchRes = await safeFetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en,zh-HK;q=0.9,zh;q=0.8",
-      },
-      signal: AbortSignal.timeout(15_000),
-      cache: "no-store",
-    });
-    finalUrl = fetchRes.finalUrl;
-    html = await fetchRes.text();
-    if (!fetchRes.ok) {
-      // 403/429 here usually means bot protection (Akamai/Cloudflare) on the
-      // retailer, not a bug — log it so it's visible in the server console.
-      console.warn(`[discounts/scan] fetch blocked: ${url} → HTTP ${fetchRes.status}`);
-      const reason = detectBlockReason(fetchRes.status, html, finalUrl, url);
-      if (reason) return blockErrorResponse(reason, url, finalUrl);
-      return errorResponse(`Could not fetch site (HTTP ${fetchRes.status})`, "fetch_failed", 422);
+  let allLinks: CandidateLink[] = [];
+  let candidates: CandidateLink[] = [];
+  let pageText: string;
+
+  if (pastedContent !== null) {
+    // Pasted-content path: nothing was fetched, so there's no HTTP status or
+    // response body for detectBlockReason() to run against — the user's own
+    // browser already got past whatever bot-protection/JS-rendering blocks
+    // the server, so there's no block page to detect here.
+    //
+    // Detect whether the paste is HTML (deep-linkable, same extraction path
+    // as a fetched page) or plain visible text (e.g. copied straight out of
+    // a rendered page with no markup) — see looksLikeHtml() for why a stray
+    // "<"/">" in ordinary text doesn't get misclassified as markup.
+    if (looksLikeHtml(pastedContent)) {
+      // Extract links from the RAW pasted html (extractTextFromHtml strips
+      // all tags, including <nav>, so this must run first) so the AI can
+      // point at a real on-page URL instead of inventing one — identical to
+      // the fetch path below, just against pasted markup instead of a fetch
+      // response body.
+      allLinks = extractLinksFromHtml(pastedContent, url);
+      candidates = selectDiscountCandidates(allLinks, url);
+      pageText = extractTextFromHtml(pastedContent, DISCOUNT_KEYWORDS);
+    } else {
+      // Plain-text paste: no markup to extract links from, so allLinks/
+      // candidates stay empty and every "url" field below resolves to
+      // null — but it still gets the same keyword-priority truncation the
+      // fetch path applies to HTML-derived text (see prioritizeAndTruncate),
+      // so promo-relevant lines survive the 8000-char cap.
+      pageText = prioritizeAndTruncate(pastedContent.trim(), DISCOUNT_KEYWORDS, 8000);
     }
-  } catch (err) {
-    if (err instanceof UnsafeUrlError) {
-      return errorResponse("Private URLs are not allowed", "private_url", 400);
+
+    if (pageText.length < 100) {
+      // Mirrors the fetch path's "thin_content" floor below, but aimed at a
+      // paste: the fix is to go copy more of the page, not try another URL.
+      console.warn(`[discounts/scan] pasted content too thin: ${url} → ${pageText.length} chars`);
+      return errorResponse(
+        "That paste doesn't have enough text to scan. Go back to the page, copy it again — including the promotion/sale text — and paste the full content in.",
+        "empty_content",
+        422
+      );
     }
-    const msg = err instanceof Error ? err.message : "Fetch failed";
-    console.warn(`[discounts/scan] fetch error: ${url} → ${msg}`);
-    return errorResponse(`Could not fetch site: ${msg}`, "fetch_failed", 422);
+
+    console.log(`[discounts/scan] pasted content: ${url} → ${pastedContent.length} chars`);
+  } else {
+    // Fetch the page server-side. Browser-like UA — large retail sites
+    // (Nike/adidas) reject obvious bot user agents. NOTE: deliberately NOT
+    // adding full Chrome sec-ch-ua/sec-fetch-* headers — empirically, on sites
+    // behind Akamai Bot Manager (adidas.com, adidas.com.hk, fanatics.com) that
+    // flips the status from 403 to 200 but the body is still the ~2.5KB
+    // JS-sensor block page, just harder to detect. detectBlockReason() below
+    // catches that case by body shape instead of chasing headers.
+    let html: string;
+    let finalUrl: string;
+    try {
+      // SSRF guard: resolves + validates the hostname (and every redirect hop)
+      // before fetching — see src/lib/safe-fetch.ts.
+      const fetchRes = await safeFetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en,zh-HK;q=0.9,zh;q=0.8",
+        },
+        signal: AbortSignal.timeout(15_000),
+        cache: "no-store",
+      });
+      finalUrl = fetchRes.finalUrl;
+      html = await fetchRes.text();
+      if (!fetchRes.ok) {
+        // 403/429 here usually means bot protection (Akamai/Cloudflare) on the
+        // retailer, not a bug — log it so it's visible in the server console.
+        console.warn(`[discounts/scan] fetch blocked: ${url} → HTTP ${fetchRes.status}`);
+        const reason = detectBlockReason(fetchRes.status, html, finalUrl, url);
+        if (reason) return blockErrorResponse(reason, url, finalUrl);
+        return errorResponse(`Could not fetch site (HTTP ${fetchRes.status})`, "fetch_failed", 422);
+      }
+    } catch (err) {
+      if (err instanceof UnsafeUrlError) {
+        return errorResponse("Private URLs are not allowed", "private_url", 400);
+      }
+      const msg = err instanceof Error ? err.message : "Fetch failed";
+      console.warn(`[discounts/scan] fetch error: ${url} → ${msg}`);
+      return errorResponse(`Could not fetch site: ${msg}`, "fetch_failed", 422);
+    }
+
+    // Same block detection on the OK-but-suspicious path: sites behind Akamai
+    // Bot Manager return 200 with a spoofed Chrome UA, but the body is still
+    // the tiny JS-sensor stub — must not be sent to the AI as real content.
+    // Also catches a 200 that's actually a corporate/investor-site redirect
+    // (e.g. www.puma.com → about.puma.com has no shop content).
+    const blockReason = detectBlockReason(200, html, finalUrl, url);
+    if (blockReason) {
+      console.warn(`[discounts/scan] ${blockReason} served as 200: ${url} → ${finalUrl}`);
+      return blockErrorResponse(blockReason, url, finalUrl);
+    }
+
+    // Extract links from the RAW html (extractTextFromHtml strips all tags,
+    // including <nav>, so this must run first) so the AI can point at a real
+    // on-page URL instead of inventing one.
+    allLinks = extractLinksFromHtml(html, url);
+    candidates = selectDiscountCandidates(allLinks, url);
+    pageText = extractTextFromHtml(html, DISCOUNT_KEYWORDS);
+    if (pageText.length < 100) {
+      console.warn(`[discounts/scan] thin content: ${url} → ${pageText.length} chars (likely JS-rendered)`);
+      return errorResponse(
+        "This site builds its pages with JavaScript, so a server-side fetch sees no promotion text. Try a specific sale/landing page URL, or use Paste page.",
+        "thin_content",
+        422
+      );
+    }
   }
 
-  // Same block detection on the OK-but-suspicious path: sites behind Akamai
-  // Bot Manager return 200 with a spoofed Chrome UA, but the body is still
-  // the tiny JS-sensor stub — must not be sent to the AI as real content.
-  // Also catches a 200 that's actually a corporate/investor-site redirect
-  // (e.g. www.puma.com → about.puma.com has no shop content).
-  const blockReason = detectBlockReason(200, html, finalUrl, url);
-  if (blockReason) {
-    console.warn(`[discounts/scan] ${blockReason} served as 200: ${url} → ${finalUrl}`);
-    return blockErrorResponse(blockReason, url, finalUrl);
-  }
-
-  // Extract links from the RAW html (extractTextFromHtml strips all tags,
-  // including <nav>, so this must run first) so the AI can point at a real
-  // on-page URL instead of inventing one.
-  const allLinks = extractLinksFromHtml(html, url);
-  const candidates = selectDiscountCandidates(allLinks, url);
   const candidatesBlock =
     candidates.length > 0
       ? `Links on the page (use the number as "url" when an offer plainly has its own page; otherwise null):\n${candidates
           .map((c, i) => `[${i}] ${c.text || "(no text)"} → ${c.href}`)
           .join("\n")}`
       : `Links on the page: none found — every "url" field must be null.`;
-
-  const pageText = extractTextFromHtml(html, DISCOUNT_KEYWORDS);
-  if (pageText.length < 100) {
-    console.warn(`[discounts/scan] thin content: ${url} → ${pageText.length} chars (likely JS-rendered)`);
-    return errorResponse(
-      "This site builds its pages with JavaScript, so a server-side fetch sees no promotion text. Try a specific sale/landing page URL, or add the deal manually.",
-      "thin_content",
-      422
-    );
-  }
 
   try {
     const { data, provider, tokensUsed } = await aiExtractJson(DISCOUNT_PROMPT(pageText, url, candidatesBlock));
@@ -304,6 +378,7 @@ export async function POST(req: NextRequest) {
       url: headlineUrl ?? offers.find((o) => o.url)?.url ?? null,
       aiUsed: provider,
       tokensUsed,
+      fromPastedContent: pastedContent !== null,
     };
     // If every offer got dropped above AND the headline itself has no
     // concrete percent/code, there's nothing left backing hasDiscount: true.

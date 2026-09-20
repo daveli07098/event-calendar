@@ -51,7 +51,12 @@ export interface DiscountScanResult {
   offers: DiscountOffer[];                         // all distinct promotions
   evidence: string[];                              // exact phrases proving the deal (the "why")
   items: DiscountItem[];
-  /** The URL that was scanned (what the user added as a source). */
+  /**
+   * The URL that was scanned (what the user added as a source). When the
+   * scan came from pasted page content instead of a server-side fetch (see
+   * `fromPastedContent`), this is just the label/base URL the user supplied
+   * — nothing was actually fetched from it.
+   */
   sourceUrl: string;
   /**
    * Best deep link for the headline promotion — the first offer's url, or the
@@ -61,6 +66,14 @@ export interface DiscountScanResult {
   url: string | null;
   aiUsed: string;
   tokensUsed: number | null;
+  /**
+   * True when this result came from user-pasted page content (see the
+   * `pageContent` request field) rather than a server-side fetch of `url` —
+   * lets the UI label the result accordingly. Optional/defaults to false so
+   * existing stored results (persisted before this field existed) still
+   * satisfy the type.
+   */
+  fromPastedContent?: boolean;
 }
 
 /**
@@ -77,4 +90,8 @@ export type DiscountScanErrorReason =
   | "private_url"
   | "no_ai"
   | "quota"
-  | "ai_failed";
+  | "ai_failed"
+  /** Pasted `pageContent` exceeded the 400,000-character cap. */
+  | "content_too_large"
+  /** Pasted `pageContent` yielded under 100 chars of usable text (mirrors "thin_content" for the paste path). */
+  | "empty_content";
