@@ -206,7 +206,7 @@ export async function POST(req: NextRequest) {
   if (pageText.length < 100) {
     console.warn(`[discounts/scan] thin content: ${url} → ${pageText.length} chars (likely JS-rendered)`);
     return errorResponse(
-      "Site returned no readable content (may require JavaScript or block bots)",
+      "This site builds its pages with JavaScript, so a server-side fetch sees no promotion text. Try a specific sale/landing page URL, or add the deal manually.",
       "thin_content",
       422
     );

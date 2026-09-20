@@ -482,7 +482,13 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         // older cached responses or a server that hasn't deployed it yet.
         const reason: DiscountScanErrorReason | undefined = typeof data?.reason === "string" ? data.reason : undefined;
         setStatuses((prev) => ({ ...prev, [url]: { state: "error", message: data.error ?? `HTTP ${res.status}`, reason } }));
-        setAnnouncement(`Scan failed for ${domainOf(url)}`);
+        // A site we can never read isn't a failed scan — announce it the same
+        // way the row renders it, so screen-reader users aren't told to retry.
+        setAnnouncement(
+          reason === "bot_protected" || reason === "corporate_redirect" || reason === "thin_content"
+            ? `Can't scan ${domainOf(url)}`
+            : `Scan failed for ${domainOf(url)}`
+        );
         return;
       }
       const result: DiscountScanResult = data.result;
@@ -688,7 +694,17 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
             // red "Failed". Re-checking either can never succeed — a bot wall
             // still blocks the next request, and a corporate redirect just
             // redirects again — so both get "Open site" instead of Re-check.
-            const cantScan = status.state === "error" && (status.reason === "bot_protected" || status.reason === "corporate_redirect");
+            const cantScan =
+              status.state === "error" &&
+              (status.reason === "bot_protected" ||
+                status.reason === "corporate_redirect" ||
+                status.reason === "thin_content");
+            // A JS-rendered page keeps Re-check (it can come back, and another
+            // path on the same site may render server-side) but still reads as
+            // "can't scan" rather than a red failure.
+            const unfetchable =
+              status.state === "error" &&
+              (status.reason === "bot_protected" || status.reason === "corporate_redirect");
             return (
               <div key={url} className="rounded-lg border border-border">
                 {/* Source row — wraps to a second line on narrow (≈390px) viewports
@@ -747,7 +763,7 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                       <Trash2 className="size-3.5" />
                     </Button>
                   )}
-                  {cantScan ? (
+                  {unfetchable ? (
                     // Re-checking can never succeed for either reason — link
                     // straight to the site instead of offering a dead-end button.
                     <a
