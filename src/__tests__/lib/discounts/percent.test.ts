@@ -77,4 +77,23 @@ describe("normalizeDiscountPercent", () => {
   it("passes through a plain raw percent when the only 折 token found (in context) is the invalid '10折'", () => {
     expect(normalizeDiscountPercent("20%", ["10折"])).toBe("20%");
   });
+
+  // A two-decimal-digit number preceding 折 (e.g. a mis-scanned longer number
+  // like "3.25折") isn't a valid 折 shorthand — the old regex misread it as
+  // "25折" → 75% off. Fail safely instead of guessing.
+  it("fails safely (null) for a 折 number with more than one decimal digit", () => {
+    expect(normalizeDiscountPercent("3.25折", [])).toBeNull();
+  });
+
+  it("fails safely (null) for a multi-decimal 折 token found in context too", () => {
+    expect(normalizeDiscountPercent(null, ["3.25折"])).toBeNull();
+  });
+
+  it("still converts a valid one-decimal 折 value (8.5折 == 85折)", () => {
+    expect(normalizeDiscountPercent("8.5折", [])).toBe("15%");
+  });
+
+  it("converts a single-digit 折 value (7折) to percent off", () => {
+    expect(normalizeDiscountPercent("7折", [])).toBe("30%");
+  });
 });

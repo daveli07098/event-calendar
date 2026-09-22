@@ -9,8 +9,14 @@
  * module exists to fix.
  */
 
-// Matches "3折", "85折", "8.5折" — one or two digits, optional one decimal.
-const ZHE_RE = /(\d{1,2}(?:\.\d)?)\s*折/;
+// Matches "3折", "85折", "8.5折" — one or two digits, optional decimal digits.
+// `(?<![\d.])` requires the digit run not be preceded by another digit or a
+// dot, so a longer decimal like "3.25折" doesn't get misread as "25折" (the
+// engine would otherwise happily start the match at the "25"). The full
+// decimal run is captured here and validated in extractZheOff() below — a
+// 折 shorthand only ever has at most one decimal digit (8.5折); two or more
+// means this was never a valid 折 value to begin with.
+const ZHE_RE = /(?<![\d.])(\d{1,2}(?:\.\d+)?)\s*折/;
 
 // "低至"/"最低" (Chinese) and "up to"/"as low as" (English) mean the stated
 // number is a ceiling on a range, not a flat rate — but ONLY when the marker
@@ -31,6 +37,10 @@ function zheToPercentOff(n: number): number {
 function extractZheOff(s: string): number | null {
   const match = ZHE_RE.exec(s);
   if (!match) return null;
+  // More than one decimal digit (e.g. "3.25" out of "3.25折") isn't a valid
+  // 折 shorthand — fail safely rather than guessing which part was meant.
+  const decimalDigits = match[1].split(".")[1];
+  if (decimalDigits && decimalDigits.length > 1) return null;
   const n = parseFloat(match[1]);
   if (!Number.isFinite(n) || n <= 0 || n >= 100) return null;
   // "10折" means paying 10/10 of the price — full price, i.e. NOT a
