@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SeatParseResult } from "@/lib/seat-parse";
 import { resolveSeatGeometry } from "@/lib/venue-seatmap/geometry";
 import { matchVenueConfig } from "@/lib/venue-seatmap/registry";
-import { buildBowl3D, type Bowl3DModel } from "@/lib/venue-seatmap/bowl3d";
+import { APPROXIMATE_BOWL, buildBowl3D, type Bowl3DModel } from "@/lib/venue-seatmap/bowl3d";
 import { Button } from "@/components/ui/button";
 
 /** Loaded lazily inside the effect — `three` must never be statically imported so the module
@@ -37,10 +37,19 @@ export interface SeatMap3DProps {
 
 type CameraMode = "bowl" | "seat";
 
-const TIER_COLORS = [0x64748b, 0x7c8ba1, 0x8b7cab, 0xa17c8b, 0x8ba17c, 0x7ca1a1];
+// One clearly distinct shade per tier (lower tiers darker, upper tiers lighter) so stacked
+// raked stands read as separate bands rather than one grey mass.
+const TIER_COLORS = [0x475569, 0x3f6690, 0x9aa3b5, 0xa78bfa, 0x7ca1a1, 0x8ba17c];
 const HIGHLIGHT_COLOR = 0xf59e0b; // amber — matches SeatMap's stage/marker accent
 const PITCH_COLOR = 0x059669; // emerald, matches SeatMap's pitch fill
+const GROUND_COLOR = 0x1e293b; // dark slate concourse under the whole bowl footprint
 const STAGE_COLOR = 0x7c3aed; // purple
+/** Canvas aspect (width / height) — landscape, used whenever the container has no CSS height
+ * of its own yet (and matches the container's own `aspectRatio` style below). */
+const CANVAS_ASPECT = 16 / 10;
+/** Seat marker radius in metres — deliberately oversized (the bowl view camera sits ~250 m
+ * away) so it stays visible as a dot rather than a sub-pixel speck. */
+const MARKER_RADIUS_M = 2.5;
 
 /** Probes a throwaway canvas (never the one we'll actually render into) so a failed probe
  * never leaves the real canvas half-initialized with the wrong context type. */
@@ -115,6 +124,10 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
 
       const canvas = document.createElement("canvas");
       canvas.setAttribute("aria-hidden", "true");
+      // Block-level so the canvas doesn't add an inline line-box descender under itself: with
+      // an inline canvas, container height = canvas height + a few px, which re-triggers the
+      // ResizeObserver below every frame and grows the canvas without bound.
+      canvas.style.display = "block";
 
       let localRenderer: InstanceType<ThreeNS["WebGLRenderer"]>;
       try {
@@ -131,8 +144,8 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
       scene.background = new THREE.Color(0x0b1220);
 
       const width = Math.max(container.clientWidth, 1);
-      const height = Math.max(container.clientHeight, 1) || 320;
-      const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 500);
+      const height = container.clientHeight > 0 ? container.clientHeight : Math.max(Math.round(width / CANVAS_ASPECT), 1);
+      const camera = new THREE.PerspectiveCamera(50, width / height, 0.5, 1000);
 
       localRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       localRenderer.setSize(width, height);
@@ -141,12 +154,26 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
       const orbitControls = new OrbitControls(camera, localRenderer.domElement);
       orbitControls.enableDamping = true;
 
-      // Lights
-      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-      const directional = new THREE.DirectionalLight(0xffffff, 0.9);
-      directional.position.set(20, 40, 20);
-      scene.add(ambient, directional);
-      disposables.push({ dispose: () => scene.remove(ambient, directional) });
+      // Lights — a sky/ground hemisphere fill plus a key light from high above, so the raked
+      // (tilted) tiers shade differently from the flat pitch and the rake reads in 3D.
+      const hemisphere = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.9);
+      const directional = new THREE.DirectionalLight(0xffffff, 1.6);
+      directional.position.set(40, 160, 90);
+      scene.add(hemisphere, directional);
+      disposables.push({ dispose: () => scene.remove(hemisphere, directional) });
+
+      // Ground — the bowl's whole outer footprint, so the gaps between pitch and tiers read as
+      // concourse rather than empty void. Sits just below the pitch to avoid z-fighting.
+      const groundGeo = new THREE.PlaneGeometry(
+        APPROXIMATE_BOWL.planOuter.width * APPROXIMATE_BOWL.scaleX,
+        APPROXIMATE_BOWL.planOuter.height * APPROXIMATE_BOWL.scaleZ,
+      );
+      const groundMat = new THREE.MeshStandardMaterial({ color: GROUND_COLOR, side: THREE.DoubleSide });
+      const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+      groundMesh.rotation.x = -Math.PI / 2;
+      groundMesh.position.y = -0.3;
+      scene.add(groundMesh);
+      disposables.push({ dispose: () => { groundGeo.dispose(); groundMat.dispose(); } });
 
       // Pitch
       const pitchGeo = new THREE.PlaneGeometry(model.pitch.width, model.pitch.length);
@@ -161,7 +188,9 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
         const stageGeo = new THREE.BoxGeometry(model.stage.width, model.stage.height, model.stage.depth);
         const stageMat = new THREE.MeshStandardMaterial({ color: STAGE_COLOR });
         const stageMesh = new THREE.Mesh(stageGeo, stageMat);
-        stageMesh.position.set(model.stage.center.x, model.stage.center.y + model.stage.height / 2, model.stage.center.z);
+        // `stage.center` is already the box's geometric centre (y = height / 2), so it sits on
+        // the ground as-is — no extra half-height offset.
+        stageMesh.position.set(model.stage.center.x, model.stage.center.y, model.stage.center.z);
         scene.add(stageMesh);
         disposables.push({ dispose: () => { stageGeo.dispose(); stageMat.dispose(); } });
       }
@@ -183,26 +212,41 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
         const geo = new THREE.BufferGeometry();
         geo.setAttribute("position", new THREE.BufferAttribute(model.seatBlock, 3));
         geo.computeVertexNormals();
-        const mat = new THREE.MeshStandardMaterial({ color: HIGHLIGHT_COLOR, side: THREE.DoubleSide, emissive: HIGHLIGHT_COLOR, emissiveIntensity: 0.25 });
+        // The patch is coplanar with its level's slab, so pull it towards the camera in depth
+        // (polygonOffset) or it z-fights with the slab and disappears.
+        const mat = new THREE.MeshStandardMaterial({
+          color: HIGHLIGHT_COLOR,
+          side: THREE.DoubleSide,
+          emissive: HIGHLIGHT_COLOR,
+          emissiveIntensity: 0.6,
+          polygonOffset: true,
+          polygonOffsetFactor: -4,
+          polygonOffsetUnits: -4,
+        });
         const mesh = new THREE.Mesh(geo, mat);
         scene.add(mesh);
         disposables.push({ dispose: () => { geo.dispose(); mat.dispose(); } });
       }
 
-      // Seat marker sphere
+      // Seat marker sphere — hidden in "From your seat" mode (the camera sits inside it there).
+      let marker: InstanceType<ThreeNS["Mesh"]> | null = null;
       if (model.seat) {
-        const markerGeo = new THREE.SphereGeometry(0.35, 16, 16);
-        const markerMat = new THREE.MeshStandardMaterial({ color: HIGHLIGHT_COLOR });
-        const marker = new THREE.Mesh(markerGeo, markerMat);
-        marker.position.set(model.seat.position.x, model.seat.position.y, model.seat.position.z);
+        const markerGeo = new THREE.SphereGeometry(MARKER_RADIUS_M, 20, 20);
+        const markerMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: HIGHLIGHT_COLOR, emissiveIntensity: 0.8 });
+        marker = new THREE.Mesh(markerGeo, markerMat);
+        marker.position.set(model.seat.position.x, model.seat.position.y + MARKER_RADIUS_M, model.seat.position.z);
         scene.add(marker);
         disposables.push({ dispose: () => { markerGeo.dispose(); markerMat.dispose(); } });
       }
 
-      // Initial "bowl" camera: above and beyond the far (non-stage) end, looking back at the
-      // pitch centre — stage end is -z per Bowl3DModel's coordinate convention.
-      const bowlEye = new THREE.Vector3(0, Math.max(model.pitch.length, model.pitch.width) * 0.55, model.pitch.length * 0.75);
-      const bowlTarget = new THREE.Vector3(0, 0, 0);
+      // Initial "bowl" camera: an elevated 3/4 overview from above and beyond the far
+      // (non-stage) end, slightly off-axis so the side stands' rake is visible, looking down
+      // (~45 deg) at a point just behind the pitch centre — stage end is -z per
+      // Bowl3DModel's coordinate convention. Distances scale with the pitch so the whole bowl
+      // (outer wall ~1.7x the pitch length, upper tier ~30 m tall) stays in frame.
+      const span = Math.max(model.pitch.length, model.pitch.width);
+      const bowlEye = new THREE.Vector3(span * 0.52, span * 1.62, span * 1.57);
+      const bowlTarget = new THREE.Vector3(0, 0, span * 0.05);
       camera.position.copy(bowlEye);
       orbitControls.target.copy(bowlTarget);
       camera.lookAt(bowlTarget);
@@ -245,10 +289,23 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
           ? new THREE.Vector3(model.seat.lookAt.x, model.seat.lookAt.y, model.seat.lookAt.z)
           : bowlTarget;
 
+        if (marker) marker.visible = next !== "seat";
+        // Stop any in-flight damping settle loop and flush leftover rotate/pan deltas from a
+        // previous drag (update() with damping off applies and zeroes them) — otherwise that
+        // residual momentum keeps turning the camera after it lands, so it no longer faces
+        // targetLook.
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        orbitControls.enableDamping = false;
+        orbitControls.update();
+
         if (!animate || reduceMotion) {
           camera.position.copy(targetEye);
           orbitControls.target.copy(targetLook);
           orbitControls.update();
+          orbitControls.enableDamping = true;
           renderOnce();
           return;
         }
@@ -269,6 +326,7 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
             tweenRafId = requestAnimationFrame(step);
           } else {
             tweenRafId = null;
+            orbitControls.enableDamping = true;
           }
         };
         if (tweenRafId !== null) cancelAnimationFrame(tweenRafId);
@@ -284,7 +342,12 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
           const entry = entries[0];
           if (!entry) return;
           const w = Math.max(Math.round(entry.contentRect.width), 1);
-          const h = Math.max(Math.round(entry.contentRect.height), 1);
+          const h = entry.contentRect.height > 0
+            ? Math.max(Math.round(entry.contentRect.height), 1)
+            : Math.max(Math.round(w / CANVAS_ASPECT), 1);
+          // Skip no-op resizes (e.g. the observer's initial callback) — each setSize would
+          // otherwise trigger another layout pass for nothing.
+          if (w === canvas.clientWidth && h === canvas.clientHeight) return;
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
           localRenderer.setSize(w, h);
@@ -360,7 +423,10 @@ export function SeatMap3D({ venue, seat, className, onUnavailable }: SeatMap3DPr
           ref={containerRef}
           role="img"
           aria-label="3D seat view of the venue bowl"
-          className="w-full aspect-video rounded-md border border-border bg-muted/40 overflow-hidden"
+          // Inline aspect-ratio (not a Tailwind class) so the height is fixed even before/without
+          // the stylesheet — the canvas sizes itself from this box. 16:10, capped for tall views.
+          style={{ aspectRatio: "16 / 10", maxHeight: 420 }}
+          className="w-full rounded-md border border-border bg-muted/40 overflow-hidden"
           data-testid="seat-map-3d-canvas-container"
         />
       )}

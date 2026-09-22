@@ -46,7 +46,7 @@ export interface Bowl3DSlab {
 export interface Bowl3DModel {
   pitch: { width: number; length: number }; // metres, x-extent and z-extent
   stage: { center: Vec3; width: number; depth: number; height: number } | null; // null when not default layout / none
-  slabs: Bowl3DSlab[]; // one per level band SeatMap.tsx would draw (confirmed ranges only)
+  slabs: Bowl3DSlab[]; // one per level band SeatMap.tsx would draw (confirmed ranges only); raked surface + back wall
   seatBlock: Float32Array | null; // triangles for just the seat's block patch (highlight), null if angleFraction null
   seat: { position: Vec3; eye: Vec3; lookAt: Vec3 } | null; // null when angleFraction is null (e.g. blocks 101-110) — never guess
   hedge: string[]; // user-facing caveats; ALWAYS includes the approximation notice, plus geometry.hedge
@@ -90,11 +90,13 @@ export const APPROXIMATE_BOWL = {
 
   // Approximate raked-seating base/rise per tier, in metres. Not measured — chosen to be a
   // plausible profile for a rounded-rect stadium bowl (floor near pitch level, Level 2 rising
-  // to a concourse, Level 5 rising much further to the roofline).
+  // to a concourse, Level 5 rising much further to the roofline). The plan's bands are only
+  // ~12-14 m deep horizontally at this scale, so the rises are kept to a ~40-50 deg rake — a
+  // taller rise reads as a near-vertical wall rather than a raked stand.
   tierHeightsM: {
     0: { baseM: 0, riseM: 1.2 }, // floor: a shallow standing platform, not raked seating
-    1: { baseM: 2, riseM: 12 }, // Level 2 tier: rises to ~14 m
-    2: { baseM: 20, riseM: 22 }, // Level 5 tier: rises to ~42 m
+    1: { baseM: 2, riseM: 10 }, // Level 2 tier: rises to ~12 m
+    2: { baseM: 16, riseM: 16 }, // Level 5 tier: rises to ~32 m
   } as Record<number, { baseM: number; riseM: number }>,
 
   // Height above the seat position for the "eye" viewpoint — an approximate seated eye-line,
@@ -181,6 +183,44 @@ function buildRakedStrip(
   return new Float32Array(verts);
 }
 
+/** Vertical back wall along a strip's outer edge (`depthOuter`), from `topY` down to `baseY`
+ * — closes each tier into a solid wedge so it reads as a stand rather than a floating sheet.
+ * Stops at the tier's own base (not the ground) so tiers never overlap vertically. Same
+ * non-indexed triangle-list layout as `buildRakedStrip`. */
+function buildBackWall(
+  t0: number,
+  t1: number,
+  depthOuter: number,
+  baseY: number,
+  topY: number,
+  steps: number,
+): Float32Array {
+  const pts = sampleArc(t0, t1, depthOuter, INNER, OUTER, steps);
+  const verts: number[] = [];
+  const push = (p: Point, y: number) => {
+    const v = toVec3(p, y);
+    verts.push(v.x, v.y, v.z);
+  };
+  for (let i = 0; i < steps; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    push(a, topY);
+    push(a, baseY);
+    push(b, topY);
+    push(a, baseY);
+    push(b, baseY);
+    push(b, topY);
+  }
+  return new Float32Array(verts);
+}
+
+function concatFloat32(a: Float32Array, b: Float32Array): Float32Array {
+  const out = new Float32Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
 // ---- Slabs (level bands) --------------------------------------------------------
 
 /** Mirrors SeatMap.tsx's level-band filter exactly: only a level with at least one CONFIRMED
@@ -196,7 +236,7 @@ function buildSlabs(config: VenueSeatMapConfig): Bowl3DSlab[] {
     if (!hasConfirmedRange(level)) continue;
     const [depthInner, depthOuter] = level.radiusRange;
     const { baseM, riseM } = tierHeights(level.tier);
-    const positions = buildRakedStrip(
+    const rake = buildRakedStrip(
       APPROXIMATE_BOWL.bandArcStart,
       APPROXIMATE_BOWL.bandArcEnd,
       depthInner,
@@ -205,6 +245,15 @@ function buildSlabs(config: VenueSeatMapConfig): Bowl3DSlab[] {
       baseM + riseM,
       APPROXIMATE_BOWL.arcSteps,
     );
+    const backWall = buildBackWall(
+      APPROXIMATE_BOWL.bandArcStart,
+      APPROXIMATE_BOWL.bandArcEnd,
+      depthOuter,
+      baseM,
+      baseM + riseM,
+      APPROXIMATE_BOWL.arcSteps,
+    );
+    const positions = concatFloat32(rake, backWall);
     slabs.push({ levelId: level.id, label: level.label, tier: level.tier, positions });
   }
   return slabs;
