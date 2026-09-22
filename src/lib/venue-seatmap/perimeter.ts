@@ -21,6 +21,14 @@ export interface RectSize {
   height: number; // long (side) edge
 }
 
+/**
+ * Plan-space bowl wall and pitch rects shared by the 2D SeatMap and the 3D bowl builder, so
+ * the two views place every block and seat identically. Unitless drawing units, not metres.
+ */
+export const PLAN_OUTER: RectSize = { width: 220, height: 260 };
+export const PLAN_INNER: RectSize = { width: 100, height: 150 }; // pitch boundary
+
+
 export interface Point {
   x: number;
   y: number;

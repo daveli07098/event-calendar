@@ -4,7 +4,7 @@ import type { SeatParseResult } from "@/lib/seat-parse";
 import type { StagePosition, ViewingAngleBucket } from "@/lib/venue-seatmap/types";
 import { DEFAULT_STAGE_POSITION, resolveSeatGeometry } from "@/lib/venue-seatmap/geometry";
 import { matchVenueConfig } from "@/lib/venue-seatmap/registry";
-import { bandPath, pointAtDepth, type RectSize } from "@/lib/venue-seatmap/perimeter";
+import { bandPath, pointAtDepth, PLAN_INNER, PLAN_OUTER } from "@/lib/venue-seatmap/perimeter";
 
 /**
  * Procedural 2D-SVG venue seat map. Consumes an already-parsed seat (from `parseSeat`, see
@@ -29,8 +29,8 @@ export interface SeatMapProps {
   className?: string;
 }
 
-const OUTER: RectSize = { width: 220, height: 260 };
-const INNER: RectSize = { width: 100, height: 150 }; // pitch boundary
+const OUTER = PLAN_OUTER;
+const INNER = PLAN_INNER; // pitch boundary
 const VIEWBOX_PAD = 24;
 const VIEW_W = OUTER.width + VIEWBOX_PAD * 2;
 const VIEW_H = OUTER.height + VIEWBOX_PAD * 2;

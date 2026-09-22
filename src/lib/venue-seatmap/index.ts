@@ -9,3 +9,5 @@ export { DEFAULT_ROW_SEQUENCE, defaultRowDepthFraction, bankedRowDepthFraction }
 export { pointOnPerimeter, pointAtDepth, sampleArc, pointsToPolylinePath, bandPath } from "./perimeter";
 export type { RectSize, Point } from "./perimeter";
 export { kaiTakStadium } from "./venues/kai-tak";
+export { buildBowl3D, APPROXIMATE_BOWL } from "./bowl3d";
+export type { Vec3, Bowl3DSlab, Bowl3DModel } from "./bowl3d";
