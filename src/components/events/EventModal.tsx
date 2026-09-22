@@ -47,6 +47,13 @@ const SeatMap = dynamic(
   { ssr: false },
 );
 
+// Same lazy-loading rationale as SeatMap above, plus `three` itself (see SeatMap3D.tsx's own
+// header) — none of this belongs in the main chunk until someone actually opens the 3D view.
+const SeatMap3D = dynamic(
+  () => import("@/components/venue/SeatMap3D").then((m) => m.SeatMap3D),
+  { ssr: false },
+);
+
 interface RelatedEvent {
   id: string;
   title: string;
@@ -208,6 +215,27 @@ export function EventModal({
   // venue-specific and the per-venue config lives in the seat-map worker's
   // files, not here — see seat-parse.ts header point 1.
   const seatParseResult = useMemo(() => (seat.trim() ? parseSeat(seat) : null), [seat]);
+
+  // Whether `location` matches a venue with a seat-map config — gates the 2D/3D toggle below.
+  // Loaded via a dynamic import (not a static `matchVenueConfig` import) so the per-venue
+  // geometry registry stays out of this modal's main chunk, same reasoning as the dynamic()
+  // wrappers above; only fires when there's a seat to map in the first place.
+  const [hasSeatMapConfig, setHasSeatMapConfig] = useState(false);
+  const [seatMapView, setSeatMapView] = useState<"2d" | "3d">("2d");
+  useEffect(() => {
+    if (!seatParseResult) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear the toggle when there's no seat to map
+      setHasSeatMapConfig(false);
+      return;
+    }
+    let cancelled = false;
+    import("@/lib/venue-seatmap/registry").then(({ matchVenueConfig }) => {
+      if (!cancelled) setHasSeatMapConfig(matchVenueConfig(location) !== null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [location, seatParseResult]);
 
   // Related events — events sharing this one's Ticket URL, shown above the
   // description so the user can jump between them. Re-derived whenever the
@@ -834,11 +862,42 @@ export function EventModal({
                 className={`h-8 text-sm${readOnly ? " cursor-default select-text" : ""}`}
               />
               {seatParseResult && <SeatBreakdown result={seatParseResult} />}
+              {/* 2D/3D toggle only once we know the venue has a seat-map config at all —
+                  hidden for unmatched venues so there's nothing to switch between. Defaults
+                  to 2D; falls back to 2D automatically if the 3D view reports itself
+                  unavailable (e.g. no WebGL on this device). */}
+              {seatParseResult && hasSeatMapConfig && (
+                <div className="flex gap-1 mb-1">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={seatMapView === "2d" ? "secondary" : "ghost"}
+                    onClick={() => setSeatMapView("2d")}
+                  >
+                    2D
+                  </Button>
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={seatMapView === "3d" ? "secondary" : "ghost"}
+                    onClick={() => setSeatMapView("3d")}
+                  >
+                    3D
+                  </Button>
+                </div>
+              )}
               {/* Renders nothing unless the venue has a seat-map config AND the
                   block resolves — an unknown venue deliberately shows no map
                   rather than a generic bowl with a guessed marker. */}
-              {seatParseResult && (
+              {seatParseResult && (seatMapView === "2d" || !hasSeatMapConfig) && (
                 <SeatMap venue={location} seat={seatParseResult} />
+              )}
+              {seatParseResult && hasSeatMapConfig && seatMapView === "3d" && (
+                <SeatMap3D
+                  venue={location}
+                  seat={seatParseResult}
+                  onUnavailable={() => setSeatMapView("2d")}
+                />
               )}
             </div>
           )}
