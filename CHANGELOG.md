@@ -3,6 +3,7 @@
 - feat(seats): **3D bowl model** — `buildBowl3D()` lifts the fractional 2D seat-map geometry into raked slabs, a stage box, the seat's block patch and a seat/eye/look-at camera; every invented metric is in `APPROXIMATE_BOWL` and the model always carries a schematic-simulation hedge; unconfirmed blocks (Kai Tak 101–110) get no seat or camera ([61e8809])
 - feat(seats): **lazy 3D venue view with "From your seat"** — 2D/3D toggle in the event modal; three.js loads only when 3D is opened (own chunk, never server-side), render-on-demand, reduced-motion aware, full GPU cleanup, falls back to 2D without WebGL ([63cbf49])
 ### Fixed
+- fix(seats): the 3D canvas grew every frame through a ResizeObserver loop, pushing the seat camera's aim off-screen; also reframed the bowl overview, gave tiers a readable rake with back walls, and made the seat highlight and marker visible. Checked visually in headless Chrome ([c6216e2])
 - fix(discounts): an AI date like "Ongoing" made `Intl.DateTimeFormat` throw, and because results persist in localStorage the row crashed on every load. The route now keeps only real `YYYY-MM-DD` dates and the UI skips invalid ones ([5a0442b])
 - fix(discounts): a scan aborted as *superseded* overwrote the newer scan with a false "Network error" ([5a0442b])
 - fix(discounts): offers/items the model repeats are deduped server-side ([5a0442b])
