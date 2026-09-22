@@ -326,6 +326,32 @@ considered in both matching passes above. To make a venue render a built-in seat
 its name or an alias must contain a string from the matching
 `VenueSeatMapConfig.aliases` in `src/lib/venue-seatmap/venues/`.
 
+### 3D bowl view (`SeatMap3D`)
+
+The event modal's seat field offers a **2D / 3D toggle** for any venue with a seat-map
+config (today only Kai Tak Stadium). 2D is the default.
+
+- **Geometry** — `src/lib/venue-seatmap/bowl3d.ts` (`buildBowl3D(config, geometry)`) is pure:
+  it reuses the 2D perimeter math (`PLAN_OUTER` / `PLAN_INNER` in `perimeter.ts`, shared with
+  `SeatMap.tsx`) and lifts it into metres, origin at pitch centre, y up, stage at -z. Output is
+  mesh-ready triangle lists per level band, the stage box, the seat's block patch, and a
+  seat/eye/look-at camera.
+- **Approximation, stated not hidden** — the seat-map data is fractional (0..1); there are no
+  measured Kai Tak dimensions. Every invented number (68×105 m pitch, tier base heights and
+  rise, 1.2 m eye height, stage size) lives in `APPROXIMATE_BOWL`, and the model's `hedge`
+  always leads with a "schematic simulation" notice that the UI prints under the canvas.
+  Real measurements would only change that object.
+- **Unconfirmed blocks stay unguessed** — Kai Tak 101–110 resolve with `angleFraction: null`,
+  so `seat`/`seatBlock` are null and "From your seat" is disabled with the geometry hedge shown.
+- **Loading** — `SeatMap3D` is mounted via `next/dynamic({ ssr: false })` and imports `three` +
+  `three/addons/controls/OrbitControls.js` inside an effect, so three.js (~780 KB) is its own
+  lazily-loaded chunk: never in the server bundle, the root chunks or the EventModal chunk.
+- **Rendering** — render-on-demand (no perpetual loop), DPR ≤ 2, camera tween skipped under
+  `prefers-reduced-motion`, full dispose + `forceContextLoss` on unmount. If WebGL is
+  unavailable it shows "3D view unavailable on this device" and EventModal falls back to 2D.
+- `stagePosition` isn't passed by EventModal to either view; wire it into both together or
+  they will disagree.
+
 ## 4. Theme boot script
 
 Every page (via `src/app/layout.tsx`) inherits a boot script eliminating the light→dark
