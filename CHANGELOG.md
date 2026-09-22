@@ -1,3 +1,17 @@
+## [2026-09-23] — Session: 3D venue view, discount scanner hardening
+### Added
+- feat(seats): **3D bowl model** — `buildBowl3D()` lifts the fractional 2D seat-map geometry into raked slabs, a stage box, the seat's block patch and a seat/eye/look-at camera; every invented metric is in `APPROXIMATE_BOWL` and the model always carries a schematic-simulation hedge; unconfirmed blocks (Kai Tak 101–110) get no seat or camera ([61e8809])
+- feat(seats): **lazy 3D venue view with "From your seat"** — 2D/3D toggle in the event modal; three.js loads only when 3D is opened (own chunk, never server-side), render-on-demand, reduced-motion aware, full GPU cleanup, falls back to 2D without WebGL ([63cbf49])
+### Fixed
+- fix(discounts): an AI date like "Ongoing" made `Intl.DateTimeFormat` throw, and because results persist in localStorage the row crashed on every load. The route now keeps only real `YYYY-MM-DD` dates and the UI skips invalid ones ([5a0442b])
+- fix(discounts): a scan aborted as *superseded* overwrote the newer scan with a false "Network error" ([5a0442b])
+- fix(discounts): offers/items the model repeats are deduped server-side ([5a0442b])
+- fix(discounts): "3.25折" matched as "25折" → 75% off; the 折 parser now needs a clean number boundary ([bd57925])
+### Maintenance
+- test(discounts): typed the superseding resolver so `tsc` passes ([6a4f2f2])
+- docs: 3D bowl view section in `docs/event-section.md` ([23f6a57])
+- refactor(seats): plan rects shared from `perimeter.ts` so 2D and 3D can't drift ([61e8809])
+
 ## [2026-09-20] — Session: Discount Sale — bot walls, server-rendered sources, account-backed source list
 ### Fixed
 - fix(discounts): **the adidas 403 is not retryable and never was.** adidas.com, adidas.com.hk and fanatics.com sit behind Akamai's JavaScript-sensor challenge; tested across six header variants and two HTTP stacks, no server-side request reaches real content. Sending a full Chrome fingerprint turns the 403 into a *200 carrying the same block page*, which would be worse than failing — so those headers are deliberately not sent, and a Googlebot UA is never used as a fallback (it draws a harder block). Such sources now render as an amber "Can't scan" with the cause named and an Open-site link instead of a red Re-check that can only fail again ([1b96ee1], [5e173e4])
