@@ -577,7 +577,7 @@ describe("DiscountSection", () => {
   // with a false "Network error".
   it("does not overwrite a newer superseding request's status with a false 'Network error'", async () => {
     let callIndex = 0;
-    let resolveSuperseding: (() => void) | null = null;
+    let resolveSuperseding = null as (() => void) | null;
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const method = (init?.method ?? "GET").toUpperCase();
       if (url === "/api/calendars") return Promise.resolve({ ok: true, json: async () => CALENDARS } as Response);
