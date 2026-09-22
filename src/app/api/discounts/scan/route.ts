@@ -37,6 +37,64 @@ function safeHost(urlStr: string): string {
   }
 }
 
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Accepts an AI-returned date only when it's a real calendar date in strict
+ * "YYYY-MM-DD" form — anything else ("Ongoing", "TBD", "Sept 2026", or a
+ * non-existent date like "2026-02-30") becomes null. The client persists
+ * whatever this returns straight into localStorage and feeds it to
+ * `Intl.DateTimeFormat`, which throws a RangeError on an Invalid Date — a
+ * loose value here would crash-loop the whole Discount Sale section on every
+ * mount of an already-saved result.
+ */
+function isoDateOnly(v: string | null): string | null {
+  if (!v) return null;
+  const m = ISO_DATE_RE.exec(v);
+  if (!m) return null;
+  const [, yStr, moStr, dStr] = m;
+  const y = Number(yStr);
+  const mo = Number(moStr);
+  const d = Number(dStr);
+  // Reject dates that don't round-trip (e.g. "2026-02-30") rather than
+  // trusting `new Date()`'s lenient month/day overflow rollover.
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  const isReal = date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+  return isReal ? v : null;
+}
+
+/** Normalises a string for exact-duplicate comparison: trim, lowercase, collapse internal whitespace. */
+function dedupeKeyPart(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Drops offers that exactly duplicate an earlier one once label/detail/
+ * discountPercent/promoCode are normalised — the AI sometimes restates the
+ * same promotion twice (once per section/language of the page, or with only
+ * whitespace/casing differences) instead of merging them into one entry.
+ */
+function dedupeOffers(offers: readonly DiscountOffer[]): DiscountOffer[] {
+  const seen = new Set<string>();
+  return offers.filter((o) => {
+    const key = [o.label, o.detail, o.discountPercent, o.promoCode].map(dedupeKeyPart).join("\u0000");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Same idea as dedupeOffers() — DiscountItem has no separate "title" field, so name + url is the key. */
+function dedupeItems(items: readonly DiscountItem[]): DiscountItem[] {
+  const seen = new Set<string>();
+  return items.filter((it) => {
+    const key = [it.name, it.url].map(dedupeKeyPart).join("\u0000");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** Builds the honest, non-retryable error response for a detected block reason. */
 function blockErrorResponse(reason: "bot_protected" | "corporate_redirect", url: string, finalUrl: string) {
   if (reason === "bot_protected") {
@@ -328,19 +386,21 @@ export async function POST(req: NextRequest) {
     // AI sometimes manufactures "offers" from nav-link labels alone (e.g.
     // nike.com's "Sale Shoes", "Student Discount" menu entries with no
     // percentage/code/price anywhere on the page). See lib/discounts/offers.ts.
-    const offers = filterConcreteOffers(rawOffers, evidence);
-    const items: DiscountItem[] = Array.isArray(data.items)
-      ? (data.items as Array<Record<string, unknown>>)
-          .slice(0, 5)
-          .map((it) => ({
-            name: String(it.name ?? "").trim(),
-            price: str(it.price),
-            originalPrice: str(it.originalPrice),
-            url: null as string | null,
-          }))
-          .filter((it) => it.name)
-          .map((it) => ({ ...it, url: matchItemLink(it.name, allLinks) }))
-      : [];
+    const offers = dedupeOffers(filterConcreteOffers(rawOffers, evidence));
+    const items: DiscountItem[] = dedupeItems(
+      Array.isArray(data.items)
+        ? (data.items as Array<Record<string, unknown>>)
+            .slice(0, 5)
+            .map((it) => ({
+              name: String(it.name ?? "").trim(),
+              price: str(it.price),
+              originalPrice: str(it.originalPrice),
+              url: null as string | null,
+            }))
+            .filter((it) => it.name)
+            .map((it) => ({ ...it, url: matchItemLink(it.name, allLinks) }))
+        : []
+    );
 
     const title = str(data.title);
     const discountSummary = str(data.discountSummary);
@@ -368,8 +428,8 @@ export async function POST(req: NextRequest) {
       discountSummary,
       discountPercent,
       promoCode: str(data.promoCode),
-      startDate: str(data.startDate),
-      endDate: str(data.endDate),
+      startDate: isoDateOnly(str(data.startDate)),
+      endDate: isoDateOnly(str(data.endDate)),
       categories: strArr(data.categories, 8),
       offers,
       evidence,

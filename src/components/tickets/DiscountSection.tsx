@@ -37,13 +37,29 @@ function daysUntil(endDate: string | null): number | null {
 }
 
 /**
- * Parses a "YYYY-MM-DD" as a date-only value in the device's local timezone.
+ * Parses a "YYYY-MM-DD" as a date-only value in the device's local timezone,
+ * or null when it isn't a real, strict "YYYY-MM-DD" calendar date.
  * `new Date("YYYY-MM-DD")` parses as UTC midnight, which shifts a day
  * backwards in any timezone west of UTC — split the string instead.
+ *
+ * The server (route.ts's isoDateOnly()) already rejects anything but a
+ * strict, real calendar date before persisting a fresh scan result — but
+ * results are also persisted verbatim in localStorage, so an entry saved
+ * before that server-side guard existed (an AI-returned "Ongoing"/"TBD"/
+ * "Sept 2026") can still be sitting there. Returning null here instead of an
+ * Invalid Date lets formatValidity() skip it instead of crash-looping the
+ * whole section on every mount via Intl.DateTimeFormat.
  */
-function parseDateOnly(dateStr: string): Date {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
+function parseDateOnly(dateStr: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (!m) return null;
+  const [, yStr, moStr, dStr] = m;
+  const y = Number(yStr);
+  const mo = Number(moStr);
+  const d = Number(dStr);
+  const date = new Date(y, mo - 1, d);
+  const isReal = date.getFullYear() === y && date.getMonth() === mo - 1 && date.getDate() === d;
+  return isReal ? date : null;
 }
 
 /** YYYY-MM-DD in the device's local calendar, for seeding date-only inputs. */
@@ -54,19 +70,24 @@ function localDateOnly(d: Date): string {
 
 const CHIP_DATE_FORMAT: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
 
-/** "Until 30 Sep" / "15–30 Sep" validity chip from a startDate/endDate pair. */
+/**
+ * "Until 30 Sep" / "15–30 Sep" validity chip from a startDate/endDate pair.
+ * Either value can be an invalid/non-calendar string on an already-persisted
+ * result (see parseDateOnly()) — an invalid side is skipped rather than fed
+ * to Intl.DateTimeFormat, which throws a RangeError on an Invalid Date.
+ */
 function formatValidity(startDate: string | null, endDate: string | null): string | null {
-  if (!startDate && !endDate) return null;
+  const start = startDate ? parseDateOnly(startDate) : null;
+  const end = endDate ? parseDateOnly(endDate) : null;
+  if (!start && !end) return null;
   const fmt = new Intl.DateTimeFormat(undefined, CHIP_DATE_FORMAT);
-  if (startDate && endDate && startDate !== endDate) {
-    const start = parseDateOnly(startDate);
-    const end = parseDateOnly(endDate);
+  if (start && end && startDate !== endDate) {
     if (typeof fmt.formatRange === "function") return fmt.formatRange(start, end);
     return `${fmt.format(start)} – ${fmt.format(end)}`;
   }
-  const only = endDate ?? startDate;
+  const only = end ?? start;
   if (!only) return null;
-  return `Until ${fmt.format(parseDateOnly(only))}`;
+  return `Until ${fmt.format(only)}`;
 }
 
 const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -539,6 +560,13 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       if (data.aiQuota) onQuotaUpdate?.(data.aiQuota);
       if (isPaste) closePasteDialog();
     } catch {
+      if (signal.aborted && signal.reason === "superseded") {
+        // A newer request for this same source (e.g. from "Check all" moving
+        // on, or another click) already took over — that request owns this
+        // row's status now. Writing here would race it and can clobber a
+        // just-arrived "done"/"scanning" state with a false "Network error".
+        return;
+      }
       if (signal.aborted && signal.reason === "cancel") {
         // User cancelled — back to idle rather than showing an error state.
         setStatuses((prev) => ({ ...prev, [url]: { state: "idle" } }));

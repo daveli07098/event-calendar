@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { DiscountSection } from "@/components/tickets/DiscountSection";
 import { toast } from "sonner";
@@ -269,6 +269,47 @@ describe("DiscountSection", () => {
     }
   });
 
+  // Regression guard: a persisted result with a non-ISO startDate/endDate
+  // (the AI returns "Ongoing"/"TBD"/"Sept 2026" sometimes) used to throw a
+  // RangeError out of Intl.DateTimeFormat on every mount, crash-looping the
+  // whole section. parseDateOnly()/formatValidity() must skip it instead.
+  it("renders a persisted result with a non-ISO startDate ('Ongoing') without crashing", async () => {
+    const result = baseResult({ startDate: "Ongoing", endDate: "2026-09-30" });
+    localStorage.setItem(
+      "discount-results",
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
+    );
+    vi.stubGlobal("fetch", fetchStub());
+
+    render(<DiscountSection />);
+
+    // The section survived and rendered the result — proof the render path
+    // didn't throw. The invalid startDate is simply dropped from the chip:
+    // endDate alone still yields "Until 30 Sep" via the single-date branch.
+    await screen.findByText("marathonsports.hkstore.com");
+    expect(screen.getAllByText("up to 70%").length).toBeGreaterThan(0);
+    expect(screen.getByText(/^checked /i)).toBeInTheDocument();
+    const expectedUntil = `Until ${chipFmt.format(new Date(2026, 8, 30))}`;
+    await waitFor(() => {
+      expect(screen.getByText(expectedUntil)).toBeInTheDocument();
+    });
+  });
+
+  it("renders a persisted result with both startDate and endDate non-ISO, with no validity chip at all", async () => {
+    const result = baseResult({ startDate: "Ongoing", endDate: "TBD" });
+    localStorage.setItem(
+      "discount-results",
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
+    );
+    vi.stubGlobal("fetch", fetchStub());
+
+    render(<DiscountSection />);
+
+    await screen.findByText("marathonsports.hkstore.com");
+    expect(screen.getAllByText("up to 70%").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^until/i)).not.toBeInTheDocument();
+  });
+
   it("renders the three server-rendered HK default sources, not the JS-rendered/blocked ones", async () => {
     vi.stubGlobal("fetch", fetchStub());
 
@@ -525,5 +566,72 @@ describe("DiscountSection", () => {
     const openSite = screen.getByRole("link", { name: /open site/i });
     expect(openSite).toHaveAttribute("href", "https://gigasports.hkstore.com/gigasports_tc_hk/");
     expect(screen.queryByRole("button", { name: /re-check/i })).not.toBeInTheDocument();
+  });
+
+  // Regression guard for the "superseded" abort race: useAbortableRequest
+  // aborts an in-flight request under the same key (source URL) with reason
+  // "superseded" as soon as a NEWER request for that same source starts (e.g.
+  // "Check all" reaching a source that's already mid single-row scan). The
+  // older request's catch block must not write anything — it no longer owns
+  // this row's status — or it clobbers whatever the newer request is doing
+  // with a false "Network error".
+  it("does not overwrite a newer superseding request's status with a false 'Network error'", async () => {
+    let callIndex = 0;
+    let resolveSuperseding: (() => void) | null = null;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url === "/api/calendars") return Promise.resolve({ ok: true, json: async () => CALENDARS } as Response);
+      if (url === "/api/discounts/sources") return Promise.resolve({ ok: true, json: async () => ({ sources: [] }) } as Response);
+      if (url === "/api/discounts/scan" && method === "POST") {
+        callIndex += 1;
+        if (callIndex === 1) {
+          // The first, single-row scan of MARATHON — this is the one that
+          // gets superseded. A real fetch rejects when its signal aborts;
+          // mirror that so the component's catch block actually runs.
+          return new Promise((_, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+          });
+        }
+        if (callIndex === 2) {
+          // "Check all" reaching MARATHON — the newer request that supersedes
+          // call #1. Stays pending so the intermediate "scanning" state (after
+          // call #1's abort settles) can be asserted before it resolves.
+          return new Promise<Response>((resolve) => {
+            resolveSuperseding = () => resolve({ ok: true, json: async () => ({ result: baseResult() }) } as Response);
+          });
+        }
+        // "Check all" continuing on to gigasports/skechers — resolve normally
+        // so they don't pollute a page-wide "Network error"/"Failed" check.
+        return Promise.resolve({ ok: true, json: async () => ({ result: baseResult({ sourceUrl: url }) }) } as Response);
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<DiscountSection />);
+    const user = userEvent.setup();
+    const [firstCheck] = await screen.findAllByRole("button", { name: /^check$/i });
+    await user.click(firstCheck); // kicks off call #1 (pending; aborts once superseded)
+
+    // "Check all" is only disabled while a Check-all loop is already running,
+    // not while a single row is mid-scan — reachable here.
+    await user.click(screen.getByRole("button", { name: /^check all$/i }));
+
+    // Flush the microtask/macrotask queue so call #1's abort → rejection →
+    // catch block settles before asserting the intermediate state.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(screen.queryByText("Network error")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/scanning marathonsports/i);
+
+    // Resolve the superseding request — the row should land on its real
+    // result, not an error the older, aborted request would have written.
+    resolveSuperseding?.();
+    await waitFor(() => {
+      expect(screen.getAllByText("up to 70%").length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText("Network error")).not.toBeInTheDocument();
   });
 });

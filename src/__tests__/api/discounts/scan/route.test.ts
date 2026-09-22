@@ -189,4 +189,80 @@ describe("POST /api/discounts/scan — pasted page content", () => {
     expect(safeFetch).toHaveBeenCalled();
     expect(assertPublicUrl).toHaveBeenCalled();
   });
+
+  describe("startDate/endDate — strict YYYY-MM-DD only", () => {
+    it("drops a non-ISO date like 'Ongoing' to null instead of persisting it", async () => {
+      mockAiData.mockReturnValue(aiOfferData({ startDate: "Ongoing", endDate: "TBD" }));
+      const res = await POST(makeReq({ url: URL, pageContent: PASTED_TEXT }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.result.startDate).toBeNull();
+      expect(json.result.endDate).toBeNull();
+    });
+
+    it("drops a non-existent calendar date (2026-02-30) to null", async () => {
+      mockAiData.mockReturnValue(aiOfferData({ startDate: "2026-02-30", endDate: null }));
+      const res = await POST(makeReq({ url: URL, pageContent: PASTED_TEXT }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.result.startDate).toBeNull();
+    });
+
+    it("keeps a valid strict YYYY-MM-DD date unchanged", async () => {
+      mockAiData.mockReturnValue(aiOfferData({ startDate: "2026-09-01", endDate: "2026-09-30" }));
+      const res = await POST(makeReq({ url: URL, pageContent: PASTED_TEXT }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.result.startDate).toBe("2026-09-01");
+      expect(json.result.endDate).toBe("2026-09-30");
+    });
+  });
+
+  describe("dedup — exact-duplicate offers/items", () => {
+    it("drops an offer that duplicates an earlier one once normalised (case/whitespace only)", async () => {
+      mockAiData.mockReturnValue(
+        aiOfferData({
+          offers: [
+            {
+              label: "Storewide sale",
+              detail: "50% off everything",
+              discountPercent: "50%",
+              promoCode: "SAVE50",
+              minSpend: null,
+              audience: "all",
+              url: 0,
+            },
+            {
+              label: "  STOREWIDE   sale ",
+              detail: "50%   off everything",
+              discountPercent: "50%",
+              promoCode: "save50",
+              minSpend: null,
+              audience: "all",
+              url: 0,
+            },
+          ],
+        })
+      );
+      const res = await POST(makeReq({ url: URL, pageContent: PASTED_HTML }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.result.offers).toHaveLength(1);
+    });
+
+    it("drops an item that duplicates an earlier one once normalised (name + url)", async () => {
+      mockAiData.mockReturnValue(
+        aiOfferData({
+          items: [
+            { name: "Air Max 90", price: "$90", originalPrice: "$120" },
+            { name: "  air  max   90 ", price: "$90", originalPrice: "$120" },
+          ],
+        })
+      );
+      const res = await POST(makeReq({ url: URL, pageContent: PASTED_TEXT }));
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.result.items).toHaveLength(1);
+    });
+  });
 });
