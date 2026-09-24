@@ -1,10 +1,11 @@
 "use client";
 
 import type { SeatParseResult } from "@/lib/seat-parse";
-import type { StagePosition, ViewingAngleBucket } from "@/lib/venue-seatmap/types";
-import { DEFAULT_STAGE_POSITION, resolveSeatGeometry } from "@/lib/venue-seatmap/geometry";
-import { matchVenueConfig } from "@/lib/venue-seatmap/registry";
-import { bandPath, pointAtDepth, PLAN_INNER, PLAN_OUTER } from "@/lib/venue-seatmap/perimeter";
+import type { LevelConfig, StagePosition, VenueSeatMapConfig, ViewingAngleBucket } from "@/lib/venue-seatmap/types";
+import { DEFAULT_STAGE_POSITION, isFloorLevel, layoutOf, locateBlock, resolveSeatGeometry, THEATRE_HEDGE } from "@/lib/venue-seatmap/geometry";
+import { configForVenue } from "@/lib/venue-seatmap/registry";
+import { bandPath, floorBandRect, perimeterKindFor, planRectsFor, ringPath, seatPlanPoint } from "@/lib/venue-seatmap/perimeter";
+import { hasConfirmedRange } from "@/lib/venue-seatmap/bowl3d";
 
 /**
  * Procedural 2D-SVG venue seat map. Consumes an already-parsed seat (from `parseSeat`, see
@@ -23,17 +24,16 @@ export interface SeatMapProps {
   venue: string | null | undefined;
   /** Already-parsed seat, e.g. EventModal's `seatParseResult`. */
   seat: SeatParseResult | null | undefined;
+  /** An explicit venue config (e.g. one drafted from an uploaded seating plan). When given it
+   * is used instead of matching `venue` by name; `venue` stays the fallback. */
+  config?: VenueSeatMapConfig | null;
   /** Defaults to the venue's documented default concert layout — see geometry.ts. Pass the
    * real value for an event known to use a different configuration (four-sided, sports). */
   stagePosition?: StagePosition;
   className?: string;
 }
 
-const OUTER = PLAN_OUTER;
-const INNER = PLAN_INNER; // pitch boundary
 const VIEWBOX_PAD = 24;
-const VIEW_W = OUTER.width + VIEWBOX_PAD * 2;
-const VIEW_H = OUTER.height + VIEWBOX_PAD * 2;
 
 const VIEWING_ANGLE_LABEL: Record<ViewingAngleBucket, string> = {
   "front-on": "front-on",
@@ -46,14 +46,35 @@ function toAbs(p: { x: number; y: number }): { x: number; y: number } {
   return { x: p.x + VIEWBOX_PAD, y: p.y + VIEWBOX_PAD };
 }
 
-export function SeatMap({ venue, seat, stagePosition, className }: SeatMapProps) {
+/** A floor-kind level's blocks in front-to-back order (confirmed ranges only), each with its
+ * own range's size so `floorBandRect` stacks them the same way bowl3d.ts does. */
+function floorBlocksOf(level: LevelConfig): { label: string; index: number; count: number }[] {
+  const ranges: string[][] = [
+    ...level.blockNumberRanges
+      .filter((r) => r.positionConfidence === "confirmed")
+      .map((r) => Array.from({ length: r.max - r.min + 1 }, (_, i) => String(r.min + i))),
+    ...(level.blockLabelRanges ?? []).filter((r) => r.positionConfidence === "confirmed").map((r) => r.labels),
+  ];
+  return ranges.flatMap((labels) => labels.map((label, index) => ({ label, index, count: labels.length })));
+}
+
+export function SeatMap({ venue, seat, config, stagePosition, className }: SeatMapProps) {
   if (!seat || seat.status === "unparseable") return null;
 
-  const venueConfig = matchVenueConfig(venue);
+  const venueConfig = configForVenue(venue, config);
   if (!venueConfig) {
     return (
       <p className={`text-xs text-muted-foreground/70 ${className ?? ""}`} data-testid="seat-map-empty">
         No seat map available for this venue yet.
+      </p>
+    );
+  }
+
+  // Theatre layouts aren't projected (see geometry.ts) — a short muted note, never a bowl.
+  if (layoutOf(venueConfig) === "theatre") {
+    return (
+      <p className={`text-xs text-muted-foreground/70 ${className ?? ""}`} data-testid="seat-map-theatre">
+        {venueConfig.name}: {THEATRE_HEDGE}
       </p>
     );
   }
@@ -67,13 +88,29 @@ export function SeatMap({ venue, seat, stagePosition, className }: SeatMapProps)
     );
   }
 
+  const { outer: OUTER, inner: INNER } = planRectsFor(venueConfig); // INNER = pitch / floor boundary
+  const perimeterKind = perimeterKindFor(venueConfig);
+  const isCentreStage = layoutOf(venueConfig) === "bowl-centre-stage";
+  const VIEW_W = OUTER.width + VIEWBOX_PAD * 2;
+  const VIEW_H = OUTER.height + VIEWBOX_PAD * 2;
+
   const isDefaultLayout = geometry.isDefaultStageLayout;
-  const marker = geometry.angleFraction !== null
-    ? toAbs(pointAtDepth(geometry.angleFraction, geometry.depthFraction, INNER, OUTER))
-    : null;
-  const stageWidth = OUTER.width * 0.32;
-  const stageX = VIEWBOX_PAD + (OUTER.width - stageWidth) / 2;
-  const stageY = VIEWBOX_PAD + OUTER.height - 6;
+  const markerLocal = seatPlanPoint(venueConfig, geometry);
+  const marker = markerLocal ? toAbs(markerLocal) : null;
+  const seatLocation = locateBlock(venueConfig, geometry.block);
+  // End stage: an 8-unit strip at the open short end. Centre stage: a compact square in the
+  // middle of the floor.
+  const stageRect = isCentreStage
+    ? (() => {
+        const side = Math.min(INNER.width, INNER.height) * 0.28;
+        return { x: VIEWBOX_PAD + (OUTER.width - side) / 2, y: VIEWBOX_PAD + (OUTER.height - side) / 2, width: side, height: side };
+      })()
+    : { x: VIEWBOX_PAD + (OUTER.width - OUTER.width * 0.32) / 2, y: VIEWBOX_PAD + OUTER.height - 6, width: OUTER.width * 0.32, height: 8 };
+  // Level bands span the U with a small gap at the stage seam, or (centre stage) a closed ring.
+  const levelBandPath = (depthInner: number, depthOuter: number) =>
+    perimeterKind === "four-sided"
+      ? ringPath(depthInner, depthOuter, INNER, OUTER)
+      : bandPath(0.02, 0.98, depthInner, depthOuter, INNER, OUTER);
 
   const angleLabel = geometry.viewingAngle ? VIEWING_ANGLE_LABEL[geometry.viewingAngle] : null;
   const distancePhrase = { close: "close to", mid: "a moderate distance from", far: "far from" }[geometry.distanceLabel];
@@ -86,8 +123,9 @@ export function SeatMap({ venue, seat, stagePosition, className }: SeatMapProps)
 
         {/* Level bands */}
         {venueConfig.levels.map((level) => {
-          const confirmedRange = level.blockNumberRanges.find((r) => r.positionConfidence === "confirmed");
-          if (!confirmedRange) return null; // no known arc position for this level's blocks — nothing safe to draw as a band
+          // Floor levels are drawn as blocks on the floor below; a stand level with no known
+          // arc position for its blocks has nothing safe to draw as a band.
+          if (isFloorLevel(level) || !hasConfirmedRange(level)) return null;
           const [depthInner, depthOuter] = level.radiusRange;
           const isMatchedLevel = level.id === geometry.levelId;
           return (
@@ -95,7 +133,8 @@ export function SeatMap({ venue, seat, stagePosition, className }: SeatMapProps)
               key={level.id}
               // bandPath generates coordinates in local (unpadded) bowl space — translate the
               // whole path via a group transform rather than re-stringifying its points.
-              d={bandPath(0.02, 0.98, depthInner, depthOuter, INNER, OUTER)}
+              d={levelBandPath(depthInner, depthOuter)}
+              fillRule="evenodd"
               transform={`translate(${VIEWBOX_PAD} ${VIEWBOX_PAD})`}
               className={isMatchedLevel ? "fill-primary/10 stroke-primary/40" : "fill-transparent stroke-border/70"}
               strokeWidth={1}
@@ -114,9 +153,44 @@ export function SeatMap({ venue, seat, stagePosition, className }: SeatMapProps)
           strokeWidth={1}
         />
 
+        {/* Floor blocks — end stage only: depth bands straight out from the stage, block 0
+            nearest it (see perimeter.ts's floorBandRect). */}
+        {!isCentreStage &&
+          venueConfig.levels.filter(isFloorLevel).flatMap((level) =>
+            floorBlocksOf(level).map(({ label, index, count }) => {
+              const rect = floorBandRect(index, count, INNER, OUTER);
+              const isSeatBlock =
+                !!seatLocation && seatLocation.level.id === level.id && seatLocation.index === index && seatLocation.count === count;
+              return (
+                <g key={`${level.id}-${label}`} data-testid="seat-map-floor-block">
+                  <rect
+                    x={VIEWBOX_PAD + rect.x + 2}
+                    y={VIEWBOX_PAD + rect.y + 1}
+                    width={Math.max(rect.width - 4, 0)}
+                    height={Math.max(rect.height - 2, 0)}
+                    rx={3}
+                    className={isSeatBlock ? "fill-primary/30 stroke-primary/60" : "fill-emerald-600/15 stroke-emerald-700/40"}
+                    strokeWidth={1}
+                  />
+                  <text
+                    // Left-aligned so the seat marker (on the centre line) never covers it.
+                    x={VIEWBOX_PAD + rect.x + 8}
+                    y={VIEWBOX_PAD + rect.y + rect.height / 2}
+                    textAnchor="start"
+                    dominantBaseline="central"
+                    fontSize={Math.min(rect.height * 0.5, 14)}
+                    className="fill-muted-foreground"
+                  >
+                    {label}
+                  </text>
+                </g>
+              );
+            }),
+          )}
+
         {/* Stage (default layout only — see geometry.ts on why other stage positions aren't geometrically rendered) */}
         {isDefaultLayout && (
-          <rect x={stageX} y={stageY} width={stageWidth} height={8} rx={2} className="fill-amber-500/80" />
+          <rect x={stageRect.x} y={stageRect.y} width={stageRect.width} height={stageRect.height} rx={2} className="fill-amber-500/80" data-testid="seat-map-stage" />
         )}
 
         {/* Approximate seat marker — position derives from the block's arc position and the

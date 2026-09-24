@@ -402,6 +402,14 @@ function validateLevel(
   const stageFacing = validateStageFacing(v.stageFacing, `${path}.stageFacing`, errors);
   const rowBankSplit = validateRowBankSplit(v.rowBankSplit, `${path}.rowBankSplit`, errors, budget);
 
+  // Row names are short (e.g. "AA", "20") — a tighter per-entry cap than the 200-char default
+  // used for descriptive text elsewhere, per the project brief for `LevelConfig.rowSequence`.
+  let rowSequence: string[] | undefined;
+  if (v.rowSequence !== undefined) {
+    rowSequence = validateStringArray(v.rowSequence, `${path}.rowSequence`, errors, { maxLen: 16, maxItems: 200 });
+    if (rowSequence !== undefined) budget.add(rowSequence.length);
+  }
+
   if (
     id === undefined ||
     label === undefined ||
@@ -424,6 +432,7 @@ function validateLevel(
     ...(wrap !== undefined ? { wrap } : {}),
     ...(stageFacing !== undefined ? { stageFacing } : {}),
     ...(rowBankSplit !== undefined ? { rowBankSplit } : {}),
+    ...(rowSequence !== undefined ? { rowSequence } : {}),
   };
 }
 

@@ -63,6 +63,15 @@ export interface BlockNumberRange {
 
 /** Documented stage-facing quality for the DEFAULT concert stage layout only (`"shortEndA"`).
  * Ranges are `[min, max]` inclusive block-number pairs. */
+/** Lettered or otherwise non-numeric blocks (AsiaWorld-Expo Arena floor blocks A-D, a
+ * theatre's named boxes), listed in physical order: along the level's arc for a `"stand"`
+ * level, front (nearest the stage) to back for a `"floor"` level. */
+export interface BlockLabelRange {
+  labels: string[];
+  positionConfidence: Confidence;
+  note?: string;
+}
+
 export interface StageFacingFacts {
   best?: [number, number][];
   mostOblique?: [number, number][];
@@ -93,6 +102,12 @@ export interface LevelConfig {
    * blocks (e.g. the floor's Zone A/B/C standing areas — see `zones`). Kai Tak's Level 2
    * famously needs TWO ranges (101-110 AND 201-240); do not assume one range per level. */
   blockNumberRanges: BlockNumberRange[];
+  /** Non-numeric blocks for this level (see `BlockLabelRange`). Optional; a level may mix
+   * both schemes. */
+  blockLabelRanges?: BlockLabelRange[];
+  /** `"stand"` (default): blocks run along the bowl's arc. `"floor"`: a flat floor whose
+   * blocks are depth bands in front of the stage, ordered front to back. */
+  kind?: "stand" | "floor";
   /** Named standing zones using a completely separate scheme from numbered blocks (e.g.
    * floor Zone A/B/C). Do not conflate with `blockNumberRanges`. */
   zones?: string[];
@@ -102,6 +117,24 @@ export interface LevelConfig {
   wrap?: { confirmed: boolean; note: string };
   stageFacing?: StageFacingFacts;
   rowBankSplit?: RowBankSplit;
+  /**
+   * Optional documented front→back row order for this level, e.g. AsiaWorld-Expo Arena's
+   * balcony (A-Z skipping I/O), Macpherson Stadium's floor (AA→SS, double letters only), or
+   * Hong Kong Coliseum's stand (`["AA", "1", …, "20"]`, a front premium row plus numbered
+   * rows). A row's depth is simply its index in this list — front is index 0, back is the
+   * last index — which is also how it differs from `rowBankSplit`: a `rowSequence` is ONE
+   * continuous documented order, while a `rowBankSplit` is two banks with a real walkway gap
+   * between them. A row not present in `rowSequence` is genuinely undocumented for this level
+   * (the resolver falls through to the "not in documented row set" hedge, never the generic
+   * default A-Z/AA-QQ sequence — that generic sequence is only used when a level documents NO
+   * row scheme of its own at all).
+   *
+   * Precedence when a level has both: `rowBankSplit` is tried first (it models a real physical
+   * break a plain sequence can't), and `rowSequence` is consulted only as a fallback for a row
+   * that isn't in either bank — e.g. two lettered banks plus a numbered overflow row outside
+   * both. A level should rarely need both in practice; document why in a comment when it does.
+   */
+  rowSequence?: string[];
 }
 
 /** A level that exists physically but sells no numbered seating (Kai Tak Level 3 hospitality
@@ -131,6 +164,22 @@ export interface AsymmetryFact {
   confidence: Confidence;
 }
 
+/**
+ * How the venue is laid out, which decides whether and how it can be projected:
+ *  - `"bowl-end-stage"` (default): stands on three sides of a floor, stage at one short end
+ *    (Kai Tak Stadium, AsiaWorld-Expo Arena).
+ *  - `"bowl-centre-stage"`: stands on all four sides, stage in the middle (紅館 四面台).
+ *  - `"theatre"`: rows facing a proscenium/thrust stage. Not projected yet; the UI shows the
+ *    seating-plan image and the parsed seat instead of a guessed position.
+ */
+export type VenueLayout = "bowl-end-stage" | "bowl-centre-stage" | "theatre";
+
+/** A seating-plan image or PDF the config was drafted from, kept so a reviewer can check. */
+export interface SeatingPlanSource {
+  url: string;
+  label: string;
+}
+
 export interface VenueSeatMapConfig {
   id: string;
   name: string;
@@ -149,6 +198,15 @@ export interface VenueSeatMapConfig {
   /** Confidence in what block-letter suffixes (e.g. "519B") actually mean (probably a
    * stair/vomitory split) — the suffix itself is always preserved verbatim regardless. */
   blockSuffixConfidence: Confidence;
+  /** Defaults to `"bowl-end-stage"` when omitted (every config written before this field). */
+  layout?: VenueLayout;
+  /** 2D plan-space rects for this venue's proportions; defaults to `PLAN_OUTER`/`PLAN_INNER`
+   * in perimeter.ts (Kai Tak's stadium proportions). Unitless drawing units. */
+  plan?: { outer: { width: number; height: number }; inner: { width: number; height: number } };
+  /** Approximate real-world floor size in metres, for the 3D view's scale. Always an
+   * estimate; defaults to the stadium pitch in `APPROXIMATE_BOWL` when omitted. */
+  approxFloorM?: { width: number; length: number };
+  seatingPlanSources?: SeatingPlanSource[];
 }
 
 // ---- Resolved geometry ---------------------------------------------------------
@@ -165,7 +223,8 @@ export interface SeatGeometryFacts {
   levelLabel: string;
   /** Verbatim block string including any letter suffix, e.g. "519B". */
   block: string;
-  blockNumeric: number;
+  /** Numeric part of a numbered block ("519B" -> 519); `null` for a label block ("A"). */
+  blockNumeric: number | null;
   blockSuffix: string | null;
   row: string | null;
   /** Ordinal distance-from-pitch tier, copied from the matched `LevelConfig.tier`. */

@@ -209,4 +209,46 @@ describe("validateSeatMapConfig", () => {
     const result = validateSeatMapConfig({ ...kaiTakStadium, levels } as unknown);
     expect(result.ok).toBe(false);
   });
+
+  // ---- rowSequence ------------------------------------------------------------------
+
+  it("accepts a level's rowSequence and round-trips it", () => {
+    const levels = kaiTakStadium.levels.map((l, i) => (i === 0 ? { ...l, rowSequence: ["AA", "1", "2", "20"] } : l));
+    const result = validateSeatMapConfig({ ...kaiTakStadium, levels } as unknown);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.config.levels[0].rowSequence).toEqual(["AA", "1", "2", "20"]);
+    }
+  });
+
+  it("rejects a rowSequence entry longer than 16 characters", () => {
+    const levels = kaiTakStadium.levels.map((l, i) => (i === 0 ? { ...l, rowSequence: ["A".repeat(17)] } : l));
+    const result = validateSeatMapConfig({ ...kaiTakStadium, levels } as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes("rowSequence"))).toBe(true);
+    }
+  });
+
+  it("rejects a rowSequence with more than 200 entries", () => {
+    const bigSequence = Array.from({ length: 201 }, (_, i) => `R${i}`);
+    const levels = kaiTakStadium.levels.map((l, i) => (i === 0 ? { ...l, rowSequence: bigSequence } : l));
+    const result = validateSeatMapConfig({ ...kaiTakStadium, levels } as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.includes("rowSequence"))).toBe(true);
+    }
+  });
+
+  it("counts rowSequence entries toward the shared 500-label budget", () => {
+    // Each level's rowSequence stays under the 200-per-array cap on its own, but three levels'
+    // worth (180 each) tips the shared budget — same mechanism already covered for `zones`.
+    const bigSequence = Array.from({ length: 180 }, (_, i) => `R${i}`);
+    const levels = kaiTakStadium.levels.map((l) => ({ ...l, rowSequence: bigSequence }));
+    const result = validateSeatMapConfig({ ...kaiTakStadium, levels } as unknown);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.some((e) => e.toLowerCase().includes("label"))).toBe(true);
+    }
+  });
 });

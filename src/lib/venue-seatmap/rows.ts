@@ -57,3 +57,33 @@ export function bankedRowDepthFraction(row: string, split: RowBankSplit): number
 
   return null;
 }
+
+/** Depth fraction (0 = frontmost, 1 = backmost) for a row using a level's own documented
+ * `LevelConfig.rowSequence` (see types.ts for the full precedence rule against
+ * `rowBankSplit`) — e.g. Hong Kong Coliseum's stand (`["AA", "1", …, "20"]`) or
+ * AsiaWorld-Expo Arena's balcony (A-Z skipping I/O). A row's depth is simply its index in the
+ * sequence. Returns `null` for a row not in the sequence — never a guessed position, same
+ * contract as `defaultRowDepthFraction`. */
+export function sequenceRowDepthFraction(row: string, sequence: readonly string[]): number | null {
+  const upper = row.toUpperCase();
+  const idx = sequence.findIndex((r) => r.toUpperCase() === upper);
+  if (idx === -1) return null;
+  return idx / Math.max(sequence.length - 1, 1);
+}
+
+// Assumed row count for a numbered-row block, floor or stand (arena floors commonly run rows
+// 1..~30; a numbered stand aisle is treated the same way once no documented scheme applies).
+// Not a documented figure for any venue — only used to turn a numeric row into a coarse
+// front/back position, and the resolver hedges whenever it's applied.
+const ASSUMED_NUMERIC_ROW_COUNT = 30;
+
+/** Depth fraction for a purely numeric row ("1" = front), clamped to [0,1] against
+ * `ASSUMED_NUMERIC_ROW_COUNT`. Returns `null` for anything that isn't a positive integer row.
+ * The resolver only falls back to this once no documented row scheme (`rowBankSplit` or
+ * `rowSequence`) applies to the level — see geometry.ts. */
+export function numericRowDepthFraction(row: string): number | null {
+  if (!/^\d{1,3}$/.test(row)) return null;
+  const n = Number(row);
+  if (n < 1) return null;
+  return Math.min(1, (n - 1) / (ASSUMED_NUMERIC_ROW_COUNT - 1));
+}
