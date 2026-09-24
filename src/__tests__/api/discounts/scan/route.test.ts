@@ -9,16 +9,20 @@ vi.mock("@/lib/auth", () => ({ auth: vi.fn(() => Promise.resolve(getMockSession(
 
 // Page fetch is fully stubbed — the pasted-content tests assert these are
 // NEVER called (that's the actual "skip the network" behaviour under test);
-// the one fetch-path test below configures a response via mockFetchResult.
-const mockFetchResult = vi.fn<() => { ok: boolean; status: number; finalUrl: string; html: string }>(() => ({
-  ok: true,
-  status: 200,
-  finalUrl: "https://example.com/",
-  html: "",
-}));
+// fetch-path tests configure a response via mockFetchResult, keyed by the
+// requested URL so fallback tests can give the primary and fallback URLs
+// different responses in the same test.
+const mockFetchResult = vi.fn<(url?: string) => { ok: boolean; status: number; finalUrl: string; html: string }>(
+  () => ({
+    ok: true,
+    status: 200,
+    finalUrl: "https://example.com/",
+    html: "",
+  })
+);
 vi.mock("@/lib/safe-fetch", () => ({
-  safeFetch: vi.fn(async () => {
-    const { ok, status, finalUrl, html } = mockFetchResult();
+  safeFetch: vi.fn(async (url: string) => {
+    const { ok, status, finalUrl, html } = mockFetchResult(url);
     return { ok, status, finalUrl, text: async () => html };
   }),
   assertPublicUrl: vi.fn(async () => {}),
@@ -47,6 +51,7 @@ vi.mock("@/lib/ai/quota", () => ({
 import { POST } from "@/app/api/discounts/scan/route";
 import { safeFetch, assertPublicUrl } from "@/lib/safe-fetch";
 import { checkRemainingAiLimit, incrementAiLimit } from "@/lib/ai/quota";
+import { aiExtractJson } from "@/lib/ai/client";
 
 const URL = "https://example.com/";
 
@@ -264,5 +269,189 @@ describe("POST /api/discounts/scan — pasted page content", () => {
       const json = await res.json();
       expect(json.result.items).toHaveLength(1);
     });
+  });
+});
+
+// A page with enough visible text to clear the thin-content floor and one
+// discount-keyword-matching anchor, for tests that need real offers/urls.
+const SALE_HTML = `
+<html><body>
+<h1>Storewide End of Season Sale</h1>
+<p>Save 40% off everything this weekend only! Extra padding text so the extracted content comfortably clears the minimum length floor for a real scan.</p>
+<a href="/sale">Shop the sale</a>
+</body></html>
+`;
+
+describe("POST /api/discounts/scan — fetch path: embedded page-data promo text", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockSession(mockSession);
+    mockAiData.mockReturnValue(aiOfferData());
+  });
+
+  // Real shape found on hk.puma.com: an 91app/NineYi inline-script JSON
+  // bootstrap whose ONLY promo copy lives in topMessageData.text — the
+  // visible (tag-stripped) page has no promotion text at all.
+  const NINEYI_HTML =
+    '<html><head><script>window.__NINEYI_STORE__ = {"topMessageData":{"text":"AUTUMN SPECIAL! 3件6折 | 滿1500減200 全場消費滿額即享折扣優惠碼AUTUMN20"}};</script></head><body><div id="app"></div></body></html>';
+
+  it("is NOT reported as thin_content once the embedded promo text is folded in", async () => {
+    mockFetchResult.mockImplementation(() => ({ ok: true, status: 200, finalUrl: URL, html: NINEYI_HTML }));
+    const res = await POST(makeReq({ url: URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.reason).not.toBe("thin_content");
+  });
+
+  it("passes the embedded promo text to the AI prompt", async () => {
+    mockFetchResult.mockImplementation(() => ({ ok: true, status: 200, finalUrl: URL, html: NINEYI_HTML }));
+    const res = await POST(makeReq({ url: URL }));
+    expect(res.status).toBe(200);
+
+    const promptArg = (aiExtractJson as unknown as { mock: { calls: string[][] } }).mock.calls[0][0];
+    expect(promptArg).toContain("Promotional text embedded in the page data:");
+    expect(promptArg).toContain("AUTUMN SPECIAL! 3件6折 | 滿1500減200");
+  });
+
+  it("a page with neither visible nor embedded promo text is still reported as thin_content", async () => {
+    mockFetchResult.mockImplementation(() => ({ ok: true, status: 200, finalUrl: URL, html: "<html><body></body></html>" }));
+    const res = await POST(makeReq({ url: URL }));
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.reason).toBe("thin_content");
+  });
+});
+
+describe("POST /api/discounts/scan — fallback sources", () => {
+  const FANATICS_URL = "https://www.fanatics.com/";
+  const FALLBACK_URL = "https://www.coupons.com/coupon-codes/fanatics";
+  const PUMA_URL = "https://hk.puma.com/";
+  const PUMA_FALLBACK_URL = "https://www.shopback.com.hk/puma";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockSession(mockSession);
+    mockAiData.mockReturnValue(aiOfferData());
+    (checkRemainingAiLimit as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+  });
+
+  it("Akamai-blocked fanatics.com falls back to coupons.com and returns offers with `via`", async () => {
+    mockFetchResult.mockImplementation((url?: string) => {
+      if (url === FANATICS_URL) return { ok: false, status: 403, finalUrl: FANATICS_URL, html: "" };
+      if (url === FALLBACK_URL) return { ok: true, status: 200, finalUrl: FALLBACK_URL, html: SALE_HTML };
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const res = await POST(makeReq({ url: FANATICS_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.result.sourceUrl).toBe(FANATICS_URL);
+    expect(json.result.via).toEqual({
+      url: FALLBACK_URL,
+      label: "Coupons.com — Fanatics",
+      note: expect.stringContaining("aggregator"),
+    });
+    expect(json.result.offers.length).toBeGreaterThan(0);
+    // Only the fallback ever reached the AI — the blocked primary never did.
+    expect(aiExtractJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("fallback also blocked → returns the original bot_protected result unchanged, with fallbackTried", async () => {
+    mockFetchResult.mockImplementation((url?: string) => {
+      if (url === FANATICS_URL) return { ok: false, status: 403, finalUrl: FANATICS_URL, html: "" };
+      if (url === FALLBACK_URL) return { ok: false, status: 403, finalUrl: FALLBACK_URL, html: "" };
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const res = await POST(makeReq({ url: FANATICS_URL }));
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.reason).toBe("bot_protected");
+    expect(json.fallbackTried).toBe(true);
+    expect(aiExtractJson).not.toHaveBeenCalled();
+  });
+
+  it("quota exhausted → no fallback call at all, original blocked result returned", async () => {
+    // First check (top of the route, before any fetch) succeeds; the
+    // fallback-specific recheck inside attemptFallback() is the one that's
+    // out of quota.
+    (checkRemainingAiLimit as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    mockFetchResult.mockImplementation((url?: string) => {
+      if (url === FANATICS_URL) return { ok: false, status: 403, finalUrl: FANATICS_URL, html: "" };
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const res = await POST(makeReq({ url: FANATICS_URL }));
+    expect(res.status).toBe(422);
+    const json = await res.json();
+    expect(json.reason).toBe("bot_protected");
+    expect(json.fallbackTried).toBeUndefined();
+    expect(safeFetch).toHaveBeenCalledTimes(1); // only the primary — fallback was never fetched
+    expect(aiExtractJson).not.toHaveBeenCalled();
+  });
+
+  it("hk.puma.com with zero offers falls back to the shopback aggregator and returns offers with `via`", async () => {
+    mockFetchResult.mockImplementation((url?: string) => {
+      if (url === PUMA_URL) return { ok: true, status: 200, finalUrl: PUMA_URL, html: SALE_HTML };
+      if (url === PUMA_FALLBACK_URL) return { ok: true, status: 200, finalUrl: PUMA_FALLBACK_URL, html: SALE_HTML };
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    mockAiData
+      .mockReturnValueOnce(aiOfferData({ hasDiscount: false, discountPercent: null, promoCode: null, offers: [], evidence: [] }))
+      .mockReturnValueOnce(aiOfferData());
+
+    const res = await POST(makeReq({ url: PUMA_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.result.sourceUrl).toBe(PUMA_URL);
+    expect(json.result.via?.url).toBe(PUMA_FALLBACK_URL);
+    expect(json.result.offers.length).toBeGreaterThan(0);
+    expect(aiExtractJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("hk.puma.com with real offers on the primary scan never triggers a fallback call", async () => {
+    mockFetchResult.mockImplementation((url?: string) => {
+      if (url === PUMA_URL) return { ok: true, status: 200, finalUrl: PUMA_URL, html: SALE_HTML };
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const res = await POST(makeReq({ url: PUMA_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.result.via).toBeUndefined();
+    expect(json.result.offers.length).toBeGreaterThan(0);
+    expect(aiExtractJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("pasted content never triggers a fallback source lookup", async () => {
+    // fanatics.com would normally have a fallback configured — pasted
+    // content must skip that path entirely since nothing was fetched.
+    const res = await POST(makeReq({ url: FANATICS_URL, pageContent: PASTED_HTML }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.result.via).toBeUndefined();
+    expect(safeFetch).not.toHaveBeenCalled();
+    expect(aiExtractJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("www.puma.com's corporate_redirect auto-uses hk.puma.com as the fallback", async () => {
+    const WWW_PUMA_URL = "https://www.puma.com/hk/en/";
+    mockFetchResult.mockImplementation((url?: string) => {
+      if (url === WWW_PUMA_URL) {
+        return { ok: true, status: 200, finalUrl: "https://about.puma.com/en", html: "<html><body>Investor relations</body></html>" };
+      }
+      if (url === "https://hk.puma.com/") return { ok: true, status: 200, finalUrl: "https://hk.puma.com/", html: SALE_HTML };
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const res = await POST(makeReq({ url: WWW_PUMA_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.result.sourceUrl).toBe(WWW_PUMA_URL);
+    expect(json.result.via?.url).toBe("https://hk.puma.com/");
+    expect(json.result.offers.length).toBeGreaterThan(0);
   });
 });

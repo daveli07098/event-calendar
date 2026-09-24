@@ -74,6 +74,17 @@ export interface DiscountScanResult {
    * satisfy the type.
    */
   fromPastedContent?: boolean;
+  /**
+   * Present when this result came from a fallback source (see
+   * src/lib/discounts/fallback-sources.ts) rather than a scan of `sourceUrl`
+   * itself — e.g. `sourceUrl` was Akamai-blocked, so a cashback/coupon
+   * aggregator page for the same brand was scanned instead. `sourceUrl`
+   * stays the URL the user actually asked about; `via.url` is what was
+   * really fetched. `via.note` is a caveat to show alongside the result
+   * (aggregator figures may be typical/stale rather than live — verify at
+   * checkout).
+   */
+  via?: { url: string; label: string; note: string };
 }
 
 /**
