@@ -36,6 +36,8 @@ import { useEventFormState } from "@/hooks/useEventFormState";
 import { describeVenueTime } from "@/lib/event-timezone";
 import { parseSeat } from "@/lib/seat-parse";
 import { SeatBreakdown } from "@/components/events/SeatBreakdown";
+import { useVenueSeatMaps } from "@/lib/venue-seatmap/use-venue-seatmaps";
+import type { VenueSeatMapConfig } from "@/lib/venue-seatmap/types";
 import dynamic from "next/dynamic";
 
 // Lazy-loaded: the SVG bowl and the per-venue geometry tables are only needed
@@ -220,22 +222,27 @@ export function EventModal({
   // Loaded via a dynamic import (not a static `matchVenueConfig` import) so the per-venue
   // geometry registry stays out of this modal's main chunk, same reasoning as the dynamic()
   // wrappers above; only fires when there's a seat to map in the first place.
-  const [hasSeatMapConfig, setHasSeatMapConfig] = useState(false);
+  // Community configs approved in the venue directory (GET /api/venues/seatmaps) are matched as
+  // `extra` — the static registry (Kai Tak) still wins inside matchVenueConfig. The list is
+  // fetched once per page load (module-scope cache) and only once a seat has been entered.
+  const { approvedConfigs } = useVenueSeatMaps(!!seatParseResult);
+  const [matchedSeatMapConfig, setMatchedSeatMapConfig] = useState<VenueSeatMapConfig | null>(null);
+  const hasSeatMapConfig = matchedSeatMapConfig !== null;
   const [seatMapView, setSeatMapView] = useState<"2d" | "3d">("2d");
   useEffect(() => {
     if (!seatParseResult) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clear the toggle when there's no seat to map
-      setHasSeatMapConfig(false);
+      setMatchedSeatMapConfig(null);
       return;
     }
     let cancelled = false;
     import("@/lib/venue-seatmap/registry").then(({ matchVenueConfig }) => {
-      if (!cancelled) setHasSeatMapConfig(matchVenueConfig(location) !== null);
+      if (!cancelled) setMatchedSeatMapConfig(matchVenueConfig(location, approvedConfigs));
     });
     return () => {
       cancelled = true;
     };
-  }, [location, seatParseResult]);
+  }, [location, seatParseResult, approvedConfigs]);
 
   // Related events — events sharing this one's Ticket URL, shown above the
   // description so the user can jump between them. Re-derived whenever the
@@ -862,6 +869,11 @@ export function EventModal({
                 className={`h-8 text-sm${readOnly ? " cursor-default select-text" : ""}`}
               />
               {seatParseResult && <SeatBreakdown result={seatParseResult} />}
+              {seatParseResult && seatParseResult.status !== "unparseable" && seatParseResult.additionalSeatsDetected > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {seatParseResult.additionalSeatsDetected} more ticket{seatParseResult.additionalSeatsDetected === 1 ? "" : "s"} found in this line — showing the first
+                </p>
+              )}
               {/* 2D/3D toggle only once we know the venue has a seat-map config at all —
                   hidden for unmatched venues so there's nothing to switch between. Defaults
                   to 2D; falls back to 2D automatically if the 3D view reports itself
@@ -890,12 +902,13 @@ export function EventModal({
                   block resolves — an unknown venue deliberately shows no map
                   rather than a generic bowl with a guessed marker. */}
               {seatParseResult && (seatMapView === "2d" || !hasSeatMapConfig) && (
-                <SeatMap venue={location} seat={seatParseResult} />
+                <SeatMap venue={location} seat={seatParseResult} config={matchedSeatMapConfig} />
               )}
               {seatParseResult && hasSeatMapConfig && seatMapView === "3d" && (
                 <SeatMap3D
                   venue={location}
                   seat={seatParseResult}
+                  config={matchedSeatMapConfig}
                   onUnavailable={() => setSeatMapView("2d")}
                 />
               )}

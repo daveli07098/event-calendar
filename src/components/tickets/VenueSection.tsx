@@ -17,6 +17,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import type { VenueEventSummary, VenueEventsResponse } from "@/app/api/venues/events/route";
+import { VenueSeatMapPanel, SeatMapStatusChip, seatMapStatusOf } from "@/components/venue/VenueSeatMapPanel";
+import { useVenueSeatMaps, type VenueSeatMapListEntry } from "@/lib/venue-seatmap/use-venue-seatmaps";
+import { matchVenueConfig } from "@/lib/venue-seatmap/registry";
+import type { VenueSeatMapConfig } from "@/lib/venue-seatmap/types";
 
 interface Venue {
   id: string;
@@ -33,6 +37,12 @@ interface Venue {
 // Per-venue slice of the /api/venues/events payload, keyed by venueId in state.
 type VenueActivity = VenueEventsResponse["venues"][number];
 type UnmatchedLocation = VenueEventsResponse["unmatched"][number];
+
+/** Static-registry (built-in) config for a directory venue — by its name or any alias, same rule
+ * as /api/venues/events uses for `hasSeatMap`. Never consults DB configs. */
+function builtInConfigFor(v: Venue): VenueSeatMapConfig | null {
+  return matchVenueConfig(v.name) ?? v.aliases.map((a) => matchVenueConfig(a)).find(Boolean) ?? null;
+}
 
 /** Device-timezone date/time for the venue events disclosure: date only for
  * all-day events, date + time otherwise. */
@@ -67,6 +77,14 @@ export function VenueSection() {
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
   const [addingLocation, setAddingLocation] = useState<string | null>(null);
+
+  // Seat-map directory (GET /api/venues/seatmaps, shared cache with EventModal). Local writes from
+  // a panel land in `seatMapOverrides` immediately; the refetched list agrees with them anyway.
+  const { entries: seatMapList, loaded: seatMapsLoaded } = useVenueSeatMaps();
+  const [seatMapOverrides, setSeatMapOverrides] = useState<Map<string, VenueSeatMapListEntry | null>>(new Map());
+  // Panels stay mounted once opened (just hidden) so collapsing never discards an unsaved draft.
+  const [openSeatMaps, setOpenSeatMaps] = useState<Set<string>>(new Set());
+  const [mountedSeatMaps, setMountedSeatMaps] = useState<Set<string>>(new Set());
 
   const refreshVenueEvents = useCallback(() => {
     return fetch("/api/venues/events")
@@ -203,6 +221,30 @@ export function VenueSection() {
     }
   };
 
+  const seatMapEntryFor = (venueId: string): VenueSeatMapListEntry | null =>
+    seatMapOverrides.has(venueId)
+      ? seatMapOverrides.get(venueId) ?? null
+      : seatMapList.find((e) => e.venueId === venueId) ?? null;
+
+  const toggleSeatMap = (venueId: string) => {
+    setMountedSeatMaps((prev) => (prev.has(venueId) ? prev : new Set(prev).add(venueId)));
+    setOpenSeatMaps((prev) => {
+      const next = new Set(prev);
+      if (next.has(venueId)) {
+        next.delete(venueId);
+      } else {
+        next.add(venueId);
+      }
+      return next;
+    });
+  };
+
+  const handleSeatMapChanged = (venueId: string, entry: VenueSeatMapListEntry | null) => {
+    setSeatMapOverrides((prev) => new Map(prev).set(venueId, entry));
+    // Approval changes the venue's hasSeatMap flag in the events payload.
+    refreshVenueEvents();
+  };
+
   const toggleEventsExpanded = (venueId: string) => {
     setExpandedEvents((prev) => {
       const next = new Set(prev);
@@ -242,8 +284,8 @@ export function VenueSection() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8 space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold">Event Venues</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -252,7 +294,7 @@ export function VenueSection() {
           </p>
           {eventsError && <p className="text-xs text-destructive mt-1">{eventsError}</p>}
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-wrap gap-2 shrink-0">
           <Button variant="outline" size="sm" onClick={handleBackfillHKLocations} disabled={backfilling} className="gap-1.5" title="Add 'Hong Kong' to imported events missing location">
             {backfilling ? <Loader2 className="size-4 animate-spin" /> : <MapPin className="size-4" />}
             Fix Locations
@@ -348,6 +390,10 @@ export function VenueSection() {
             const upcoming = activity?.upcoming ?? [];
             const ticketedCount = upcoming.filter((e) => e.isTicket).length;
             const eventsExpanded = expandedEvents.has(v.id);
+            const builtInConfig = builtInConfigFor(v);
+            const seatMapEntry = seatMapEntryFor(v.id);
+            const seatMapOpen = openSeatMaps.has(v.id);
+            const seatMapPanelId = `venue-seatmap-panel-${v.id}`;
             return (
               <div key={v.id} className="rounded-lg border border-border bg-card overflow-hidden">
                 {/* Venue header row */}
@@ -367,7 +413,7 @@ export function VenueSection() {
                       </div>
                     )}
                     {/* Event activity badges — from /api/venues/events, keyed by venue id */}
-                    {activity && (upcoming.length > 0 || ticketedCount > 0 || activity.hasSeatMap || activity.pastCount > 0) && (
+                    {activity && (upcoming.length > 0 || ticketedCount > 0 || activity.pastCount > 0) && (
                       <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                         {upcoming.length > 0 && (
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{upcoming.length} upcoming</Badge>
@@ -375,11 +421,6 @@ export function VenueSection() {
                         {ticketedCount > 0 && (
                           <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                             <Ticket /> {ticketedCount} ticketed
-                          </Badge>
-                        )}
-                        {activity.hasSeatMap && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                            <Armchair /> Seat map
                           </Badge>
                         )}
                         {activity.pastCount > 0 && (
@@ -396,6 +437,23 @@ export function VenueSection() {
                         )}
                       </div>
                     )}
+                    {/* Seat-map panel disclosure + status (Built-in / Approved / Draft / No seat map).
+                        Replaces the old "Seat map" activity badge, which couldn't tell those apart. */}
+                    <div className="mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => toggleSeatMap(v.id)}
+                        aria-expanded={seatMapOpen}
+                        aria-controls={seatMapPanelId}
+                        aria-label={`${seatMapOpen ? "Hide" : "Show"} seat map for ${v.name}`}
+                        className="inline-flex items-center gap-1.5 rounded-md px-1 -mx-1 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                      >
+                        <Armchair className="size-3.5" />
+                        <span>Seat map</span>
+                        <SeatMapStatusChip status={seatMapStatusOf(builtInConfig, seatMapEntry)} />
+                        {seatMapOpen ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                      </button>
+                    </div>
                   </div>
                   {/* Actions */}
                   <div className="flex items-center gap-1 shrink-0">
@@ -472,6 +530,26 @@ export function VenueSection() {
                       </div>
                     ))}
                   </div>
+                )}
+
+                {/* Mounted only once the list has loaded — the panel seeds its working state from
+                    `entry` once, so mounting it early would start an approved venue as empty. */}
+                {seatMapOpen && !seatMapsLoaded && (
+                  <div id={seatMapPanelId} className="border-t border-border px-4 py-3 bg-muted/10 flex items-center gap-2 text-xs text-muted-foreground" role="status">
+                    <Loader2 className="size-3.5 animate-spin" /> Loading seat map…
+                  </div>
+                )}
+                {mountedSeatMaps.has(v.id) && seatMapsLoaded && (
+                  <VenueSeatMapPanel
+                    id={seatMapPanelId}
+                    hidden={!seatMapOpen}
+                    venue={v}
+                    entry={seatMapEntry}
+                    builtInConfig={builtInConfig}
+                    events={upcoming}
+                    eventsUnavailable={!!eventsError}
+                    onChanged={(entry) => handleSeatMapChanged(v.id, entry)}
+                  />
                 )}
 
                 {/* Image gallery — collapsible */}
