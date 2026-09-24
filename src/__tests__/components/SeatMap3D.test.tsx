@@ -3,22 +3,33 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { SeatMap3D } from "@/components/venue/SeatMap3D";
 import { parseSeat } from "@/lib/seat-parse";
 import { APPROXIMATE_BOWL } from "@/lib/venue-seatmap/bowl3d";
+import { THEATRE_HEDGE } from "@/lib/venue-seatmap/geometry";
+import { SEAT_LAYOUT_HEDGE } from "@/lib/venue-seatmap/seats3d";
+import { aweLikeArena, coliseumLike, seatWith, theatreLike } from "../lib/venue-seatmap-layout-fixtures";
+
+// Instances created by the stubs below, so tests can assert on disposal.
+const created = vi.hoisted(() => ({
+  renderers: [] as { dispose: ReturnType<typeof import("vitest").vi.fn> }[],
+  composers: [] as { dispose: ReturnType<typeof import("vitest").vi.fn>; passes: unknown[] }[],
+}));
 
 // Partial mock: only WebGLRenderer is stubbed (it would otherwise fail to acquire a real GL
-// context under jsdom), everything else (Vector3, PerspectiveCamera, Scene, materials, ...) is
-// the real three.js implementation, so the component's own math (camera lerp, target.copy,
-// etc.) actually runs against real objects.
+// context under jsdom), everything else (Vector3, PerspectiveCamera, Scene, materials,
+// InstancedMesh, Raycaster, ...) is the real three.js implementation, so the component's own
+// math (camera flight, instancing, raycasts) actually runs against real objects.
 vi.mock("three", async (importOriginal) => {
   const actual = await importOriginal<typeof import("three")>();
+  const { vi: v } = await import("vitest");
   class StubWebGLRenderer {
     domElement: HTMLCanvasElement;
+    dispose = v.fn();
     constructor({ canvas }: { canvas: HTMLCanvasElement }) {
       this.domElement = canvas;
+      created.renderers.push(this);
     }
     setPixelRatio() {}
     setSize() {}
     render() {}
-    dispose() {}
     forceContextLoss() {}
   }
   return { ...actual, WebGLRenderer: StubWebGLRenderer };
@@ -29,6 +40,10 @@ vi.mock("three/addons/controls/OrbitControls.js", async () => {
   class StubOrbitControls {
     target: InstanceType<typeof THREE.Vector3>;
     enableDamping = false;
+    enabled = true;
+    enableZoom = true;
+    enablePan = true;
+    maxPolarAngle = Math.PI;
     constructor() {
       this.target = new THREE.Vector3();
     }
@@ -39,6 +54,40 @@ vi.mock("three/addons/controls/OrbitControls.js", async () => {
   }
   return { OrbitControls: StubOrbitControls };
 });
+
+// Post-processing stubs (the bloom path) — real passes need a live GL context.
+vi.mock("three/addons/postprocessing/EffectComposer.js", async () => {
+  const { vi: v } = await import("vitest");
+  class EffectComposer {
+    passes: unknown[] = [];
+    dispose = v.fn();
+    constructor() {
+      created.composers.push(this);
+    }
+    addPass(pass: unknown) {
+      this.passes.push(pass);
+    }
+    setPixelRatio() {}
+    setSize() {}
+    render() {}
+  }
+  return { EffectComposer };
+});
+vi.mock("three/addons/postprocessing/RenderPass.js", () => ({
+  RenderPass: class {
+    dispose() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/UnrealBloomPass.js", () => ({
+  UnrealBloomPass: class {
+    dispose() {}
+  },
+}));
+vi.mock("three/addons/postprocessing/OutputPass.js", () => ({
+  OutputPass: class {
+    dispose() {}
+  },
+}));
 
 const KAI_TAK = "Kai Tak Stadium";
 
@@ -64,7 +113,16 @@ describe("SeatMap3D", () => {
 
   afterEach(() => {
     getContextSpy.mockRestore();
+    created.renderers.length = 0;
+    created.composers.length = 0;
   });
+
+  /** Waits until the lazy three.js setup has built the scene and rendered its first frame. */
+  async function renderedContainer() {
+    const container = await screen.findByTestId("seat-map-3d-canvas-container");
+    await waitFor(() => expect(container.dataset.rendered).toBe("1"), { timeout: 5000 });
+    return container;
+  }
 
   it("renders the canvas container, both camera buttons, and the model's hedge lines for a resolvable Kai Tak seat", async () => {
     render(<SeatMap3D venue={KAI_TAK} seat={RESOLVABLE_SEAT} />);
@@ -137,5 +195,98 @@ describe("SeatMap3D", () => {
     const { container } = render(<SeatMap3D venue={KAI_TAK} seat={null} />);
     expect(screen.getByTestId("seat-map-3d-empty")).toBeInTheDocument();
     expect(container.querySelector("canvas")).not.toBeInTheDocument();
+  });
+  it("renders an explicit config prop instead of name matching (AWE-like floor seat)", async () => {
+    // The venue name matches nothing — only the config prop can make this render.
+    render(<SeatMap3D venue="Some Unmapped Arena" config={aweLikeArena} seat={seatWith("B", "12")} />);
+
+    const container = await screen.findByTestId("seat-map-3d-canvas-container");
+    await waitFor(() => expect(container.querySelector("canvas")).not.toBeNull());
+    const fromYourSeat = screen.getByRole("button", { name: "From your seat" });
+    expect(fromYourSeat).not.toBeDisabled();
+    fireEvent.click(fromYourSeat);
+    expect(screen.getByText(/depth bands straight in front of the stage/)).toBeInTheDocument();
+  });
+
+  it("renders a centre-stage config with every block placed", async () => {
+    render(<SeatMap3D venue={null} config={coliseumLike} seat={seatWith("62", "K")} />);
+    const container = await screen.findByTestId("seat-map-3d-canvas-container");
+    await waitFor(() => expect(container.querySelector("canvas")).not.toBeNull());
+    expect(screen.getByRole("button", { name: "From your seat" })).not.toBeDisabled();
+    expect(screen.getByText(/In-the-round staging/)).toBeInTheDocument();
+  });
+
+  it("renders the theatre hedge as a muted note (no canvas) for a theatre config", () => {
+    const { container } = render(<SeatMap3D venue={null} config={theatreLike} seat={seatWith("Centre", "F")} />);
+    expect(screen.getByTestId("seat-map-3d-theatre")).toHaveTextContent(THEATRE_HEDGE);
+    expect(screen.queryByTestId("seat-map-3d-canvas-container")).not.toBeInTheDocument();
+    expect(container.querySelector("canvas")).not.toBeInTheDocument();
+  });
+
+  it("toggles the crowd on and off without rebuilding the scene", async () => {
+    render(<SeatMap3D venue={KAI_TAK} seat={RESOLVABLE_SEAT} />);
+    await renderedContainer();
+    const crowd = screen.getByRole("button", { name: "Crowd" });
+    expect(crowd).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(crowd);
+    expect(crowd).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(crowd);
+    expect(crowd).toHaveAttribute("aria-pressed", "true");
+    expect(created.renderers).toHaveLength(1);
+  });
+
+  it("flies back to the bowl view on Escape in 'From your seat' mode, without letting Escape bubble out", async () => {
+    const outer = vi.fn();
+    document.addEventListener("keydown", outer);
+    try {
+      render(<SeatMap3D venue={KAI_TAK} seat={RESOLVABLE_SEAT} />);
+      const container = await renderedContainer();
+      const bowl = screen.getByRole("button", { name: "Bowl view" });
+      const fromYourSeat = screen.getByRole("button", { name: "From your seat" });
+      fireEvent.click(fromYourSeat);
+      expect(fromYourSeat).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.keyDown(container, { key: "Escape" });
+      expect(bowl).toHaveAttribute("aria-pressed", "true");
+      expect(fromYourSeat).toHaveAttribute("aria-pressed", "false");
+      expect(outer).not.toHaveBeenCalled();
+
+      // In bowl mode Escape is left alone (e.g. for a surrounding dialog to close).
+      fireEvent.keyDown(container, { key: "Escape" });
+      expect(outer).toHaveBeenCalledTimes(1);
+    } finally {
+      document.removeEventListener("keydown", outer);
+    }
+  });
+
+  it("renders the schematic-seating hedge and a per-level colour legend", async () => {
+    render(<SeatMap3D venue={KAI_TAK} seat={RESOLVABLE_SEAT} />);
+    await renderedContainer();
+    expect(screen.getByText(SEAT_LAYOUT_HEDGE)).toBeInTheDocument();
+    const legend = screen.getByTestId("seat-map-3d-legend");
+    expect(legend).toHaveTextContent("Level 2");
+    expect(legend).toHaveTextContent("Level 5");
+    expect(legend).toHaveTextContent("Your seat");
+  });
+
+  it("uses the bloom composer on a wide desktop canvas and disposes it (and the renderer) on unmount", async () => {
+    const widthSpy = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(800);
+    try {
+      const { unmount } = render(<SeatMap3D venue={KAI_TAK} seat={RESOLVABLE_SEAT} />);
+      await renderedContainer();
+      expect(created.composers).toHaveLength(1);
+      expect(created.composers[0].passes).toHaveLength(3); // render, bloom, output
+      unmount();
+      expect(created.composers[0].dispose).toHaveBeenCalledTimes(1);
+      expect(created.renderers[0].dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      widthSpy.mockRestore();
+    }
+  });
+
+  it("skips bloom on a narrow (mobile-sized) canvas", async () => {
+    render(<SeatMap3D venue={KAI_TAK} seat={RESOLVABLE_SEAT} />);
+    await renderedContainer();
+    expect(created.composers).toHaveLength(0);
   });
 });
