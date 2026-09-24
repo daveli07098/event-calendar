@@ -20,6 +20,8 @@ import { useAbortableRequest } from "@/lib/use-abortable-request";
 import { mutate } from "@/lib/mutate";
 import type { CalendarType } from "@/types";
 import type { DiscountScanResult, DiscountScanErrorReason } from "@/lib/discounts/types";
+import { PAGE_MESSAGE_TYPE, READY_MESSAGE_TYPE } from "@/lib/discounts/bookmarklet";
+import { BookmarkletInstall } from "@/components/tickets/BookmarkletInstall";
 
 const AUDIENCE_LABEL: Record<string, string> = {
   all: "Everyone",
@@ -262,6 +264,15 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   // Guards the results-persistence effect from firing (and clobbering storage
   // with an empty `statuses`) before the post-mount restore below has run.
   const hydratedResultsRef = useRef(false);
+  // A page handed over by the "Scan with Event Calendar" bookmarklet (see
+  // bookmarklet.ts + the receiver effect below) — shown as a confirmation
+  // strip instead of auto-scanning, so a spoofed/unwanted message can never
+  // trigger a scan (and spend AI quota) without the user clicking through.
+  const [received, setReceived] = useState<{ url: string; title: string; html: string } | null>(null);
+  // Guards the message listener so only the first valid ec-discount-page
+  // message this mount receives is ever accepted — a second one (e.g. a
+  // stale/duplicate post) is ignored rather than clobbering the strip.
+  const receivedAcceptedRef = useRef(false);
 
   const sources = [...DEFAULT_SOURCES, ...customSources];
 
@@ -424,6 +435,74 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
   const defaultCalendarId =
     calendars.find((c) => c.isDefault)?.id ?? calendars[0]?.id ?? "";
 
+  // Receiving end of the "Scan with Event Calendar" bookmarklet (see
+  // BookmarkletInstall / bookmarklet.ts): when this page was opened with
+  // `?receive=1` (the bookmarklet's window.open target), ping window.opener
+  // to say we're ready, then accept exactly one ec-discount-page message —
+  // validated hard, since it's untrusted input from an arbitrary shop page's
+  // script, not something the AI or server ever gets to see first:
+  //   - shape: right `type`/`v`, `url` is http(s), `html` is a non-empty
+  //     string under the same cap the paste dialog enforces
+  //   - anti-spoofing: `url`'s hostname must equal the hostname of
+  //     `event.origin` — the message's *actual* sender, which postMessage
+  //     sets and a page can't fake — so a malicious page can't claim to be
+  //     e.g. fanatics.com while actually posting from evil.example.
+  // On accept: stash it for the confirmation strip below (never auto-scan —
+  // that would spend AI quota on an unreviewed page) and strip `receive=1`
+  // from the URL so a reload doesn't re-arm the listener for nothing.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("receive") !== "1") return;
+
+    if (window.opener) {
+      try {
+        (window.opener as Window).postMessage({ type: READY_MESSAGE_TYPE, v: 1 }, "*");
+      } catch {
+        // Opener gone, or a cross-origin quirk on an unusual embedder — the
+        // bookmarklet's own handshake timeout covers this case either way.
+      }
+    }
+
+    const onMessage = (event: MessageEvent) => {
+      if (receivedAcceptedRef.current) return;
+      const data = event.data as { type?: unknown; v?: unknown; url?: unknown; title?: unknown; html?: unknown } | null;
+      if (!data || typeof data !== "object") return;
+      if (data.type !== PAGE_MESSAGE_TYPE || data.v !== 1) return;
+      if (typeof data.url !== "string" || !/^https?:\/\//i.test(data.url)) return;
+      if (typeof data.html !== "string" || data.html.length === 0 || data.html.length > PASTE_CONTENT_MAX_CHARS) return;
+      let urlHost: string;
+      let originHost: string;
+      try {
+        urlHost = new URL(data.url).hostname;
+        originHost = new URL(event.origin).hostname;
+      } catch {
+        return;
+      }
+      if (!urlHost || urlHost !== originHost) return;
+
+      receivedAcceptedRef.current = true;
+      window.removeEventListener("message", onMessage);
+      setReceived({ url: data.url, title: typeof data.title === "string" ? data.title : "", html: data.html });
+      try {
+        const u = new URL(window.location.href);
+        u.searchParams.delete("receive");
+        window.history.replaceState(null, "", u.toString());
+      } catch {
+        // Non-fatal — the strip below still renders either way.
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  const receivedDomain = received ? domainOf(received.url) : null;
+  // Match by host, not exact string — the bookmarklet posts the tab's exact
+  // location.href, which can differ from a saved source's URL by a trailing
+  // slash, query string, or path.
+  const receivedMatch = received ? (sources.find((s) => domainOf(s) === receivedDomain) ?? null) : null;
+  const receivedSizeKB = received ? Math.max(1, Math.round(received.html.length / 1024)) : 0;
+
   // localStorage is now only an offline mirror of the account-backed list —
   // does not touch React state itself, so callers control the optimistic
   // update (see addSource/removeSource below).
@@ -442,6 +521,30 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     } catch {
       return u;
     }
+  };
+
+  // Shared PUT + optimistic-update + rollback for appending one normalised
+  // URL to the account-backed custom-sources list — used by both the manual
+  // "Add source" input (addSource) and the bookmarklet strip's "Add as
+  // source & scan" path (scanReceived) below, so the two can't drift.
+  const addCustomSource = async (normalized: string): Promise<boolean> => {
+    const previous = customSources;
+    const next = [...customSources, normalized];
+    const { ok } = await mutate(SOURCES_API, {
+      method: "PUT",
+      body: { sources: next },
+      optimisticUpdate: () => {
+        setCustomSources(next);
+        persistCustomSourcesLocally(next);
+      },
+      rollback: () => {
+        setCustomSources(previous);
+        persistCustomSourcesLocally(previous);
+      },
+      silent: true,
+    });
+    if (!ok) toast.error("Couldn't save your sources");
+    return ok;
   };
 
   const addSource = async () => {
@@ -463,23 +566,8 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
       toast.info("Source already in the list");
       return;
     }
-    const previous = customSources;
-    const next = [...customSources, normalized];
     setNewSource("");
-    const { ok } = await mutate(SOURCES_API, {
-      method: "PUT",
-      body: { sources: next },
-      optimisticUpdate: () => {
-        setCustomSources(next);
-        persistCustomSourcesLocally(next);
-      },
-      rollback: () => {
-        setCustomSources(previous);
-        persistCustomSourcesLocally(previous);
-      },
-      silent: true,
-    });
-    if (!ok) toast.error("Couldn't save your sources");
+    await addCustomSource(normalized);
   };
 
   const removeSource = async (url: string) => {
@@ -595,6 +683,30 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
     setPasteDialogFor(null);
     setPasteContent("");
     setPasteError(null);
+  };
+
+  const dismissReceived = () => setReceived(null);
+
+  // Confirm action for the bookmarklet's confirmation strip: scans the
+  // received HTML via the same paste path as the "Paste page" dialog
+  // (scanSource(url, pageContent)) — matched-by-host source row if there is
+  // one, otherwise saves it as a new custom source first so the result has
+  // somewhere to land. Never fires automatically on message receipt: only
+  // this explicit click spends AI quota.
+  const scanReceived = async () => {
+    if (!received) return;
+    const page = received;
+    setReceived(null);
+    if (receivedMatch) {
+      await scanSource(receivedMatch, page.html);
+      return;
+    }
+    const normalized = normalizeUrl(page.url);
+    const normalizedExisting = new Set(sources.map(normalizeUrl));
+    if (!normalizedExisting.has(normalized)) {
+      await addCustomSource(normalized);
+    }
+    await scanSource(normalized, page.html);
   };
 
   /** Cancel whichever source is currently scanning (single "Check" or "Check all" loop). */
@@ -736,6 +848,30 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
           Add it to your calendar so you don&apos;t miss the window.
         </p>
       </div>
+
+      {/* Confirmation strip for a page handed over by the "Scan with Event
+          Calendar" bookmarklet — never auto-scans (see scanReceived's
+          comment); this is the only way that page's content gets used. */}
+      {received && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
+          <ClipboardPaste className="size-4 shrink-0 text-primary" />
+          <span>
+            Received page from <strong>{receivedDomain}</strong> ({receivedSizeKB} KB)
+            {!receivedMatch && (
+              <span className="text-muted-foreground"> — not yet in your sources</span>
+            )}
+          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <Button size="sm" className="gap-1.5" onClick={scanReceived}>
+              <RefreshCw className="size-3.5" />
+              {receivedMatch ? "Scan now" : "Add as source & scan"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={dismissReceived}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
@@ -931,7 +1067,13 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                 {/* Full error text as its own row — touch users have no hover for a
                     title tooltip, so this can no longer be truncated-with-title only. */}
                 {status.state === "error" && (
-                  <p className={cn("break-words px-3 pb-3 text-xs", cantScan ? "text-amber-600 dark:text-amber-400" : "text-destructive")}>{status.message}</p>
+                  <div className={cn("px-3 pb-3", cantScan ? "text-amber-600 dark:text-amber-400" : "text-destructive")}>
+                    <p className="break-words text-xs">{status.message}</p>
+                    {/* A site we can never fetch server-side is exactly what the
+                        bookmarklet is for — offer the one-click install inline,
+                        right where the user just learned they need it. */}
+                    {cantScan && <BookmarkletInstall compact />}
+                  </div>
                 )}
 
                 {/* Discount preview — rich deal card */}
@@ -1160,6 +1302,8 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
         build themselves with JavaScript, or block automated requests, can&apos;t be read
         from a server at all — open one in your browser and use Paste page instead.
       </p>
+
+      <BookmarkletInstall />
 
       {/* Preview the event before adding it to the calendar */}
       <Dialog open={!!preview} onOpenChange={(o) => { if (!o) setPreview(null); }}>
