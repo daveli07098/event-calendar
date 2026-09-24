@@ -1,3 +1,9 @@
+## [2026-09-25] — Session: discount scanner for walled and JS-built shops
+### Fixed
+- fix(discounts): hk.puma.com now scans automatically — its promos live in inline script JSON that text extraction discarded; embedded promo strings are now read. Fanatics / adidas.com.hk and empty Puma scans fall back to a readable deal page (coupons.com, ShopBack HK), labelled "via …" with an out-of-date caveat ([2e2b9ae], [2f8b5af])
+### Added
+- feat(discounts): one-click "Scan with Event Calendar" bookmarklet for bot-walled sites, confirmed before scanning ([d398cb9])
+
 ## [2026-09-25] — Session: venue seat maps, 3D upgrade
 ### Added
 - feat(seats): ticket seat lines with lettered blocks, aisles (43段), theatre levels (堂座) and several tickets in one paste ([39d3aa0])
