@@ -1,3 +1,14 @@
+## [2026-09-25] — Session: venue seat maps, 3D upgrade
+### Added
+- feat(seats): ticket seat lines with lettered blocks, aisles (43段), theatre levels (堂座) and several tickets in one paste ([39d3aa0])
+- feat(venues): per-venue seat maps in the DB, plan upload (image/PDF), AI vision drafting, validator and API ([dbb1cf7])
+- feat(seats): seat maps for end-stage arenas, in-the-round venues and theatres; runtime configs; numeric stand rows and per-level row order ([1f63645])
+- feat(seats): night-concert 3D view — individual seats, lightstick crowd, glowing stage and LED screens, labels, bloom, hover/select, fly-in to your seat ([0a3979e])
+- feat(venues): Seat map panel on each venue — upload plan → AI draft → review with test seat → save/approve; your tickets at the venue with View seat; events project seats for approved venues ([1efcdaf])
+- feat(venues): researched drafts for AsiaWorld-Expo Arena, 紅館, Macpherson, Xiqu Centre and EKCC, saved as drafts for review ([ee03b89])
+### Maintenance
+- chore(db): migration `20260924000000_add_venue_seat_maps` applied to the production database (additive, nullable)
+
 ## [2026-09-23] — Session: 3D venue view, discount scanner hardening
 ### Added
 - feat(seats): **3D bowl model** — `buildBowl3D()` lifts the fractional 2D seat-map geometry into raked slabs, a stage box, the seat's block patch and a seat/eye/look-at camera; every invented metric is in `APPROXIMATE_BOWL` and the model always carries a schematic-simulation hedge; unconfirmed blocks (Kai Tak 101–110) get no seat or camera ([61e8809])

@@ -352,6 +352,34 @@ config (today only Kai Tak Stadium). 2D is the default.
 - `stagePosition` isn't passed by EventModal to either view; wire it into both together or
   they will disagree.
 
+### Venue seat maps — upload, draft, approve (2026-09-25)
+
+Seat maps are now per venue, not just the built-in Kai Tak config.
+
+- **Storage** — nullable `EventVenue.seatMap*` columns (migration
+  `20260924000000_add_venue_seat_maps`, applied by hand with `prisma migrate deploy` — the
+  build does not migrate). `seatMapStatus` is `draft` or `approved`; only **approved** maps are
+  used to project seats on events. The directory is shared: anyone signed in can edit.
+- **Flow (Venues → Seat map)** — 1 upload/link the seating plan (image ≤5 MB, PDF ≤10 MB, Vercel
+  Blob) → 2 *Draft with AI* (`POST /api/venues/[id]/seatmap/draft`: SSRF-safe fetch,
+  `aiExtractJsonFromImage` Gemini inlineData → Copilot gpt-4o, quota-gated, cached by image hash,
+  never saved) → 3 review beside the plan in 2D/3D with a **test seat** box and JSON editor
+  (`validateSeatMapConfig`) → 4 save draft / approve. "Your tickets here" lists events at the
+  venue with a seat and a *View seat* button.
+- **Layouts** — `bowl-end-stage` (default), `bowl-centre-stage` (紅館 四面台, stands on four
+  sides) and `theatre` (plan + seat breakdown only; no projected position yet). Levels can be
+  `stand` or `floor`, blocks numeric or lettered, rows ordered by `rowSequence`. A printed
+  "Section 10" resolves as block 10 when the venue has such a block.
+- **Researched drafts** — `scripts/data/venue-seatmap-drafts.ts` + `scripts/seed-venue-seatmaps.ts`
+  (dry run by default, `--apply` writes drafts only and never overwrites). Seeded 2026-09-25:
+  AsiaWorld-Expo Arena, Hong Kong Coliseum, Macpherson Stadium, Xiqu Centre Grand Theatre, EKCC
+  Theatre. No fixed plan exists for Kai Tak Arena (retractable seating, per-event charts) or AXA
+  Dreamland (per-promoter flat-hall layouts); livehouses and AWE exhibition halls are standing-only.
+- **3D look** — instanced seats per block (60k desktop / 15k mobile cap), optional lightstick
+  crowd, glowing stage with LED screens, block labels, desktop-only bloom, hover/select, and a
+  curved camera flight into the seat (reduced motion → instant cut). Built in
+  `seats3d.ts` (pure) + `seat-map-3d-scene.ts`; three is still lazy-loaded.
+
 ## 4. Theme boot script
 
 Every page (via `src/app/layout.tsx`) inherits a boot script eliminating the light→dark
