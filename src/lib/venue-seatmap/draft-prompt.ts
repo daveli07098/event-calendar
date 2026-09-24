@@ -7,7 +7,7 @@
  *
  * Bump this whenever the prompt text changes in any way that could change the model's output.
  */
-export const DRAFT_PROMPT_VERSION = "2026-09-24.1";
+export const DRAFT_PROMPT_VERSION = "2026-09-25.1";
 
 import { kaiTakStadium } from "./venues/kai-tak";
 
@@ -90,6 +90,12 @@ Pick the one that matches what the plan actually shows. If genuinely unclear, om
 - Numeric blocks (e.g. "201"-"240") go in \`blockNumberRanges\` as inclusive [min,max] pairs. Non-numeric blocks
   (letters, named boxes, "A"-"D") go in \`blockLabelRanges\` as an ordered \`labels\` array — never invent numbers for
   lettered blocks or vice versa.
+
+## Rows
+- When the plan prints a level's row labels, list them front-to-back in \`rowSequence\` exactly as printed (e.g.
+  ["AA","BB","A","B",…] or ["1","2",…,"20"]), keeping any skipped letters skipped (many HK venues omit I and O).
+- Use \`rowBankSplit\` ONLY for a real walkway split into a lower and an upper bank; never as a way to list rows.
+- If the plan shows no row labels for a level, omit both.
 
 ## Confidence rules — read carefully, these are the most important rules in this prompt
 - \`positionConfidence\` on a block range: "confirmed" ONLY when the plan unambiguously shows where this specific
