@@ -130,6 +130,49 @@ describe("GET /api/venues/events", () => {
     ]);
   });
 
+  it("flags hasSeatMap for a venue with an approved community seat-map config, even with no built-in match", async () => {
+    const future = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const communityVenue = { id: "community-1", name: "Some Random Hall", aliases: [] as string[], seatMapStatus: "approved" };
+    prismaMock.event.findMany.mockResolvedValue([
+      mockEvent({
+        id: "evt-community",
+        calendarId: "cal-1",
+        location: "Some Random Hall",
+        startTime: future,
+        endTime: new Date(future.getTime() + 60 * 60 * 1000),
+        calendar: mockCalendar({ id: "cal-1", name: "My Calendar" }),
+      }),
+    ]);
+    prismaMock.eventVenue.findMany.mockResolvedValue([communityVenue]);
+
+    const res = await GET();
+    const body = await res.json();
+    expect(body.venues).toHaveLength(1);
+    expect(body.venues[0].hasSeatMap).toBe(true);
+    expect(body.venues[0].upcoming[0].hasSeatMap).toBe(true);
+  });
+
+  it("does not flag hasSeatMap for a venue with only a DRAFT (not approved) community config", async () => {
+    const future = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    const communityVenue = { id: "community-2", name: "Some Random Hall", aliases: [] as string[], seatMapStatus: "draft" };
+    prismaMock.event.findMany.mockResolvedValue([
+      mockEvent({
+        id: "evt-community-2",
+        calendarId: "cal-1",
+        location: "Some Random Hall",
+        startTime: future,
+        endTime: new Date(future.getTime() + 60 * 60 * 1000),
+        calendar: mockCalendar({ id: "cal-1", name: "My Calendar" }),
+      }),
+    ]);
+    prismaMock.eventVenue.findMany.mockResolvedValue([communityVenue]);
+
+    const res = await GET();
+    const body = await res.json();
+    expect(body.venues).toHaveLength(1);
+    expect(body.venues[0].hasSeatMap).toBe(false);
+  });
+
   it("counts past matched events without listing them in upcoming", async () => {
     const past = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const events = [

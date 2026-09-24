@@ -80,15 +80,19 @@ export async function GET() {
       },
       orderBy: { startTime: "asc" },
     }),
-    prisma.eventVenue.findMany({ select: { id: true, name: true, aliases: true } }),
+    prisma.eventVenue.findMany({ select: { id: true, name: true, aliases: true, seatMapStatus: true } }),
   ]);
 
   // Venue-level hasSeatMap: does the venue's own name or any of its aliases resolve to a
-  // built-in seat-map config?
+  // built-in seat-map config, OR does the venue's own DB row carry an approved community-
+  // drafted config (src/app/api/venues/[id]/seatmap)? A "draft" config doesn't count here —
+  // it hasn't been reviewed yet, so the UI shouldn't advertise it as available.
   const venueHasSeatMap = new Map<string, boolean>();
   for (const v of venues) {
     const hasSeatMap =
-      matchVenueConfig(v.name) !== null || v.aliases.some((alias) => matchVenueConfig(alias) !== null);
+      matchVenueConfig(v.name) !== null ||
+      v.aliases.some((alias) => matchVenueConfig(alias) !== null) ||
+      v.seatMapStatus === "approved";
     venueHasSeatMap.set(v.id, hasSeatMap);
   }
 

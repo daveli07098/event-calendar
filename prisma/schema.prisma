@@ -143,16 +143,25 @@ model EventBookmark {
 
 // Community venue directory — referenced when importing ticket events
 model EventVenue {
-  id        String   @id @default(cuid())
-  name      String                      // primary/official name
-  aliases   String[] @default([])       // other names used for the same venue
-  address   String?                     // street address
-  city      String   @default("Hong Kong")
-  country   String   @default("HK")
-  tags      String[] @default([])       // e.g. ["arena", "theatre", "concert-hall"]
-  imageUrls String[] @default([])       // uploaded venue / seating-view images (Vercel Blob URLs)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String    @id @default(cuid())
+  name           String                      // primary/official name
+  aliases        String[]  @default([])      // other names used for the same venue
+  address        String?                     // street address
+  city           String    @default("Hong Kong")
+  country        String    @default("HK")
+  tags           String[]  @default([])      // e.g. ["arena", "theatre", "concert-hall"]
+  imageUrls      String[]  @default([])      // uploaded venue / seating-view images (Vercel Blob URLs)
+  // Procedural seat-map (see src/lib/venue-seatmap/types.ts VenueSeatMapConfig), community-
+  // sourced/AI-drafted rather than built into the registry. Nullable/additive — a venue with
+  // none of these renders no seat map, same as before this feature existed.
+  seatMapConfig    Json?                     // VenueSeatMapConfig, validated by validate.ts before save
+  seatMapStatus    String?                   // "draft" | "approved"
+  seatMapSource    String?                   // "ai-draft" | "research" | "user"
+  seatMapPlanUrl   String?                   // uploaded/linked official seating-plan image or PDF
+  seatMapUpdatedBy String?                   // session user email/id who last wrote seatMapConfig
+  seatMapUpdatedAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@index([name])
 }

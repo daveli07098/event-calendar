@@ -455,3 +455,186 @@ export async function aiExtractJson(prompt: string): Promise<AiJsonResult> {
   const unique = [...new Set(failures)];
   throw new Error(unique.slice(0, 2).join(" | ") || "All AI providers failed");
 }
+
+// ---------------------------------------------------------------------------
+// Vision extraction — a prompt PLUS one inline image/PDF (venue seating-plan
+// drafting). Kept as sibling functions to the text-only cascade above rather
+// than threading an optional image param through callGeminiJson /
+// callOpenAICompatibleJson, so their existing behavior/signatures are
+// untouched for every current caller.
+// ---------------------------------------------------------------------------
+
+/** Inline image/PDF bytes to attach to a vision-capable extraction call. */
+export interface AiImageInput {
+  /** e.g. "image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf". */
+  mimeType: string;
+  /** Raw bytes, base64-encoded (no "data:" prefix). */
+  base64: string;
+}
+
+/**
+ * Gemini JSON-mode call with an inline image/PDF part alongside the text prompt. Mirrors
+ * callGeminiJson's request shape/error handling/quota tracking exactly, differing only in the
+ * `contents[0].parts` payload — Gemini accepts `application/pdf` inline the same way it does
+ * images, so this one function covers both.
+ */
+async function callGeminiJsonWithImage(prompt: string, model: string, image: AiImageInput): Promise<AiJsonResult> {
+  const apiKey = process.env.GEMINI_API_KEY!;
+  const endpoint = `${GEMINI_BASE_URL}/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const body = JSON.stringify({
+    contents: [
+      {
+        parts: [{ text: prompt }, { inlineData: { mimeType: image.mimeType, data: image.base64 } }],
+      },
+    ],
+    generationConfig: {
+      responseMimeType: "application/json",
+      maxOutputTokens: 8192,
+      temperature: 0,
+      ...(geminiPool.spec(model)?.thinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+    },
+  });
+
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 2000));
+    res = await aiFetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(45_000), // vision calls run slower than text-only extraction
+    });
+    if (res.ok || res.status !== 503) break;
+  }
+
+  if (!res || !res.ok) {
+    let detail = "";
+    try {
+      const errBody = await res?.json();
+      if (errBody?.error?.message) detail = ` — ${errBody.error.message}`;
+    } catch {
+      // Non-JSON error body — status code alone will have to do
+    }
+    if (res?.status === 429 && isDailyQuotaError(detail)) await markModelExhausted(model);
+    throw new Error(`Gemini API error: ${res?.status ?? "unknown"}${detail}`);
+  }
+  await recordModelCall(model);
+  const data = await res.json();
+  const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+  const usage = data.usageMetadata as { totalTokenCount?: number } | undefined;
+  return {
+    data: parseJsonLoose(raw),
+    provider: model,
+    tokensUsed: usage?.totalTokenCount ?? null,
+  };
+}
+
+/**
+ * OpenAI-compatible (Copilot) chat-completions call with an inline image as a `image_url` data
+ * URL alongside the text prompt. Images only — the caller must not invoke this for a PDF (no
+ * OpenAI-compatible provider used here accepts inline PDF bytes this way).
+ */
+async function callOpenAICompatibleJsonWithImage(
+  prompt: string,
+  image: AiImageInput,
+  endpoint: string,
+  token: string,
+  model: string,
+  providerName: string,
+  extraHeaders: Record<string, string> = {}
+): Promise<AiJsonResult> {
+  const res = await aiFetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...extraHeaders,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.base64}` } },
+          ],
+        },
+      ],
+      max_tokens: 4096,
+      temperature: 0,
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+
+  if (!res.ok) throw new Error(`AI API error: ${res.status}`);
+  const data = await res.json();
+  const raw: string = data.choices?.[0]?.message?.content ?? "{}";
+  const usage = data.usage as { total_tokens?: number } | undefined;
+  return {
+    data: parseJsonLoose(raw),
+    provider: providerName,
+    tokensUsed: usage?.total_tokens ?? null,
+  };
+}
+
+async function callCopilotJsonWithImage(prompt: string, image: AiImageInput, githubToken: string): Promise<AiJsonResult> {
+  const copilotToken = await getCopilotToken(githubToken);
+  return callOpenAICompatibleJsonWithImage(
+    prompt,
+    image,
+    "https://api.githubcopilot.com/chat/completions",
+    copilotToken,
+    "gpt-4o",
+    "github-copilot",
+    {
+      "Copilot-Integration-Id": "vscode-chat",
+      "Editor-Version": "vscode/1.95.0",
+      "Editor-Plugin-Version": "copilot-chat/0.22.4",
+    }
+  );
+}
+
+/**
+ * Run a JSON-extraction prompt WITH an attached image/PDF through the vision-capable subset of
+ * the provider cascade: every Gemini model (Gemini accepts inline PDF too), then GitHub
+ * Copilot's gpt-4o (images only — skipped entirely for a PDF `image.mimeType`). Groq is
+ * deliberately never in this cascade — none of its models here accept image input, so a hop
+ * through it would only ever fail.
+ */
+export async function aiExtractJsonFromImage(prompt: string, image: AiImageInput): Promise<AiJsonResult> {
+  const geminiKey = process.env.GEMINI_API_KEY;
+  const githubToken = process.env.GITHUB_TOKEN;
+  const isPdf = image.mimeType === "application/pdf";
+
+  const providers: Array<() => Promise<AiJsonResult>> = [];
+  if (geminiKey) {
+    for (const model of await availableCascade()) {
+      providers.push(() => callGeminiJsonWithImage(prompt, model, image));
+    }
+  }
+  if (githubToken && !isPdf) {
+    providers.push(() => callCopilotJsonWithImage(prompt, image, githubToken));
+  }
+  if (providers.length === 0) {
+    throw new Error(
+      isPdf
+        ? "No AI provider configured for PDF extraction (Copilot doesn't support inline PDFs — configure GEMINI_API_KEY)"
+        : "No AI provider configured for image extraction"
+    );
+  }
+
+  const failures: string[] = [];
+  for (const provider of providers) {
+    try {
+      return await provider();
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      failures.push(err.message);
+      console.warn(`[ai] vision provider failed (${failures.length}/${providers.length}): ${err.message}`);
+      if (!isTransientAiError(err.message)) throw err;
+    }
+  }
+  const unique = [...new Set(failures)];
+  throw new Error(unique.slice(0, 2).join(" | ") || "All AI providers failed");
+}
