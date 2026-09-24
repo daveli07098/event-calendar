@@ -61,10 +61,17 @@
  *    descriptor, so that case still parses. The trade-off is a small
  *    residual false-positive surface for keyword-shaped English words
  *    ("row", "gate") appearing in truly unrelated prose; value shapes are
- *    kept short (row: 1–3 letters or digits; seat/block: digit-led) and a
- *    small stopword guard rejects a handful of common filler words (see
- *    `STOPWORDS`) to keep that surface small, but it is not exhaustive
- *    NLP-grade disambiguation.
+ *    kept short (row: 1–3 letters or digits; seat: digit-led; block: either
+ *    digit-led OR a single letter with an optional 1–2 digit suffix, e.g.
+ *    "A"/"A1" — see point 9) and a small stopword guard rejects a handful
+ *    of common filler words (see `STOPWORDS`) to keep that surface small,
+ *    but it is not exhaustive NLP-grade disambiguation. Letter blocks
+ *    inherit a slightly larger residual surface than digit blocks — a
+ *    single-letter value collides more easily with ordinary words ("don't
+ *    block a doorway" → could read as block "a") — accepted as the same
+ *    class of trade-off, not stopword-guarded like row/gate because
+ *    single-letter block codes (block "A") are themselves extremely common
+ *    and legitimate.
  *    This applies even more readily to AREA names, which need no
  *    accompanying value at all (unlike gate/row/seat, which require a
  *    keyword+value pair) — "meet on the balcony" or "second floor of the
@@ -110,6 +117,72 @@
  *    be correct, but naive lexicographic sort of all rows together is not
  *    (`BB` < `Z` lexicographically, but BB is physically further back).
  *
+ * 9. Letter blocks, areas, and aisles are additional ways of stating `block`.
+ *    Hong Kong venues also number/letter blocks via "Block A"/"Blk C",
+ *    "Area A" (arena floor letter-sections, distinct from the named
+ *    theatre-tier `area` values below), "A區"/"A 區"/"區A" (CJK), and via
+ *    "aisle" numbering ("Aisle 43", "43段", "段43" — the convention Hong
+ *    Kong Coliseum 紅館 uses for its stand sections). All of these populate
+ *    `block`, same field as "Block 225", not a separate field — a block IS
+ *    "the venue's named/numbered wedge", whether it's spelled with a
+ *    number, a letter, or reached via an aisle number. When a value came
+ *    from an aisle marker specifically, `blockKind: "aisle"` is set
+ *    alongside it (metadata about how `block` was derived, not an
+ *    independent value — hence a bare literal, not a `SeatField` wrapper).
+ *    "Section D" (letter, not digit) is also treated as a block per this
+ *    point, unlike "Section 118" (digit — see point 2's `section` field):
+ *    a letter directly after Section/Sect/Sec reads as the same kind of
+ *    named wedge as "Block D", not a generic ticketing-site section number.
+ *    The CJK "區A" (區 before the letter) form is deliberately matched only
+ *    with NO whitespace between them — Hong Kong district names routinely
+ *    end in 區 (灣仔區, 油尖旺區) followed by further address text, so a
+ *    loose "區 <letter>" match would reopen the same address-collision risk
+ *    that point 6 already guards against for 號/番.
+ *    The CJK aisle markers (N段 / 段N) are additionally gated behind the
+ *    SAME `CJK_SEATING_CONTEXT_RE` check used for 號/番 in point 6: 段 is
+ *    also how Taiwanese road addresses mark a numbered section (e.g.
+ *    忠孝東路4段100號 = "No. 100, Section 4, Zhongxiao East Road"), so a bare
+ *    "N段" with no other CJK seating marker (區/排/樓/層/階/列/ブロック)
+ *    elsewhere in the string is left unmatched rather than fabricating an
+ *    aisle block from a street address. This is a mitigation, not a full
+ *    guarantee — an address that happens to also contain one of those
+ *    markers could still misfire; flagged as a known residual gap rather
+ *    than a solved case (see "not handled" below).
+ *
+ * 10. Bare theatre-tier CJK terms extend `area`, not `level`.
+ *    堂座 (Stalls), 樓座 (Circle), 廂座 (Box), 露台 (Balcony), and 內場
+ *    (arena floor) are Chinese theatre/arena tier names, parallel to the
+ *    English "Stalls"/"Circle"/"Balcony"/"Floor" wording already in
+ *    `AREA_RULES` (point 5's `area`, not the numeric `level` field) — they
+ *    describe a *named* tier, not a numbered storey, so they belong beside
+ *    Stalls/Balcony rather than beside "2樓"/"Level 2". "Arena floor"
+ *    (English) needs no new rule: it already matches the existing bare
+ *    `\bfloor\b` rule verbatim.
+ *
+ * 11. A single paste can describe MULTIPLE tickets; `parseSeat` still
+ *    returns only the first.
+ *    A confirmation email or a group order can list several seats in one
+ *    string, e.g. "Block 109·RowJ·Seat223 Block 225·RowJ·Seat78" or one
+ *    ticket per line. `parseSeat`'s contract (a single `SeatParseResult`)
+ *    doesn't change — it keeps returning the FIRST ticket's fields, exactly
+ *    as it already did before this was recognised (its keyword scan always
+ *    took the leftmost match) — but it now also reports
+ *    `additionalSeatsDetected`, a count of further ticket-shaped segments
+ *    found after the first, so a caller doesn't silently lose the rest.
+ *    The exported `parseSeats` function returns the full list, one
+ *    `SeatParseResult` per ticket, by splitting the input on repeated
+ *    Block/區/Aisle markers (see `splitTicketSegments`) before parsing each
+ *    segment independently. A newline between two tickets doesn't need
+ *    special handling of its own: it's ordinary whitespace to the marker
+ *    regex, so "Block 109·... \n Block 225·..." (one ticket per line) and
+ *    "Block 109·... Block 225·..." (one line, repeated marker) split the
+ *    same way. That also means a marker-less line (a greeting, a delivery
+ *    note) never becomes a bogus segment of its own — only genuine
+ *    marker-to-marker boundaries create a split. A single-ticket input
+ *    still produces a single-element array from `parseSeats`, so it's a
+ *    strict superset of `parseSeat`, not a different code path for the
+ *    common case.
+ *
  * Formats NOT handled (deliberately, not oversights):
  *  - Numeric-row dash-compacts, e.g. `225-08-101` — indistinguishable from
  *    an ISO date fragment; see point 4.
@@ -126,6 +199,14 @@
  *  - Full-width digits (２２５) or CJK numerals (二樓 / 二二五) — not present
  *    in any confirmed real example; flagged here as future work rather
  *    than guessed at.
+ *  - Double-letter block codes (e.g. "Block AA") — not a confirmed real
+ *    format; the letter-block value shape is deliberately kept to a single
+ *    letter plus an optional 1–2 digit suffix (see point 9).
+ *  - A Taiwan-style road-section address (e.g. 忠孝東路4段100號) that
+ *    happens to ALSO contain another CJK seating marker elsewhere in the
+ *    same string could still be misread as an aisle block — the point 9
+ *    mitigation only covers the common case of a bare address; not
+ *    exhaustively solved.
  */
 
 // ---- Public types ---------------------------------------------------------
@@ -150,13 +231,20 @@ export interface SeatFieldConflict {
 export interface ParsedSeatFields {
   gate?: SeatField<string>;
   level?: SeatField<number>;
-  /** Stadium/arena block number, e.g. "225", "519B" — letter suffix preserved verbatim. */
+  /** Stadium/arena block, e.g. "225", "519B" (letter suffix preserved verbatim), or a
+   * letter block/area/aisle code like "A", "A1", "43" — see header point 9. */
   block?: SeatField<string>;
+  /** Set when `block` was derived from an aisle marker ("Aisle 43", "43段", "段43")
+   * rather than a Block/Area marker — see header point 9. Metadata about how `block`
+   * was read, not an independent value, hence a bare literal rather than a `SeatField`. */
+  blockKind?: "aisle";
   /** Generic ticketing-site section number, e.g. "118" (Section/Sec/Sect). No level tie-in — see header point 2. */
   section?: SeatField<string>;
-  /** Named area with no block/section number: theatre tiers (Stalls, Dress
-   * Circle, Upper Circle, Balcony), arena floor (Floor A), or a standing/GA
-   * category (Standing, General Admission, GA Pit). */
+  /** Named area with no block/section number: theatre tiers (Stalls, Circle,
+   * Dress Circle, Upper Circle, Balcony, Box), arena floor (Floor A), or a
+   * standing/GA category (Standing, General Admission, GA Pit). CJK
+   * equivalents (堂座/樓座/廂座/露台/內場) map onto these same English
+   * labels — see header point 10. */
   area?: SeatField<string>;
   row?: SeatField<string>;
   seat?: SeatField<string>;
@@ -176,8 +264,22 @@ export interface ParseSeatOptions {
 }
 
 export type SeatParseResult =
-  | { status: "parsed"; raw: string; fields: ParsedSeatFields; conflicts: SeatFieldConflict[] }
-  | { status: "partial"; raw: string; fields: ParsedSeatFields; conflicts: SeatFieldConflict[] }
+  | {
+      status: "parsed";
+      raw: string;
+      fields: ParsedSeatFields;
+      conflicts: SeatFieldConflict[];
+      /** Count of additional tickets detected in the same input beyond the one this
+       * result describes (0 when only one ticket was found) — see `parseSeats`. */
+      additionalSeatsDetected: number;
+    }
+  | {
+      status: "partial";
+      raw: string;
+      fields: ParsedSeatFields;
+      conflicts: SeatFieldConflict[];
+      additionalSeatsDetected: number;
+    }
   | { status: "unparseable"; raw: string };
 
 // ---- Internal: field regexes -----------------------------------------------
@@ -201,6 +303,19 @@ const GATE_RE = /\bgate\s*[:#]?\s*([A-Za-z0-9]{1,4})\b/i;
 const LEVEL_RE = /\blevel\s*[:#]?\s*(\d{1,2})\b/i;
 const BLOCK_RE = /\b(?:block|blk)\.?\s*[:#]?\s*(\d{1,4}[A-Za-z]?)\b/i;
 const SECTION_RE = /\b(?:section|sect|sec)\.?\s*[:#]?\s*(\d{1,4}[A-Za-z]?)\b/i;
+
+// Letter block/area codes — "Block A", "Blk C", "Section D" (letter, not
+// digit — see header point 9), "Area A". Value shape: a single letter with
+// an optional 1–2 digit suffix ("A", "A1"), deliberately narrower than the
+// digit-led BLOCK_RE/SECTION_RE value shapes so the two never overlap on
+// the same captured text (one requires a leading digit, the other a
+// leading letter).
+const BLOCK_LETTER_RE = /\b(?:block|blk|section|sect|sec)\.?\s*[:#]?\s*([A-Za-z]\d{0,2})\b/i;
+const AREA_LETTER_BLOCK_RE = /\barea\s*[:#]?\s*([A-Za-z]\d{0,2})\b/i;
+
+// Aisle numbering — Hong Kong Coliseum 紅館-style stand sections identified
+// by aisle rather than block; recorded into `block` with `blockKind: "aisle"`.
+const AISLE_RE = /\baisle\s*[:#]?\s*(\d{1,4}[A-Za-z]?)\b/i;
 
 // Row values are kept short and shaped like real row labels (1–3 letters,
 // e.g. "BB", or 1–3 digits, e.g. "12") — this is also what keeps "Row of
@@ -228,6 +343,26 @@ function extractCjkSeat(s: string): string | undefined {
   return s.match(SEAT_CJK_RE)?.[1];
 }
 
+// Letter block CJK forms — "A區"/"A 區" (letter before) and the tighter,
+// no-whitespace "區A" (letter after) — see header point 9 for why the
+// letter-after form requires no gap (Hong Kong district-name collision).
+// Tried only once BLOCK_CJK_RE (digit-led, e.g. "519B區") has failed, so a
+// letter *suffix* on a digit block is never mistaken for a bare letter block.
+const BLOCK_CJK_LETTER_BEFORE_RE = /\b([A-Za-z])\s*區/;
+const BLOCK_CJK_LETTER_AFTER_RE = /區([A-Za-z]\d{0,2})\b/;
+
+// Aisle CJK forms — "43段" / "段43". Gated behind the same
+// `CJK_SEATING_CONTEXT_RE` check as 號/番 (header point 6/9): 段 also marks a
+// road-address section in Taiwan (忠孝東路4段100號), so a bare "N段" with no
+// other CJK seating marker in the string is left unmatched.
+const AISLE_CJK_BEFORE_RE = /(\d{1,4})\s*段/;
+const AISLE_CJK_AFTER_RE = /段\s*(\d{1,4})/;
+
+function extractCjkAisle(s: string): string | undefined {
+  if (!CJK_SEATING_CONTEXT_RE.test(s)) return undefined;
+  return s.match(AISLE_CJK_BEFORE_RE)?.[1] ?? s.match(AISLE_CJK_AFTER_RE)?.[1];
+}
+
 interface AreaRule {
   re: RegExp;
   label: (m: RegExpMatchArray) => string;
@@ -238,6 +373,9 @@ interface AreaRule {
 const AREA_RULES: AreaRule[] = [
   { re: /\bdress\s+circle\b/i, label: () => "Dress Circle" },
   { re: /\bupper\s+circle\b/i, label: () => "Upper Circle" },
+  // Bare "Circle" (theatre tier) — must come after the two-word forms above
+  // so those aren't swallowed by this shorter match.
+  { re: /\bcircle\b/i, label: () => "Circle" },
   { re: /\bga\s*pit\b/i, label: () => "GA Pit" },
   { re: /\bgeneral\s+admission\b/i, label: () => "General Admission" },
   { re: /\bstalls\b/i, label: () => "Stalls" },
@@ -247,6 +385,14 @@ const AREA_RULES: AreaRule[] = [
   // class plus trailing \b means a multi-letter word right after "Floor"
   // (like "Floor Row 3") can't accidentally be captured as the sub-label.
   { re: /\bfloor\b(?:\s+([A-Za-z]))?\b/i, label: (m) => (m[1] ? `Floor ${m[1]}` : "Floor") },
+  // CJK theatre-tier equivalents — see header point 10. These describe a
+  // named tier (like Stalls/Balcony above), not a numbered storey, so they
+  // populate `area`, not the numeric `level` field.
+  { re: /堂座/, label: () => "Stalls" },
+  { re: /樓座/, label: () => "Circle" },
+  { re: /廂座/, label: () => "Box" },
+  { re: /露台/, label: () => "Balcony" },
+  { re: /內場/, label: () => "Floor" },
 ];
 
 function matchArea(s: string): string | undefined {
@@ -263,6 +409,7 @@ interface ExtractedRaw {
   gate?: string;
   level?: { value: number; source: "stated" };
   block?: string;
+  blockKind?: "aisle";
   section?: string;
   area?: string;
   row?: string;
@@ -271,6 +418,37 @@ interface ExtractedRaw {
 
 function hasAnyField(f: ExtractedRaw): boolean {
   return !!(f.gate || f.level || f.block || f.section || f.area || f.row || f.seat);
+}
+
+interface BlockMatch {
+  value: string;
+  kind?: "aisle";
+}
+
+/** Tries every way this module recognises a `block` value, in priority
+ * order — see header point 9. Digit-led forms are tried before letter-led
+ * ones so a letter *suffix* on a digit block (e.g. "519B") is never
+ * mis-read as a bare letter block. */
+function matchBlock(s: string): BlockMatch | undefined {
+  const numeric = s.match(BLOCK_RE)?.[1];
+  if (numeric) return { value: numeric };
+
+  const letter = s.match(BLOCK_LETTER_RE)?.[1] ?? s.match(AREA_LETTER_BLOCK_RE)?.[1];
+  if (letter) return { value: letter };
+
+  const aisle = s.match(AISLE_RE)?.[1];
+  if (aisle) return { value: aisle, kind: "aisle" };
+
+  const cjkNumeric = s.match(BLOCK_CJK_RE)?.[1];
+  if (cjkNumeric) return { value: cjkNumeric };
+
+  const cjkLetter = s.match(BLOCK_CJK_LETTER_BEFORE_RE)?.[1] ?? s.match(BLOCK_CJK_LETTER_AFTER_RE)?.[1];
+  if (cjkLetter) return { value: cjkLetter };
+
+  const cjkAisle = extractCjkAisle(s);
+  if (cjkAisle) return { value: cjkAisle, kind: "aisle" };
+
+  return undefined;
 }
 
 /** Scans the whole string for keyword+value pairs anywhere within it — see
@@ -285,8 +463,11 @@ function scanGeneral(s: string): ExtractedRaw {
   const levelValue = s.match(LEVEL_RE)?.[1] ?? s.match(LEVEL_CJK_RE)?.[1];
   if (levelValue) out.level = { value: Number(levelValue), source: "stated" };
 
-  const block = s.match(BLOCK_RE)?.[1] ?? s.match(BLOCK_CJK_RE)?.[1];
-  if (block) out.block = block;
+  const blockMatch = matchBlock(s);
+  if (blockMatch) {
+    out.block = blockMatch.value;
+    if (blockMatch.kind) out.blockKind = blockMatch.kind;
+  }
 
   const section = s.match(SECTION_RE)?.[1];
   if (section) out.section = section;
@@ -386,6 +567,60 @@ function classify(fields: ParsedSeatFields): "parsed" | "partial" {
   return "partial";
 }
 
+// ---- Internal: multi-ticket splitting ---------------------------------------
+
+// Marks the start of a new ticket within a multi-ticket paste — see header
+// point 11 / `parseSeats`. Deliberately narrower than every block-ish
+// keyword this module recognises (no "area"/"section"): the brief specifies
+// splitting on repeated Block/區/Aisle markers specifically, and widening
+// this would risk splitting a single ticket whose block was itself stated
+// via "Section"/"Area" wording (see header point 9) into bogus fragments.
+// Asymmetric by design: the English keywords PRECEDE their value ("Block
+// 225", so the split point is the keyword itself), but 區/段/ブロック
+// FOLLOW theirs ("225區", "43段", "A區" — see header point 9/`BLOCK_CJK_RE`/
+// `BLOCK_CJK_LETTER_BEFORE_RE`), so the split point there must back up to
+// include any immediately preceding digit run OR single letter — otherwise
+// that value is wrongly left behind, orphaned at the end of the PREVIOUS
+// segment, and the new segment starts marker-only with no value (e.g.
+// splitting "225區 ... 226區 ..." naively at the bare 區 characters would
+// strand "226" in segment 0 and leave segment 1 as just "區 ..."; same for
+// "A區 ... B區 ..." stranding "B"). A bare 區/ブロック (no preceding
+// digit/letter — the letter-AFTER form "區A", header point 9) still falls
+// through to matching just the marker itself, which is correct there since
+// the letter comes after it, not before.
+const TICKET_MARKER_SPLIT_RE =
+  /\b(?:block|blk|aisle)\b|(?:\d{1,4}[A-Za-z]?|\b[A-Za-z])\s*(?:區|ブロック)|區|ブロック|\d{1,4}\s*段|段/gi;
+
+/** Splits a raw multi-ticket paste into one string per ticket — see header
+ * point 11 / `parseSeats`. Operates directly on the RAW string (newlines
+ * and all) rather than pre-splitting on `\n`: a newline is just ordinary
+ * whitespace to `TICKET_MARKER_SPLIT_RE`, so "one ticket per line, each
+ * restating Block/Aisle/區" is already handled correctly by marker-based
+ * splitting alone (a marker right after a newline is still found, and the
+ * newline itself is trimmed away as part of whichever segment it borders).
+ * This also means a line with NO marker at all (e.g. a leading "Your
+ * ticket details:" greeting, or a trailing "please arrive early" note in a
+ * real confirmation email) never becomes a bogus segment of its own — it
+ * only gets swept into an existing segment's leading/trailing whitespace —
+ * which matters: an earlier version of this function split on every
+ * non-empty line unconditionally and mis-flagged such ordinary
+ * single-ticket, multi-line emails as containing an "additional" ticket.
+ * A single marker occurrence (the ordinary one-ticket case, split or not)
+ * is left as a single whole segment. */
+function splitTicketSegments(raw: string): string[] {
+  const idxs: number[] = [];
+  for (const m of raw.matchAll(TICKET_MARKER_SPLIT_RE)) idxs.push(m.index);
+  if (idxs.length < 2) return [raw];
+
+  const segments: string[] = [];
+  for (let i = 0; i < idxs.length; i++) {
+    const start = i === 0 ? 0 : idxs[i];
+    const end = i + 1 < idxs.length ? idxs[i + 1] : raw.length;
+    segments.push(raw.slice(start, end).trim());
+  }
+  return segments;
+}
+
 // ---- Public API -------------------------------------------------------------
 
 /**
@@ -393,6 +628,11 @@ function classify(fields: ParsedSeatFields): "parsed" | "partial" {
  * throws — unparseable/garbage/empty input returns `{ status: "unparseable" }`
  * rather than a half-filled object or an exception. The original string is
  * always preserved on `raw` so callers can fall back to displaying it as-is.
+ *
+ * When `input` contains more than one ticket (see `parseSeats`), this
+ * returns only the FIRST ticket's fields — `additionalSeatsDetected` on the
+ * result reports how many more were found so callers can decide whether to
+ * call `parseSeats` for the full list rather than silently dropping them.
  */
 export function parseSeat(input: string, opts: ParseSeatOptions = {}): SeatParseResult {
   const raw = input;
@@ -414,6 +654,7 @@ export function parseSeat(input: string, opts: ParseSeatOptions = {}): SeatParse
     gate: wrap(extracted.gate),
     level,
     block: wrap(extracted.block),
+    blockKind: extracted.blockKind,
     section: wrap(extracted.section),
     area: wrap(extracted.area),
     row: wrap(extracted.row),
@@ -421,5 +662,30 @@ export function parseSeat(input: string, opts: ParseSeatOptions = {}): SeatParse
   };
 
   const status = classify(fields);
-  return { status, raw, fields, conflicts };
+
+  // Segments beyond the first that themselves parse to something other than
+  // "unparseable" count as additional tickets — a trailing scrap of prose
+  // after the last real ticket shouldn't inflate the count. Recursion here
+  // is bounded: each sub-segment is a strict substring of `raw`, so it
+  // terminates even if a sub-segment itself contains further markers.
+  const restSegments = splitTicketSegments(raw).slice(1);
+  const additionalSeatsDetected = restSegments.filter((seg) => parseSeat(seg, opts).status !== "unparseable").length;
+
+  return { status, raw, fields, conflicts, additionalSeatsDetected };
+}
+
+/**
+ * Splits a raw paste containing MULTIPLE ticket descriptors — e.g. "Block
+ * 109·RowJ·Seat223 Block 225·RowJ·Seat78" or several newline-separated
+ * lines, one ticket each — into one `SeatParseResult` per ticket, in order.
+ * Splits on repeated Block/區/Aisle markers, wherever they fall (see
+ * `splitTicketSegments`); a single-ticket input returns a single-element
+ * array, same as calling `parseSeat` directly. Each element may
+ * independently be "parsed", "partial", or "unparseable" — a garbled extra
+ * fragment doesn't invalidate the tickets around it.
+ */
+export function parseSeats(input: string, opts: ParseSeatOptions = {}): SeatParseResult[] {
+  const segments = splitTicketSegments(input);
+  if (segments.length <= 1) return [parseSeat(input, opts)];
+  return segments.map((seg) => parseSeat(seg, opts));
 }

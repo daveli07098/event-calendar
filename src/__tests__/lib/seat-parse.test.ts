@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSeat } from "@/lib/seat-parse";
+import { parseSeat, parseSeats } from "@/lib/seat-parse";
 
 // A realistic per-venue inference function used only in the opt-in tests
 // below — mirrors the CONFIRMED Kai Tak Stadium seating chart (Level 2
@@ -412,5 +412,321 @@ describe("parseSeat", () => {
       if (result.status === "unparseable") throw new Error("unreachable");
       expect(result.fields.row).toEqual({ value: "BB", source: "stated" });
     });
+  });
+
+  describe("letter blocks — 'Block A', 'Blk C', 'Section D', 'Area A' (header point 9)", () => {
+    it("fixes the dropped-block regression: 'Block B Row 12 Seat 5' keeps the block", () => {
+      const result = parseSeat("Block B Row 12 Seat 5");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "B", source: "stated" });
+      expect(result.fields.row).toEqual({ value: "12", source: "stated" });
+      expect(result.fields.seat).toEqual({ value: "5", source: "stated" });
+    });
+
+    it.each(["Block A", "BLOCK B", "Blk C"])("parses '%s' alone as a partial block", (input) => {
+      const result = parseSeat(input);
+      expect(result.status).toBe("partial");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      const expected = input.match(/[A-Za-z]$/)?.[0];
+      expect(result.fields.block).toEqual({ value: expected, source: "stated" });
+      expect(result.fields.blockKind).toBeUndefined();
+    });
+
+    it("treats a letter after 'Section' as a block, not the numeric section field", () => {
+      const result = parseSeat("Section D Row 4 Seat 9");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "D", source: "stated" });
+      expect(result.fields.section).toBeUndefined();
+    });
+
+    it("still treats a digit after 'Section' as the numeric section field, not block (no regression)", () => {
+      const result = parseSeat("Section 118, Row 12, Seat 5");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.section).toEqual({ value: "118", source: "stated" });
+      expect(result.fields.block).toBeUndefined();
+    });
+
+    it("parses a short letter+digit block code like 'A1'", () => {
+      const result = parseSeat("Block A1 Row 2 Seat 3");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "A1", source: "stated" });
+    });
+
+    it("does not lose a digit-led block's letter suffix now that letter blocks exist (no regression)", () => {
+      const result = parseSeat("Level 5 Block 519B Row M Seat 547");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "519B", source: "stated" });
+    });
+  });
+
+  describe("areas as block — 'Area A' (arena floor letter-section, header point 9)", () => {
+    it("parses 'Area A Row 3 Seat 8' with block 'A', distinct from the named-tier 'area' field", () => {
+      const result = parseSeat("Area A Row 3 Seat 8");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "A", source: "stated" });
+      expect(result.fields.area).toBeUndefined();
+    });
+
+    it("parses the CJK letter-block form 'A區'", () => {
+      const result = parseSeat("A區 Row 3 Seat 8");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "A", source: "stated" });
+    });
+
+    it("parses the CJK letter-block form with a space, 'A 區'", () => {
+      const result = parseSeat("A 區 Row 3 Seat 8");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "A", source: "stated" });
+    });
+
+    it("parses the reversed tight CJK letter-block form '區A' (no whitespace)", () => {
+      const result = parseSeat("區A 3排 8號");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "A", source: "stated" });
+    });
+
+    it("does not break the existing numeric '225區' CJK block (no regression)", () => {
+      const result = parseSeat("225區 BB排 101號");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "225", source: "stated" });
+    });
+  });
+
+  describe("aisles — Hong Kong Coliseum 紅館-style stand numbering (header point 9)", () => {
+    it("parses 'Aisle 43' into block '43'", () => {
+      const result = parseSeat("Aisle 43 Row 5 Seat 12");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "43", source: "stated" });
+      expect(result.fields.blockKind).toBe("aisle");
+    });
+
+    it("parses the CJK aisle form '43段'", () => {
+      const result = parseSeat("43段 5排 12號");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "43", source: "stated" });
+      expect(result.fields.blockKind).toBe("aisle");
+    });
+
+    it("parses the reversed CJK aisle form '段43'", () => {
+      const result = parseSeat("段43 5排 12號");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "43", source: "stated" });
+      expect(result.fields.blockKind).toBe("aisle");
+    });
+
+    it("a bare Block does not get blockKind 'aisle' (metadata only set for actual aisle matches)", () => {
+      const result = parseSeat("Block 225 Row BB Seat 101");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.blockKind).toBeUndefined();
+    });
+
+    it("does NOT extract an aisle block from a bare Taiwan road-address fragment (段 with no other CJK seating marker)", () => {
+      // 忠孝東路4段100號 = "No. 100, Section 4, Zhongxiao East Road" — 段 here
+      // marks a road section, not an aisle. See header point 9.
+      const result = parseSeat("忠孝東路4段100號");
+      expect(result.status).toBe("unparseable");
+    });
+  });
+
+  describe("theatre-tier CJK equivalents extend `area` (header point 10)", () => {
+    it("parses bare English 'Circle' (after Dress/Upper Circle, no regression — see the 'theatre naming' describe above)", () => {
+      const result = parseSeat("Circle Row C Seat 11");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.area).toEqual({ value: "Circle", source: "stated" });
+    });
+
+    it.each([
+      ["堂座", "Stalls"],
+      ["樓座", "Circle"],
+      ["廂座", "Box"],
+      ["露台", "Balcony"],
+      ["內場", "Floor"],
+    ])("parses CJK theatre tier '%s' as area '%s'", (cjk, label) => {
+      const result = parseSeat(`${cjk} Row 3 Seat 8`);
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.area).toEqual({ value: label, source: "stated" });
+      expect(result.fields.level).toBeUndefined();
+    });
+
+    it("'Arena floor' already matches the existing bare Floor rule (no new rule needed)", () => {
+      const result = parseSeat("Arena floor Row 3 Seat 8");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.area).toEqual({ value: "Floor", source: "stated" });
+    });
+
+    it("numeric rows and CJK numeric rows still work alongside the new area labels (no regression)", () => {
+      const en = parseSeat("Circle Row 12 Seat 5");
+      const cjk = parseSeat("堂座 12排 5號");
+      if (en.status === "unparseable" || cjk.status === "unparseable") throw new Error("unreachable");
+      expect(en.fields.row).toEqual({ value: "12", source: "stated" });
+      expect(cjk.fields.row).toEqual({ value: "12", source: "stated" });
+    });
+
+    it("double-letter AA/BB rows still work alongside the new area labels (no regression)", () => {
+      const result = parseSeat("露台 Row AA Seat 5");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.area).toEqual({ value: "Balcony", source: "stated" });
+      expect(result.fields.row).toEqual({ value: "AA", source: "stated" });
+    });
+  });
+
+  describe("middle-dot / no-space compact formats — letter variant (header point 9)", () => {
+    it("keeps the existing numeric middle-dot format working: 'Block 225·RowJ·Seat78'", () => {
+      const result = parseSeat("Block 225·RowJ·Seat78");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "225", source: "stated" });
+      expect(result.fields.row).toEqual({ value: "J", source: "stated" });
+      expect(result.fields.seat).toEqual({ value: "78", source: "stated" });
+    });
+
+    it("parses the new letter variant 'Block A·Row12·Seat5'", () => {
+      const result = parseSeat("Block A·Row12·Seat5");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "A", source: "stated" });
+      expect(result.fields.row).toEqual({ value: "12", source: "stated" });
+      expect(result.fields.seat).toEqual({ value: "5", source: "stated" });
+    });
+  });
+
+  describe("multiple tickets in one paste — additionalSeatsDetected (header point 11)", () => {
+    it("a single-ticket input reports additionalSeatsDetected: 0", () => {
+      const result = parseSeat("Gate F Level 2 Block 225 Row BB Seat 101");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.additionalSeatsDetected).toBe(0);
+    });
+
+    it("parseSeat on 'Block 109·RowJ·Seat223 Block 225·RowJ·Seat78' returns the FIRST ticket and flags one more", () => {
+      const result = parseSeat("Block 109·RowJ·Seat223 Block 225·RowJ·Seat78");
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "109", source: "stated" });
+      expect(result.fields.row).toEqual({ value: "J", source: "stated" });
+      expect(result.fields.seat).toEqual({ value: "223", source: "stated" });
+      expect(result.additionalSeatsDetected).toBe(1);
+    });
+
+    it("flags the correct count across three tickets", () => {
+      const result = parseSeat(
+        "Block 109·RowJ·Seat223 Block 225·RowJ·Seat78 Block 301·RowK·Seat14",
+      );
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.additionalSeatsDetected).toBe(2);
+    });
+
+    it("does NOT over-count an ordinary single-ticket multi-line email as containing an additional seat", () => {
+      // Regression guard: a marker-less line before/after the real ticket
+      // line must not be mistaken for a second ticket.
+      const result = parseSeat(
+        "Your ticket details:\nBlock 225 Row BB Seat 101\nPlease arrive 30 minutes early.",
+      );
+      expect(result.status).toBe("parsed");
+      if (result.status === "unparseable") throw new Error("unreachable");
+      expect(result.fields.block).toEqual({ value: "225", source: "stated" });
+      expect(result.additionalSeatsDetected).toBe(0);
+    });
+  });
+
+  describe("negative cases — must not fabricate a seat", () => {
+    it("does not yield a seat for a bare Hong Kong street address with no seating marker", () => {
+      const result = parseSeat("彌敦道363號");
+      expect(result.status).toBe("unparseable");
+    });
+
+    it("does not yield anything for 'Kai Tak' alone", () => {
+      const result = parseSeat("Kai Tak");
+      expect(result.status).toBe("unparseable");
+    });
+  });
+});
+
+describe("parseSeats", () => {
+  it("returns a single-element array for a single-ticket input, matching parseSeat", () => {
+    const results = parseSeats("Gate F Level 2 Block 225 Row BB Seat 101");
+    expect(results).toHaveLength(1);
+    expect(results[0].status).toBe("parsed");
+    if (results[0].status === "unparseable") throw new Error("unreachable");
+    expect(results[0].fields.block).toEqual({ value: "225", source: "stated" });
+  });
+
+  it("splits 'Block 109·RowJ·Seat223 Block 225·RowJ·Seat78' into two parsed tickets", () => {
+    const results = parseSeats("Block 109·RowJ·Seat223 Block 225·RowJ·Seat78");
+    expect(results).toHaveLength(2);
+    expect(results[0].status).toBe("parsed");
+    expect(results[1].status).toBe("parsed");
+    if (results[0].status === "unparseable" || results[1].status === "unparseable") {
+      throw new Error("unreachable");
+    }
+    expect(results[0].fields.block).toEqual({ value: "109", source: "stated" });
+    expect(results[0].fields.seat).toEqual({ value: "223", source: "stated" });
+    expect(results[1].fields.block).toEqual({ value: "225", source: "stated" });
+    expect(results[1].fields.seat).toEqual({ value: "78", source: "stated" });
+  });
+
+  it("splits three tickets separated by newlines, one Block marker per line", () => {
+    const results = parseSeats(
+      "Block 109 Row J Seat 223\nBlock 225 Row J Seat 78\nBlock 301 Row K Seat 14",
+    );
+    expect(results).toHaveLength(3);
+    for (const r of results) expect(r.status).toBe("parsed");
+    if (results.some((r) => r.status === "unparseable")) throw new Error("unreachable");
+    expect((results[0] as Extract<(typeof results)[number], { status: "parsed" }>).fields.block).toEqual({
+      value: "109",
+      source: "stated",
+    });
+    expect((results[2] as Extract<(typeof results)[number], { status: "parsed" }>).fields.seat).toEqual({
+      value: "14",
+      source: "stated",
+    });
+  });
+
+  it("splits tickets by repeated CJK 區 markers", () => {
+    const results = parseSeats("225區 BB排 101號 226區 CC排 102號");
+    expect(results).toHaveLength(2);
+    expect(results[0].status).toBe("parsed");
+    expect(results[1].status).toBe("parsed");
+    if (results[0].status === "unparseable" || results[1].status === "unparseable") {
+      throw new Error("unreachable");
+    }
+    expect(results[0].fields.block).toEqual({ value: "225", source: "stated" });
+    expect(results[1].fields.block).toEqual({ value: "226", source: "stated" });
+  });
+
+  it("splits tickets by repeated CJK letter-before block markers ('A區' form) without stranding the letter", () => {
+    // Regression guard: the split point for a suffix-style CJK marker (區
+    // comes AFTER its value) must back up over a preceding LETTER too, not
+    // just a preceding digit run — otherwise "B區" is stranded at the start
+    // of the second segment with its own block value already consumed by
+    // segment one.
+    const results = parseSeats("A區 3排 8號 B區 4排 9號");
+    expect(results).toHaveLength(2);
+    expect(results[0].status).toBe("parsed");
+    expect(results[1].status).toBe("parsed");
+    if (results[0].status === "unparseable" || results[1].status === "unparseable") {
+      throw new Error("unreachable");
+    }
+    expect(results[0].fields.block).toEqual({ value: "A", source: "stated" });
+    expect(results[1].fields.block).toEqual({ value: "B", source: "stated" });
   });
 });
