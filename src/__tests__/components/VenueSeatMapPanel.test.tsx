@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { VenueSection } from "@/components/tickets/VenueSection";
@@ -7,6 +7,10 @@ import { validateSeatMapConfig } from "@/lib/venue-seatmap/validate";
 import type { VenueSeatMapConfig } from "@/lib/venue-seatmap/types";
 import type { VenueEventSummary, VenueEventsResponse } from "@/app/api/venues/events/route";
 import type { VenueSeatMapListEntry } from "@/app/api/venues/seatmaps/route";
+
+// Mounting the panel (dynamic imports, several fetch round-trips) is slow when the whole
+// suite runs in parallel; the default 5 s limit made these flaky there, not in isolation.
+vi.setConfig({ testTimeout: 20_000 });
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 

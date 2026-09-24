@@ -1108,6 +1108,22 @@ export function DiscountSection({ onQuotaUpdate }: { onQuotaUpdate?: (q: { used:
                         {result.discountSummary && (
                           <p className="mt-0.5 text-sm text-muted-foreground">{result.discountSummary}</p>
                         )}
+                        {/* The shop itself couldn't be read, so these offers came from a
+                            deal/cashback page instead — say where, and that it may lag. */}
+                        {result.via && (
+                          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                            Via{" "}
+                            <a
+                              href={result.via.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline underline-offset-2"
+                            >
+                              {result.via.label}
+                            </a>{" "}
+                            — {result.via.note}
+                          </p>
+                        )}
                       </div>
                     </div>
 

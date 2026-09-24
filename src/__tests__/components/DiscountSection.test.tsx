@@ -295,6 +295,23 @@ describe("DiscountSection", () => {
     });
   });
 
+  it("labels a result that came from a fallback deal page with where it came from", async () => {
+    const result = baseResult({
+      via: { url: "https://www.coupons.com/coupon-codes/fanatics", label: "coupons.com", note: "deal-site figures may be out of date" },
+    });
+    localStorage.setItem(
+      "discount-results",
+      JSON.stringify({ [MARATHON]: { result, checkedAt: new Date().toISOString() } })
+    );
+    vi.stubGlobal("fetch", fetchStub());
+
+    render(<DiscountSection />);
+
+    const link = await screen.findByRole("link", { name: "coupons.com" });
+    expect(link).toHaveAttribute("href", "https://www.coupons.com/coupon-codes/fanatics");
+    expect(screen.getByText(/deal-site figures may be out of date/)).toBeInTheDocument();
+  });
+
   it("renders a persisted result with both startDate and endDate non-ISO, with no validity chip at all", async () => {
     const result = baseResult({ startDate: "Ongoing", endDate: "TBD" });
     localStorage.setItem(
