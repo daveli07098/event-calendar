@@ -10,8 +10,11 @@
  * roster + quota knowledge lives in exactly one place.
  *
  * All models share GEMINI_API_KEY. Free-tier RPM is from Google AI Studio rate
- * limits (2026-05) and is approximate — used only to order fallbacks so a
- * low-quota model that 429s falls through to a higher-quota one.
+ * limits (2026-09) and is approximate — the exact per-model RPM/RPD table lives
+ * behind AI Studio login and isn't in the public docs, so these numbers carry
+ * forward the prior pool's figures for the equivalent tier (flagship flash,
+ * lite, Gemma) rather than a re-measured value. Used only to order fallbacks so
+ * a low-quota model that 429s falls through to a higher-quota one.
  */
 
 /** Capability / quota metadata for one Gemini free-tier model. */
@@ -20,7 +23,7 @@ export interface GeminiModelSpec {
   /** Approx free-tier requests/min. Higher = more resilient to 429 storms. */
   rpm: number;
   /**
-   * Approx free-tier requests/DAY (AI Studio dashboard, 2026-07). This is the
+   * Approx free-tier requests/DAY (AI Studio dashboard, 2026-09). This is the
    * quota we actually exhaust in practice: calls are small (~3k tokens) and
    * spread out, so RPM/TPM never spike — but 20-ish daily requests on the
    * flagship flash models run out fast. Tracked in AiModelUsage (see
@@ -28,15 +31,34 @@ export interface GeminiModelSpec {
    * remaining daily quota instead of burning a 429 on an exhausted one.
    */
   rpd: number;
-  /** Supports the google_search grounding tool (Gemma models do NOT). */
+  /**
+   * Supports the google_search grounding tool on the FREE tier (Gemma models
+   * do NOT support it at all; Gemini 3.x models support the tool syntactically
+   * but their free tier has ZERO grounding quota — verified live 2026-09-25:
+   * a grounded call to gemini-3.8-flash 429'd instantly with RESOURCE_EXHAUSTED
+   * while a plain (non-grounded) call to the SAME model right after returned
+   * 200 — ruling out "today's RPD is just exhausted" as the explanation — and
+   * the official pricing page lists "Not available" under Free Tier for
+   * Grounding with Google Search on every Gemini 3.x model (flash, flash-lite,
+   * AND pro) — grounding on Gemini 3.x requires a paid tier. Only Gemini 2.5
+   * models still get free grounding (500 RPD, shared between Flash and
+   * Flash-Lite). Do not set this true for a 3.x model just because the API
+   * accepts the tool — it will burn a 429 on the first call.
+   */
   grounding: boolean;
   /** Lightweight/cheap variant — preferred for high-volume, low-stakes tasks. */
   lite: boolean;
   /**
-   * Thinking model family (accepts `thinkingConfig`). Thinking burns hidden
+   * Thinking model family that accepts `thinkingConfig`. Thinking burns hidden
    * reasoning tokens out of maxOutputTokens — a 2048 cap can leave ~70 tokens
    * for the actual JSON (finishReason MAX_TOKENS), truncating extractions.
    * Deterministic JSON extraction disables it via thinkingBudget: 0.
+   *
+   * NOT the same as "does this model think" — gemini-3.5-flash-lite always
+   * emits a `thoughtSignature` (it's architecturally a thinking model) but
+   * rejects the `thinkingConfig` field outright (400 "Request contains an
+   * invalid argument", verified live 2026-09-25), so it's `false` here even
+   * though ListModels reports a thinking capability for it.
    */
   thinking: boolean;
 }
@@ -44,22 +66,51 @@ export interface GeminiModelSpec {
 /**
  * The pool, in hand-tuned cascade priority (strongest / most-available first).
  *
- * Deliberately excludes `gemini-2.0-flash`: its free tier is now limit 0, so it
- * always 429s — a dead hop that only slows every cascade down.
+ * Deliberately excludes `gemini-2.0-flash` / `gemini-2.0-flash-lite`: Google's
+ * own deprecations page now lists both as "(Shut down)" — a guaranteed-dead
+ * cascade hop.
  *
  * Also deliberately excludes models whose idle free-tier quota looks tempting
  * on the AI Studio dashboard but that CANNOT serve this cascade (verified by
- * live calls, 2026-07-20). Do not re-add:
+ * live calls, 2026-07-20 / 2026-09-25). Do not re-add:
  *   • gemini-3.1-flash-live-preview / gemini-3.5-live-translate-preview — only
  *     support bidiGenerateContent (realtime WebSocket Live API); HTTP
- *     generateContent rejects them.
- *   • antigravity-preview-05-2026 — ListModels advertises generateContent, but
+ *     generateContent rejects them (absent from the generateContent-capable
+ *     ListModels results entirely — re-confirmed 2026-09-25).
+ *   • antigravity-preview-05-2026 / antigravity-preview-09-2026 /
+ *     antigravity-preview-latest — ListModels advertises generateContent, but
  *     real calls 400 with "This model only supports Interactions API" (and
  *     "JSON mode is not enabled") — it's the Antigravity agent quota bucket.
+ *     Only -05-2026 was live-tested; the -09-2026/-latest ids share the same
+ *     product (not re-probed — same failure mode expected).
+ *   • gemini-3.1-flash-lite-preview — Google's docs list it as "(Shut down)"
+ *     under Previous models (2026-09-24); the non-preview `gemini-3.1-flash-lite`
+ *     id still works but is superseded here by `gemini-3.5-flash-lite`.
+ *   • gemini-2.5-pro / gemini-3.1-pro-preview — no viable free Pro tier: a live
+ *     call to gemini-2.5-pro now 404s "no longer available to new users...use
+ *     models/gemini-3.1-pro-preview", and gemini-3.1-pro-preview's official
+ *     pricing page lists Free Tier input/output price as "Not available"
+ *     (limit 0) — dead end either way (verified 2026-09-25).
+ *   • gemini-flash-latest / gemini-flash-lite-latest / gemini-pro-latest —
+ *     "latest" aliases get hot-swapped by Google on every release (2-week
+ *     breaking-change notice, not a version pin); the pool intentionally pins
+ *     explicit stable ids instead so a Google-side swap can't silently change
+ *     cascade behavior here.
  */
 export const GEMINI_POOL: readonly GeminiModelSpec[] = [
-  { id: "gemini-3.5-flash",           rpm: 5,  rpd: 20,    grounding: true,  lite: false, thinking: true  },
-  { id: "gemini-3.1-flash-lite",      rpm: 15, rpd: 50,    grounding: true,  lite: true,  thinking: true  },
+  // gemini-3.8-flash / -3.7 / -3.6 are three separate, currently-live flagship
+  // Flash generations (Google's own descriptions rank capability in that
+  // order: "most intelligent" → "high-speed, efficient" → "previous
+  // generation"), each with its OWN free-tier RPD bucket
+  // (GenerateRequestsPerDayPerProjectPerModel is per model id) — chaining all
+  // three roughly triples flagship-flash daily headroom for the price of two
+  // extra cascade hops, which is exactly what model-quota.ts's RPD-aware
+  // ordering exists to exploit. All three passed a live image+JSON probe
+  // (2026-09-25).
+  { id: "gemini-3.8-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
+  { id: "gemini-3.7-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
+  { id: "gemini-3.6-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
+  { id: "gemini-3.5-flash-lite",      rpm: 15, rpd: 50,    grounding: false, lite: true,  thinking: false },
   { id: "gemini-2.5-flash",           rpm: 5,  rpd: 20,    grounding: true,  lite: false, thinking: true  },
   { id: "gemini-2.5-flash-lite",      rpm: 10, rpd: 20,    grounding: true,  lite: true,  thinking: true  },
   { id: "gemma-4-31b-it",             rpm: 15, rpd: 14400, grounding: false, lite: false, thinking: false },
