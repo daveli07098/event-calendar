@@ -1,6 +1,8 @@
 ## [2026-09-25] — Session: discount scanner for walled and JS-built shops
 ### Fixed
 - fix(discounts): hk.puma.com now scans automatically — its promos live in inline script JSON that text extraction discarded; embedded promo strings are now read. Fanatics / adidas.com.hk and empty Puma scans fall back to a readable deal page (coupons.com, ShopBack HK), labelled "via …" with an out-of-date caveat ([2e2b9ae], [2f8b5af])
+### Maintenance
+- chore(ai): Gemini pool refreshed from live ListModels — gemini-3.8/3.7/3.6-flash and 3.5-flash-lite added; Search grounding is free only on 2.5 models now ([8e7aeb5])
 ### Added
 - feat(discounts): one-click "Scan with Event Calendar" bookmarklet for bot-walled sites, confirmed before scanning ([d398cb9])
 
