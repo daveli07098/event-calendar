@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { geminiPool } from "@/lib/ai/models";
+import {
+  availableGrounded,
+  isDailyQuotaError,
+  markModelExhausted,
+  recordModelCall,
+} from "@/lib/ai/model-quota";
 
 const WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_knockout_stage";
-const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`;
+const geminiEndpoint = (model: string) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
 interface TeamResult {
   team1: string | null;
@@ -50,19 +58,50 @@ If the teams are not yet determined (the match hasn't happened yet or the bracke
 Wikipedia text:
 ${pageText}`;
 
-  const res = await fetch(`${GEMINI_ENDPOINT}${apiKey}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-  });
-  if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
-  const json = await res.json();
-  const text: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  // Grounding-capable models only (only Gemini 2.5 still has free-tier Google
+  // Search grounding — see the pool's comment) — try each in RPD headroom
+  // order, same 429 fall-through + quota-recording pattern as scrape/route.ts.
+  let lastError: Error | null = null;
+  for (const model of await availableGrounded()) {
+    try {
+      const res = await fetch(geminiEndpoint(model), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          ...(geminiPool.spec(model)?.thinking
+            ? { generationConfig: { thinkingConfig: { thinkingBudget: 0 } } }
+            : {}),
+        }),
+      });
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const errBody = await res.json();
+          if (errBody?.error?.message) detail = ` — ${errBody.error.message}`;
+        } catch {
+          // Non-JSON error body — status code alone will have to do
+        }
+        if (res.status === 429 && isDailyQuotaError(detail)) await markModelExhausted(model);
+        lastError = new Error(`Gemini API error: ${res.status}${detail}`);
+        continue; // try next grounded model
+      }
+      await recordModelCall(model); // count toward today's RPD budget
+      const json = await res.json();
+      const text: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
 
-  // Extract JSON from the response
-  const jsonMatch = text.match(/\{[\s\S]*"team1"[\s\S]*"team2"[\s\S]*\}/);
-  if (!jsonMatch) throw new Error("Gemini did not return valid JSON");
-  return JSON.parse(jsonMatch[0]) as TeamResult;
+      // Extract JSON from the response
+      const jsonMatch = text.match(/\{[\s\S]*"team1"[\s\S]*"team2"[\s\S]*\}/);
+      if (!jsonMatch) {
+        lastError = new Error("Gemini did not return valid JSON");
+        continue;
+      }
+      return JSON.parse(jsonMatch[0]) as TeamResult;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+  throw lastError ?? new Error("No Gemini grounded model available");
 }
 
 // Replace the team name portion inside the event title while keeping round prefix

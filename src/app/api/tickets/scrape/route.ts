@@ -1178,7 +1178,7 @@ CRITICAL — "description" and "category" are REQUIRED, never null: even from sp
 URL: ${url}
 ${text}`.trim();
 
-async function callGemini(text: string, url: string, model = "gemini-3-flash-preview"): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
+async function callGemini(text: string, url: string, model: string): Promise<Partial<TicketData> & { _tokensUsed: number | null }> {
   const apiKey = process.env.GEMINI_API_KEY!;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
   const body = JSON.stringify({
@@ -2026,21 +2026,39 @@ ${candidateTitles}
 
 Return ONLY a JSON object like {"0":0.95,"1":0.1,...}`;
 
-            const simEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${geminiKey}`;
-            const simRes = await fetch(simEndpoint, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: similarityPrompt }] }],
-                generationConfig: { responseMimeType: "application/json", maxOutputTokens: 256 },
-              }),
-              signal: AbortSignal.timeout(8000), // 8 s max for this lightweight call
-            });
-            if (simRes.ok) {
-              const simData = await simRes.json();
-              const raw = simData.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-              const cleaned = raw.replace(/```json\n?|```/g, "").trim();
-              aiScores = JSON.parse(cleaned) as Record<string, number>;
+            // Lightweight task → use the pool's lite models with remaining daily quota,
+            // same fall-through-on-429 pattern as generateDescription() above.
+            for (const model of await availableLite()) {
+              try {
+                const simRes = await fetch(
+                  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+                    body: JSON.stringify({
+                      contents: [{ parts: [{ text: similarityPrompt }] }],
+                      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 256 },
+                    }),
+                    signal: AbortSignal.timeout(8000), // 8 s max for this lightweight call
+                  },
+                );
+                if (!simRes.ok) {
+                  // Per-DAY 429 → mark the model spent so later calls skip it today.
+                  if (simRes.status === 429) {
+                    const detail = await simRes.text().catch(() => "");
+                    if (isDailyQuotaError(detail)) await markModelExhausted(model);
+                  }
+                  continue; // 429/400 → try next lite model
+                }
+                await recordModelCall(model); // count toward today's RPD budget
+                const simData = await simRes.json();
+                const raw = simData.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+                const cleaned = raw.replace(/```json\n?|```/g, "").trim();
+                aiScores = JSON.parse(cleaned) as Record<string, number>;
+                break;
+              } catch {
+                // network/timeout/parse error — fall through to the next model, then give up
+              }
             }
           } catch {
             // non-critical — fall back to no-AI filter below

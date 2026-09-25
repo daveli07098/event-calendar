@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
-import { prismaMock, setMockSession, mockSession, getMockSession } from "../../../helpers";
+import { prismaMock, setMockSession, mockSession, getMockSession, mockCalendar, mockEvent } from "../../../helpers";
+import { geminiPool } from "@/lib/ai/models";
 
 // vi.mock must live in this file (not helpers.ts) so Vitest hoists it above the
 // route import below — see the comment in helpers.ts for why.
@@ -180,5 +181,89 @@ describe("POST /api/tickets/scrape — venue-local schema times", () => {
     expect(json.date).toBe("2027-05-07");
     expect(json.time).toBe("19:00");
     expect(json.sourceTimezone).toBe("+09:00");
+  });
+});
+
+describe("POST /api/tickets/scrape — duplicate-detection AI similarity model selection", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockSession(mockSession);
+    mockHtml.mockReturnValue(timableHtml("2027-05-07T12:00:00.000Z"));
+    // Served from cache — no AI call for the main extraction, so the only
+    // Gemini traffic in these tests is the duplicate-detection similarity call.
+    mockAiResult.mockReturnValue({
+      title: "Test Live in Hong Kong",
+      date: "2027-05-07",
+      time: "20:00",
+      venue: "Hong Kong Coliseum",
+      // A populated category skips the classifySingleEvent() fallback call, so
+      // the only Gemini fetch left is the duplicate-detection similarity call.
+      category: "concert",
+    });
+    prismaMock.calendar.findMany.mockResolvedValue([mockCalendar({ id: "cal-1" })]);
+    prismaMock.calendarMember.findMany.mockResolvedValue([]);
+    // A same-day existing event triggers the AI similarity-scoring call.
+    prismaMock.event.findMany.mockResolvedValue([
+      mockEvent({ id: "evt-existing", title: "Existing Similar Event", startTime: new Date("2027-05-07T12:00:00.000Z"), location: null }),
+    ]);
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GITHUB_TOKEN", "");
+    vi.stubEnv("GROQ_API_KEY", "");
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("sends the Gemini API key via the x-goog-api-key header, not the URL query string", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"0":0.95}' }] } }] }), { status: 200 })
+    );
+
+    const res = await POST(makeReq({ url: TIMABLE_URL }));
+    expect(res.status).toBe(200);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [calledUrl, calledInit] = fetchMock.mock.calls[0];
+    expect(String(calledUrl)).not.toContain("key=");
+    expect(String(calledUrl)).not.toContain("test-key");
+    expect((calledInit as RequestInit).headers).toMatchObject({ "x-goog-api-key": "test-key" });
+    // Model id comes from the pool's lite roster (not a hardcoded string).
+    expect(geminiPool.lite()).toContain(String(calledUrl).match(/models\/([^:]+):/)?.[1]);
+
+    const json = await res.json();
+    expect(json.duplicateCandidates).toHaveLength(1);
+    expect(json.duplicateCandidates[0].similarityScore).toBe(0.95);
+  });
+
+  it("falls through to the next pool model on a 429 and still resolves duplicate scores", async () => {
+    const calledModels: string[] = [];
+    fetchMock.mockImplementation(async (url: string) => {
+      const model = String(url).match(/models\/([^:]+):/)?.[1] ?? "unknown";
+      calledModels.push(model);
+      if (calledModels.length === 1) {
+        return new Response(
+          JSON.stringify({
+            error: { message: "Quota exceeded for quota metric 'GenerateRequestsPerDayPerProjectPerModel'" },
+          }),
+          { status: 429 },
+        );
+      }
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"0":0.9}' }] } }] }), { status: 200 });
+    });
+
+    const res = await POST(makeReq({ url: TIMABLE_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    // Two Gemini attempts, in the pool's lite-quota priority order.
+    expect(calledModels).toEqual(geminiPool.lite());
+    expect(json.duplicateCandidates).toHaveLength(1);
+    expect(json.duplicateCandidates[0].similarityScore).toBe(0.9);
   });
 });
