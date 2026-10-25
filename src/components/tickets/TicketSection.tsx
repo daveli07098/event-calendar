@@ -217,6 +217,16 @@ export function TicketSection() {
     setWcLive(now >= start && now <= end);
   }, []);
   const [url, setUrl] = useState("");
+  // Deep-link support: /tickets?url=… (from the home quick-capture box)
+  // prefills the import box so the user only has to press Scan.
+  useEffect(() => {
+    const u = searchParams.get("url");
+    if (u && /^https?:\/\//i.test(u)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing URL → state on mount/back-forward
+      setSection("import");
+      setUrl(u);
+    }
+  }, [searchParams]);
   const [status, setStatus] = useState<Status>("idle");
   const [ticket, setTicket] = useState<ScrapedTicket | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
