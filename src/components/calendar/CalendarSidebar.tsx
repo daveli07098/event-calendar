@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
-import { Plus, ChevronLeft, ChevronRight, ChevronDown, Settings, Users, Megaphone, Ticket, X } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, Settings, Users, Megaphone, Ticket, X, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
@@ -490,6 +490,12 @@ export function CalendarSidebar({
 
       {/* Bottom nav links */}
       <div className="p-3 border-t border-border space-y-1">
+        <Link href="/">
+          <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
+            <Home className="size-4" />
+            Home
+          </Button>
+        </Link>
         <Link href="/tickets">
           <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
             <Ticket className="size-4" />

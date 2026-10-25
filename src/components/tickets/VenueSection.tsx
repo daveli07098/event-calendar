@@ -525,7 +525,7 @@ export function VenueSection() {
                           )}
                           {/* Deep-links into the main calendar via the ?event= param it reads on mount
                               (see CalendarPageClient's mount effect) — no ?date= equivalent exists there. */}
-                          <a href={`/?event=${ev.id}`} className="text-primary hover:underline">Open</a>
+                          <a href={`/calendar?event=${ev.id}`} className="text-primary hover:underline">Open</a>
                         </div>
                       </div>
                     ))}

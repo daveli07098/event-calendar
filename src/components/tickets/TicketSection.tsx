@@ -740,7 +740,7 @@ export function TicketSection() {
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-card px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
-        <a href="/">
+        <a href="/calendar">
           <Button variant="ghost" size="icon" className="size-8" aria-label="Back to calendar">
             <ArrowLeft className="size-4" />
           </Button>
@@ -1823,7 +1823,7 @@ export function TicketSection() {
                 {/* Hard reload so new event-reminders / sale-ticket calendars appear in sidebar.
                     Deep-links to the created event: opens its modal with the calendar on its month. */}
                 <a
-                  href={addedEvent ? `/?event=${addedEvent.id}&date=${addedEvent.start.slice(0, 10)}` : "/"}
+                  href={addedEvent ? `/calendar?event=${addedEvent.id}&date=${addedEvent.start.slice(0, 10)}` : "/calendar"}
                   className="flex-1"
                 >
                   <Button variant="outline" className="w-full">View calendar</Button>

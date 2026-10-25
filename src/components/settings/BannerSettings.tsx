@@ -165,7 +165,7 @@ export function BannerSettings() {
               id="banner-cta-href"
               value={draft.ctaHref}
               onChange={(e) => update({ ctaHref: e.target.value })}
-              placeholder="/?category=sports"
+              placeholder="/calendar?category=sports"
             />
           </div>
         </div>

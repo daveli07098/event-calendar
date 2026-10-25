@@ -39,7 +39,7 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
           <p className="text-muted-foreground text-sm mb-6">
             This link may have expired or been revoked.
           </p>
-          <Button onClick={() => router.push("/")} variant="outline">
+          <Button onClick={() => router.push("/calendar")} variant="outline">
             Go to Calendar
           </Button>
         </div>
@@ -62,7 +62,7 @@ export function JoinClient({ token, preview, error }: JoinClientProps) {
         setJoinError(data.error ?? "Failed to join calendar");
       } else {
         setJoined(true);
-        setTimeout(() => router.push("/"), 2000);
+        setTimeout(() => router.push("/calendar"), 2000);
       }
     } catch {
       setJoinError("Network error, please try again");

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Inter, Roboto, Poppins, Lato } from "next/font/google";
 import { Toaster } from "sonner";
 import { Providers } from "@/components/Providers";
+import { AppNav } from "@/components/nav/AppNav";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 import { buildThemeBootScript } from "@/lib/theme-boot";
 import "./globals.css";
@@ -105,7 +106,11 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col">
         <Providers>
-          {children}
+          <AppNav />
+          {/* Full-height pages (calendar, settings, tickets) give up the nav bar's height (2.75rem, see AppNav) so the page never scrolls past the viewport. */}
+          <div className="flex flex-1 flex-col [&_.h-screen]:h-[calc(100dvh-2.75rem)] [&_.min-h-screen]:min-h-[calc(100dvh-2.75rem)]">
+            {children}
+          </div>
           <InstallPrompt />
           <Toaster />
         </Providers>

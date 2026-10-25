@@ -110,7 +110,7 @@ export default function GoogleConnectPage() {
             <Button className="w-full" onClick={() => setStep("picker")}>
               Yes, let me choose calendars
             </Button>
-            <Button variant="outline" className="w-full" onClick={() => router.push("/")}>
+            <Button variant="outline" className="w-full" onClick={() => router.push("/calendar")}>
               Skip for now
             </Button>
           </CardContent>
@@ -133,7 +133,7 @@ export default function GoogleConnectPage() {
                   next 6 months will be imported.
                 </CardDescription>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => router.push("/")}>
+              <Button variant="ghost" size="icon" onClick={() => router.push("/calendar")}>
                 <X className="size-4" />
               </Button>
             </div>
@@ -187,7 +187,7 @@ export default function GoogleConnectPage() {
               <Button
                 variant="outline"
                 className="flex-1"
-                onClick={() => router.push("/")}
+                onClick={() => router.push("/calendar")}
               >
                 Skip
               </Button>
@@ -243,7 +243,7 @@ export default function GoogleConnectPage() {
               </div>
             ))}
           </div>
-          <Button className="w-full" onClick={() => router.push("/")}>
+          <Button className="w-full" onClick={() => router.push("/calendar")}>
             Go to Calendar
           </Button>
         </CardContent>

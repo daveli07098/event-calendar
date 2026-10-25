@@ -38,7 +38,7 @@ export default function Error({
           Try again
         </button>
         <Link
-          href="/"
+          href="/calendar"
           className="inline-flex h-9 items-center rounded-md border border-input bg-background px-4 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           Back to calendar

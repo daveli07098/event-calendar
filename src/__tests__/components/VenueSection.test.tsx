@@ -138,7 +138,7 @@ describe("VenueSection", () => {
 
     // Deep-links back into the calendar using the ?event= param it reads on mount.
     const openLink = within(card).getByRole("link", { name: /open/i });
-    expect(openLink).toHaveAttribute("href", "/?event=event-1");
+    expect(openLink).toHaveAttribute("href", "/calendar?event=event-1");
   });
 
   it("posts to /api/venues when 'Add to directory' is clicked for an unmatched location", async () => {

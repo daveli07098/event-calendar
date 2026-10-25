@@ -217,7 +217,7 @@ export function SettingsClient({ user }: SettingsClientProps) {
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-2xl p-6">
         <div className="flex items-center gap-4 mb-6">
-          <Link href="/">
+          <Link href="/calendar">
             <Button variant="ghost" size="icon" aria-label="Back to calendar" title="Back to calendar">
               <ArrowLeft className="size-4" />
             </Button>
