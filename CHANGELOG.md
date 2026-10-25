@@ -1,3 +1,7 @@
+## [2026-10-26] — Session: retire World Cup defaults
+### Changed
+- chore(theme): drop World Cup as the default skin and banner ([2d2b943])
+
 ## [2026-09-25] — Session: discount scanner for walled and JS-built shops
 ### Fixed
 - fix(discounts): hk.puma.com now scans automatically — its promos live in inline script JSON that text extraction discarded; embedded promo strings are now read. Fanatics / adidas.com.hk and empty Puma scans fall back to a readable deal page (coupons.com, ShopBack HK), labelled "via …" with an out-of-date caveat ([2e2b9ae], [2f8b5af])
