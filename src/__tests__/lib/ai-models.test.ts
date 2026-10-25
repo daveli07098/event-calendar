@@ -22,9 +22,17 @@ describe("GEMINI_POOL", () => {
       "gemini-flash-latest",
       "gemini-flash-lite-latest",
       "gemini-pro-latest",
+      // free-tier cleanup 2026-10-26: not on pricing page / pings timed out
+      "gemini-3.7-flash",
+      "gemma-4-31b-it",
     ];
     const ids = new Set(GEMINI_POOL.map((s) => s.id));
     for (const id of excluded) expect(ids.has(id)).toBe(false);
+  });
+
+  it("contains only free-tier models (no Pro) and leads with a fast one", () => {
+    for (const spec of GEMINI_POOL) expect(spec.id).not.toMatch(/-pro/);
+    expect(GEMINI_POOL[0].id).toBe("gemini-3.5-flash-lite");
   });
 
   it("gives every model positive rpm/rpd", () => {

@@ -98,25 +98,27 @@ export interface GeminiModelSpec {
  *     cascade behavior here.
  */
 export const GEMINI_POOL: readonly GeminiModelSpec[] = [
-  // gemini-3.8-flash / -3.7 / -3.6 are three separate, currently-live flagship
-  // Flash generations (Google's own descriptions rank capability in that
-  // order: "most intelligent" → "high-speed, efficient" → "previous
-  // generation"), each with its OWN free-tier RPD bucket
-  // (GenerateRequestsPerDayPerProjectPerModel is per model id) — chaining all
-  // three roughly triples flagship-flash daily headroom for the price of two
-  // extra cascade hops, which is exactly what model-quota.ts's RPD-aware
-  // ordering exists to exploit. All three passed a live image+JSON probe
-  // (2026-09-25).
-  { id: "gemini-3.8-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
-  { id: "gemini-3.7-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
-  { id: "gemini-3.6-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
+  // FREE-TIER ONLY (user moved off the paid Google AI plan, 2026-10-26). One
+  // list, edit here to change the roster. Source: ai.google.dev/gemini-api/docs/
+  // pricing (checked 2026-10-26) lists "Free of charge" Standard input for
+  // gemini-3.8-flash, gemini-3.6-flash, gemini-3.5-flash-lite and
+  // gemini-2.5-flash/-flash-lite; Pro models are "Not available" on free.
+  // Ordered by LIVE latency (ping, 2026-10-26) so a free model answers inside
+  // the scrape route's 60s budget: 3.5-flash-lite ~1s, 2.5-flash ~1s,
+  // 2.5-flash-lite ~1s, gemma-4-26b ~4s, 3.6-flash ~7s, 3.8-flash 503 "high
+  // demand" (kept last as it is the smartest when it is up).
+  // Dropped: gemini-3.7-flash (not on the pricing page; ping timed out at 30s)
+  // and gemma-4-31b-it (ping timed out at 30s) — they burned the whole budget
+  // before the cascade reached a working model. Each flash still has its own
+  // free RPD bucket. rpm/rpd are approximate AI Studio figures.
   { id: "gemini-3.5-flash-lite",      rpm: 15, rpd: 50,    grounding: false, lite: true,  thinking: false },
   { id: "gemini-2.5-flash",           rpm: 5,  rpd: 20,    grounding: true,  lite: false, thinking: true  },
   { id: "gemini-2.5-flash-lite",      rpm: 10, rpd: 20,    grounding: true,  lite: true,  thinking: true  },
-  { id: "gemma-4-31b-it",             rpm: 15, rpd: 14400, grounding: false, lite: false, thinking: false },
-  // NOTE: "gemma-4-26b-it" does not exist — ListModels says the real id is
+  // NOTE: "gemma-4-26b" does not exist — ListModels says the real id is
   // gemma-4-26b-a4b-it; the old id 404'd on every call (dead cascade hop).
   { id: "gemma-4-26b-a4b-it",         rpm: 15, rpd: 14400, grounding: false, lite: false, thinking: false },
+  { id: "gemini-3.6-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
+  { id: "gemini-3.8-flash",           rpm: 5,  rpd: 20,    grounding: false, lite: false, thinking: true  },
 ];
 
 /**

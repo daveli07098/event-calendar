@@ -1198,7 +1198,9 @@ async function callGemini(text: string, url: string, model: string): Promise<Par
   });
 
   let res: Response | null = null;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // 503 ("high demand") is NOT retried on the same model: the cascade falls
+  // through to the next free model, which is faster than waiting.
+  for (let attempt = 0; attempt < 1; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 2000)); // wait before retry
     // Cap each attempt so a model that accepts the request but stalls can't hang
     // the whole cascade for minutes — fail fast and fall through to the next model.
@@ -1206,7 +1208,7 @@ async function callGemini(text: string, url: string, model: string): Promise<Par
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body,
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.timeout(12_000),
     });
     if (res.ok || res.status !== 503) break; // success or non-retryable error
   }
@@ -1520,6 +1522,14 @@ function extractTextSlots(text: string, excludeDates: string[]): EventSlot[] {
 // ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
+// Vercel Hobby allows up to 60s (the cron route already uses it). Without this
+// the default can cut the request off mid-cascade → "took too long" in the UI.
+export const maxDuration = 60;
+
+// Wall-clock budget for the whole AI provider cascade; leaves headroom inside
+// maxDuration for fetching the page and saving results.
+const AI_CASCADE_BUDGET_MS = 40_000;
+
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -1711,7 +1721,13 @@ export async function POST(req: NextRequest) {
       }));
     }
 
+    const cascadeStart = Date.now();
     for (const provider of providers) {
+      if (Date.now() - cascadeStart > AI_CASCADE_BUDGET_MS) {
+        console.warn("[tickets/scrape] AI cascade budget exhausted — stopping");
+        aiError = aiError ?? "AI temporarily unavailable — trying next provider";
+        break;
+      }
       let currentProviderName = "unknown";
       try {
         const { result, name } = await provider();
