@@ -48,11 +48,15 @@ model User {
   aiQuotaDate    String?          // "YYYY-MM-DD" day key for AI rate limiting
   aiQuotaCount   Int              @default(0) // AI scrape calls used on aiQuotaDate
   discountSources Json?           // user's custom Discount Sale source URLs (string[])
+  feedToken      String?          @unique // secret token for the personal ICS subscription feed; null = feed off
   accounts       Account[]
   sessions       Session[]
   calendars      Calendar[]
   calendarMemberships CalendarMember[]
   eventBookmarks EventBookmark[]
+  pushSubscriptions PushSubscription[]
+  pushReminderLogs  PushReminderLog[]
+  notes          Note[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 }
@@ -76,6 +80,7 @@ model Calendar {
   // Sharing
   shareToken       String?          @unique  // random token for invite URL; null = not shared
   shareMode        String?          // "collaborative" | "broadcast" | null
+  isSiteShared     Boolean          @default(false) // site-wide broadcast calendar every user auto-joins as viewer
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -120,6 +125,7 @@ model Event {
 
   calendar  Calendar        @relation(fields: [calendarId], references: [id], onDelete: Cascade)
   bookmarks EventBookmark[]
+  pushReminderLogs PushReminderLog[]
 
   @@index([calendarId])
   @@index([startTime, endTime])
@@ -132,6 +138,7 @@ model EventBookmark {
   id        String   @id @default(cuid())
   userId    String
   eventId   String
+  countdown Boolean  @default(false) // pinned as a countdown card on the home dashboard
   createdAt DateTime @default(now())
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -202,4 +209,49 @@ model AiScrapeCache {
   updatedAt DateTime @updatedAt
 
   @@index([updatedAt])
+}
+
+// Web Push subscription for one browser/device of a user.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// One row per push reminder sent, so the dispatch cron never repeats one.
+// kind: "event-1d" | "event-1h" | "sale-1d" | "sale-15m"
+model PushReminderLog {
+  id      String   @id @default(cuid())
+  userId  String
+  eventId String
+  kind    String
+  sentAt  DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, eventId, kind])
+  @@index([eventId])
+}
+
+// Quick-capture note from the home dashboard (text, optionally a link).
+model Note {
+  id        String   @id @default(cuid())
+  userId    String
+  text      String   @db.Text
+  url       String?
+  done      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, done])
 }
