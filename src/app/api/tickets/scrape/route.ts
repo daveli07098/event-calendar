@@ -480,14 +480,23 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
   for (const s of sections) {
     const startIso = typeof s.startDatetime === "string" ? s.startDatetime : null;
     if (!startIso) continue;
-    const start = utcToLocalStrings(new Date(startIso), tz, startIso);
     const endIso = typeof s.endDatetime === "string" ? s.endDatetime : null;
-    const end = endIso ? utcToLocalStrings(new Date(endIso), tz, endIso) : null;
-    concertEvents.push({
-      startDate: `${start.date}T${start.time}`,
-      dateObj: new Date(startIso),
-      raw: end ? { endDate: `${end.date}T${end.time}` } : {},
-    });
+    // Timable stores "no time given" as UTC midnight (start == end, or no end).
+    // Converting that to local would invent a bogus 08:00 — treat it as date-only.
+    const isDateOnlyPlaceholder =
+      /T00:00:00(\.0+)?Z$/.test(startIso.trim()) &&
+      (!endIso || new Date(endIso).getTime() === new Date(startIso).getTime());
+    if (isDateOnlyPlaceholder) {
+      concertEvents.push({ startDate: startIso.slice(0, 10), dateObj: new Date(startIso), raw: {} });
+    } else {
+      const start = utcToLocalStrings(new Date(startIso), tz, startIso);
+      const end = endIso ? utcToLocalStrings(new Date(endIso), tz, endIso) : null;
+      concertEvents.push({
+        startDate: `${start.date}T${start.time}`,
+        dateObj: new Date(startIso),
+        raw: end ? { endDate: `${end.date}T${end.time}` } : {},
+      });
+    }
     // First section with a venue wins (single-venue events repeat the same one).
     if (!venue) {
       const loc = isRec(s.location) ? s.location : null;
@@ -562,6 +571,11 @@ function parseRemixEvent(html: string, sourceTz: string | null): RemixEvent | nu
     saleWindows: saleWindows.length > 0 ? saleWindows : null,
     concertEvents,
   };
+}
+
+// "YYYY-MM-DD HH:MM" when the window has a time, so the on-sale hour isn't lost.
+function withWindowTime(w: { date: string; time?: string | null }): string {
+  return `${w.date}${w.time ? " " + w.time : ""}`;
 }
 
 function extractMeta(html: string, pageUrl: string): MetaFallback {
@@ -1122,9 +1136,9 @@ function extractMeta(html: string, pageUrl: string): MetaFallback {
     // they beat the JSON-LD/text-scan strategies (which collapse same-date
     // vendors and only know a fixed vendor list).
     saleDate: remix?.saleWindows?.length
-      ? remix.saleWindows[remix.saleWindows.length - 1]!.date
+      ? withWindowTime(remix.saleWindows[remix.saleWindows.length - 1]!)
       : schemaSaleDate,
-    saleFirstDate: remix?.saleWindows?.length ? remix.saleWindows[0]!.date : schemaSaleFirstDate,
+    saleFirstDate: remix?.saleWindows?.length ? withWindowTime(remix.saleWindows[0]!) : schemaSaleFirstDate,
     saleDates: remix?.saleWindows ?? (schemaSaleDates.length > 0 ? schemaSaleDates : null),
     saleDatesComplete: !!remix?.saleWindows?.length,
     // Structured ticketing sellers (Remix) are authoritative — the text-pattern

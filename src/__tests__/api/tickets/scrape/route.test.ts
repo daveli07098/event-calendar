@@ -69,6 +69,25 @@ function timableHtml(startDate: string, opts: { endDate?: string } = {}) {
 </head><body><p>Tickets available now.</p></body></html>`;
 }
 
+/** Timable Remix-only page (no JSON-LD): sections[] + ticketing[] in UTC. */
+function timableRemixHtml(section: { startDatetime: string; endDatetime?: string }, ticketing: unknown[] = []) {
+  const ctx = {
+    state: {
+      loaderData: {
+        event: {
+          __typename: "Event",
+          name: "Test Live in Hong Kong",
+          sections: [{ ...section, location: { name: "Hong Kong Coliseum" }, address: "9 Cheong Wan Road" }],
+          ticketing,
+        },
+      },
+    },
+  };
+  return `<!DOCTYPE html><html><head><title>Test Live in Hong Kong</title>
+<meta property="og:title" content="Test Live in Hong Kong" /></head><body>
+<script>window.__remixContext = ${JSON.stringify(ctx)};</script></body></html>`;
+}
+
 function makeReq(body: Record<string, unknown>) {
   return new NextRequest("http://localhost/api/tickets/scrape", {
     method: "POST",
@@ -154,6 +173,42 @@ describe("POST /api/tickets/scrape — venue-local schema times", () => {
 
     expect(json.date).toBe("2027-05-07");
     expect(json.time).toBeNull();
+  });
+
+  it("treats a Remix UTC-midnight start (start == end) as date-only, not 08:00 HKT", async () => {
+    mockHtml.mockReturnValue(
+      timableRemixHtml({ startDatetime: "2027-05-07T00:00:00.000Z", endDatetime: "2027-05-07T00:00:00.000Z" }),
+    );
+    mockAiResult.mockReturnValue({ title: "Test Live in Hong Kong", time: null });
+
+    const res = await POST(makeReq({ url: TIMABLE_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.date).toBe("2027-05-07");
+    expect(json.time).toBeNull();
+    expect(json.endTime).toBeNull();
+  });
+
+  it("keeps the sale window's time in saleDate / saleFirstDate from Remix ticketing[]", async () => {
+    mockHtml.mockReturnValue(
+      timableRemixHtml(
+        { startDatetime: "2027-05-07T12:00:00.000Z" },
+        [{
+          location: { name: "Hopestar" },
+          ticketingType: "public",
+          startDatetime: "2027-03-01T04:00:00.000Z", // 12:00 HKT
+        }],
+      ),
+    );
+    mockAiResult.mockReturnValue({ title: "Test Live in Hong Kong" });
+
+    const res = await POST(makeReq({ url: TIMABLE_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.saleFirstDate).toBe("2027-03-01 12:00");
+    expect(json.saleDate).toBe("2027-03-01 12:00");
   });
 
   it("keeps the JSON-LD's own frame when the venue timezone can't be resolved", async () => {
