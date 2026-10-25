@@ -79,7 +79,11 @@ export function bannerConfigFromPreset(presetId: string): BannerConfig {
   };
 }
 
-export const DEFAULT_BANNER: BannerConfig = bannerConfigFromPreset(DEFAULT_BANNER_PRESET);
+// Off by default now the World Cup has ended; the preset stays selectable in settings.
+export const DEFAULT_BANNER: BannerConfig = {
+  ...bannerConfigFromPreset(DEFAULT_BANNER_PRESET),
+  enabled: false,
+};
 
 /** Stable signature used to remember a dismissal across reloads. */
 export function bannerSignature(cfg: Pick<BannerConfig, "preset" | "version">): string {

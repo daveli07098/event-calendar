@@ -52,9 +52,9 @@ export const DEFAULT_THEME: Theme = {
   radius: "default",
   density: "comfortable",
   font: "geist",
-  // Ships in World Cup mode so every visitor lands in the football skin; it can
-  // be switched off (→ null) from the top-right theme button or settings.
-  eventTheme: "worldcup",
+  // No event skin by default (the World Cup has ended); visitors can still
+  // switch one on from the top-right theme button or settings.
+  eventTheme: null,
   timeZone: DEFAULT_TIME_ZONE, // GMT+8 by default
 };
 

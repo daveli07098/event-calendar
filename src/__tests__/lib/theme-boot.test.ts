@@ -84,9 +84,10 @@ describe("buildThemeBootScript", () => {
     mockMatchMedia(false);
     localStorage.setItem(STORAGE_KEY, "{not json");
     expect(() => runBootScript()).not.toThrow();
-    // Default theme ships eventTheme: "worldcup", which overrides the accent —
-    // confirms the default was used rather than blowing up mid-script.
-    expect(document.documentElement.dataset.eventTheme).toBe("worldcup");
+    // Default theme ships no event skin and the blue accent — confirms the
+    // default was used rather than blowing up mid-script.
+    expect(document.documentElement.dataset.eventTheme).toBeUndefined();
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(ACCENT_COLORS.blue.lightPrimary);
   });
 });
 
