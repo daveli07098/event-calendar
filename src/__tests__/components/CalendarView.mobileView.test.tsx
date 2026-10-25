@@ -113,104 +113,50 @@ function stubMatchMedia(initialMatches: boolean) {
   };
 }
 
-describe("CalendarView — mobile breakpoint view sync", () => {
+vi.mock("@/components/agenda/UpcomingAgenda", () => ({
+  UpcomingAgenda: () => React.createElement("div", { "data-testid": "agenda-mock" }),
+}));
+
+describe("CalendarView — mobile layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    window.history.replaceState(null, "", "/calendar");
     firstFCProps = null;
     latestFCProps = null;
   });
 
-  it("switches to listWeek once matchMedia resolves mobile at mount", async () => {
-    stubMatchMedia(true);
+  it("no longer forces listWeek/dayGridMonth on breakpoint changes", async () => {
+    const mm = stubMatchMedia(true);
+    localStorage.setItem("calendar.view", "dayGridMonth");
     await act(async () => {
       render(<CalendarView initialEvents={[]} calendars={calendars} />);
     });
-
-    // Bug: FullCalendar always constructs as dayGridMonth on first render because
-    // isMobile starts false — this is unavoidable and not itself the bug. The real
-    // FullCalendar reads `initialView` only at construction, so only the FIRST
-    // render's value matters here.
     expect(firstFCProps?.initialView).toBe("dayGridMonth");
-    // Fix: the post-mount effect must correct it imperatively once mobile resolves.
-    expect(changeViewSpy).toHaveBeenCalledWith("listWeek");
-  });
-
-  it("stays on dayGridMonth when matchMedia resolves desktop at mount", async () => {
-    stubMatchMedia(false);
-    await act(async () => {
-      render(<CalendarView initialEvents={[]} calendars={calendars} />);
-    });
-
-    expect(firstFCProps?.initialView).toBe("dayGridMonth");
-    // Guard: must not clobber the desktop default with a spurious changeView call.
+    await act(async () => { mm.fire(false); });
     expect(changeViewSpy).not.toHaveBeenCalled();
   });
 
-  it("re-syncs the view when the breakpoint is crossed after mount", async () => {
-    const mm = stubMatchMedia(false);
+  it("gives mobile a footer view-switcher starting with upcoming", async () => {
+    stubMatchMedia(true);
+    localStorage.setItem("calendar.view", "listWeek");
     await act(async () => {
       render(<CalendarView initialEvents={[]} calendars={calendars} />);
     });
-    expect(changeViewSpy).not.toHaveBeenCalled();
-
-    // Simulate rotating into / resizing down to a phone-width viewport.
-    await act(async () => {
-      mm.fire(true);
-    });
-    expect(changeViewSpy).toHaveBeenCalledWith("listWeek");
-
-    changeViewSpy.mockClear();
-
-    // Cross back the other way too.
-    await act(async () => {
-      mm.fire(false);
-    });
-    expect(changeViewSpy).toHaveBeenCalledWith("dayGridMonth");
-  });
-
-  it("does not reset a user's manually chosen view on a re-render that doesn't cross the breakpoint", async () => {
-    stubMatchMedia(true);
-    const { rerender } = render(
-      <CalendarView initialEvents={[]} calendars={calendars} categoryFilter={null} />,
-    );
-    await act(async () => {});
-    expect(changeViewSpy).toHaveBeenCalledWith("listWeek");
-    changeViewSpy.mockClear();
-
-    // User taps "Day" on the mobile footer toolbar — a real user action would
-    // drive this same fake API, so simulate it directly on the spy's target.
-    fakeCalendarApi.changeView("timeGridDay");
-
-    // An unrelated prop change causes CalendarView to re-render without the
-    // breakpoint changing (e.g. a filter toggled elsewhere in the app).
-    await act(async () => {
-      rerender(
-        <CalendarView initialEvents={[]} calendars={calendars} categoryFilter={"concert"} />,
-      );
-    });
-
-    // The mobile-sync effect is keyed off `isMobile`, which hasn't changed, so
-    // it must not fire again and stomp the user's manual selection back to listWeek.
-    expect(changeViewSpy).not.toHaveBeenCalledWith("listWeek");
-  });
-
-  it("gives mobile a footer view-switcher (listWeek, dayGridMonth, timeGridDay) since the header has no room for one", async () => {
-    stubMatchMedia(true);
-    await act(async () => {
-      render(<CalendarView initialEvents={[]} calendars={calendars} />);
-    });
-
     expect(latestFCProps?.footerToolbar).toEqual({
-      center: "listWeek,dayGridMonth,timeGridDay",
+      center: "upcoming,listWeek,dayGridMonth,timeGridDay",
     });
   });
 
-  it("gives desktop no footer toolbar", async () => {
+  it("gives desktop no footer toolbar and Upcoming as the first header tab", async () => {
     stubMatchMedia(false);
+    localStorage.setItem("calendar.view", "dayGridMonth");
     await act(async () => {
       render(<CalendarView initialEvents={[]} calendars={calendars} />);
     });
-
     expect(latestFCProps?.footerToolbar).toBe(false);
+    expect((latestFCProps?.headerToolbar as { right: string }).right).toBe(
+      "upcoming,dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+    );
   });
 });

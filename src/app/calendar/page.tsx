@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ensureSiteCalendarMembership } from "@/lib/site-calendar";
+import { loadAgendaEvents } from "@/lib/agenda-data";
 import { CalendarPageClient } from "@/components/calendar/CalendarPageClient";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,9 @@ export default async function CalendarPage() {
   }
 
   const uid = session.user.id;
+
+  // Join the site-shared calendar first so its events are part of everything below.
+  await ensureSiteCalendarMembership(uid);
 
   // Own calendars
   const ownedCalendars = await prisma.calendar.findMany({
@@ -71,6 +76,11 @@ export default async function CalendarPage() {
     orderBy: { startTime: "asc" },
   });
 
+  // Upcoming agenda window: yesterday .. +14 days
+  const agendaFrom = new Date(now.getTime() - 86400000);
+  const agendaTo = new Date(now.getTime() + 14 * 86400000);
+  const agendaEvents = await loadAgendaEvents(uid, agendaFrom, agendaTo);
+
   // Serialize
   function serializeMember(m: { id: string; calendarId: string; userId: string; role: string; joinedAt: Date; user: { id: string; name: string | null; email: string | null; image: string | null } }) {
     return { ...m, role: m.role as "editor" | "viewer", joinedAt: m.joinedAt.toISOString() };
@@ -117,6 +127,7 @@ export default async function CalendarPage() {
     <CalendarPageClient
       initialCalendars={serializedCalendars}
       initialEvents={serializedEvents}
+      initialAgendaEvents={agendaEvents}
     />
   );
 }

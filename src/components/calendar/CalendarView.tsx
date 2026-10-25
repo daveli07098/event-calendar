@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import FullCalendar from "@fullcalendar/react";
 import type { CalendarApi } from "@fullcalendar/core";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -33,6 +33,51 @@ import { useTheme } from "@/context/ThemeContext";
 import { parseGroupMatch, parseKnockoutMatch } from "@/lib/worldcup";
 import { getTeamFlag } from "@/lib/team-flags";
 import { cn } from "@/lib/utils";
+import { UpcomingAgenda } from "@/components/agenda/UpcomingAgenda";
+import { isLongEvent, type AgendaEvent } from "@/lib/agenda";
+import { SALE_TICKET_CALENDAR_NAME } from "@/lib/calendar-names";
+
+/** "upcoming" is our own agenda (outside FullCalendar); the rest are FC view names. */
+export type CalendarViewName = "upcoming" | "dayGridMonth" | "timeGridWeek" | "timeGridDay" | "listWeek";
+const VIEW_STORAGE_KEY = "calendar.view";
+const VIEW_TABS: { view: CalendarViewName; label: string }[] = [
+  { view: "upcoming", label: "Upcoming" },
+  { view: "dayGridMonth", label: "Month" },
+  { view: "timeGridWeek", label: "Week" },
+  { view: "timeGridDay", label: "Day" },
+  { view: "listWeek", label: "List" },
+];
+const isViewName = (v: unknown): v is CalendarViewName =>
+  VIEW_TABS.some((t) => t.view === v);
+
+const AGENDA_PAST_DAYS = 1;
+const AGENDA_FUTURE_DAYS = 14;
+
+function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+/** Client-side EventType -> AgendaEvent (agenda-data's toAgendaEvent is server-only). */
+function eventToAgenda(e: EventType, calendars: CalendarType[]): AgendaEvent {
+  const cal = e.calendar ?? calendars.find((c) => c.id === e.calendarId);
+  return {
+    id: e.id,
+    title: e.title,
+    start: e.startTime,
+    end: e.endTime,
+    allDay: e.allDay,
+    calendarId: e.calendarId,
+    calendarName: cal?.name ?? "",
+    color: cal?.color ?? "#4285f4",
+    category: e.category,
+    location: e.location,
+    isSale: cal?.name === SALE_TICKET_CALENDAR_NAME,
+  };
+}
 
 /**
  * For a World Cup match event, return its two team names with flags prepended
@@ -67,6 +112,8 @@ function isTodayLocal(iso: string): boolean {
 
 interface CalendarViewProps {
   initialEvents: EventType[];
+  /** Events for the Upcoming agenda (now-1d .. now+14d), loaded server-side */
+  initialAgendaEvents?: AgendaEvent[];
   calendars: CalendarType[];
   /** Called externally (e.g. search) to open a specific event by id in the modal */
   openEventId?: string | null;
@@ -93,49 +140,89 @@ interface CalendarViewProps {
   onBookmarkToggle?: (eventId: string, bookmarked: boolean) => Promise<void>;
 }
 
-export function CalendarView({ initialEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
+export function CalendarView({ initialEvents, initialAgendaEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
+  const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>(initialAgendaEvents ?? []);
+  // Always starts as "upcoming" (SSR-safe); the stored / deep-link view is
+  // resolved after mount, and the body renders nothing until then.
+  const [view, setView] = useState<CalendarViewName>("upcoming");
+  const [viewReady, setViewReady] = useState(false);
+  const [initialDate, setInitialDate] = useState<string | undefined>(undefined);
+  const deepLinkRef = useRef(false);
+  const timeZone = useMemo(() => browserTimeZone(), []);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
   const { theme } = useTheme();
   const worldCupActive = theme.eventTheme === "worldcup";
 
-  // Expose gotoDate to parent on mount
+  // Expose gotoDate to parent on mount. When the Upcoming agenda is showing
+  // (no FullCalendar mounted) jump to the month view on that date instead.
   useEffect(() => {
     if (!onGotoDateReady) return;
     onGotoDateReady((date: Date) => {
       const api: CalendarApi | undefined = calendarRef.current?.getApi();
-      if (api) api.gotoDate(date);
+      if (api) {
+        api.gotoDate(date);
+      } else {
+        setInitialDate(date.toLocaleDateString("en-CA"));
+        setView("dayGridMonth");
+      }
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 767px)");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- matchMedia only exists after mount
     setIsMobile(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
 
-  // `isMobile` can only be resolved after mount (matchMedia needs `window`, and
-  // guessing during SSR would desync hydration), but FullCalendar reads
-  // `initialView` once at construction and never again — so the mobile default
-  // never reached it and phones were stuck in dayGridMonth with no way out.
-  // Drive the view imperatively instead. The breakpoint ref means a user who
-  // deliberately picks another view isn't reset by unrelated re-renders or by
-  // resizes that don't cross the breakpoint.
-  const lastBreakpointRef = useRef<boolean | null>(null);
+  // Resolve the starting view after mount: a deep link (?date= / ?event=) wins
+  // so the target is visible; otherwise the last chosen view; otherwise the
+  // Upcoming agenda (desktop and mobile alike).
   useEffect(() => {
-    const api: CalendarApi | undefined = calendarRef.current?.getApi();
-    if (!api) return;
-    if (lastBreakpointRef.current === isMobile) return;
-    const isFirstResolve = lastBreakpointRef.current === null;
-    lastBreakpointRef.current = isMobile;
-    // Desktop already constructs into dayGridMonth — only correct on mount when
-    // we're actually on a phone. Real breakpoint crossings always re-sync.
-    if (isFirstResolve && !isMobile) return;
-    api.changeView(isMobile ? "listWeek" : "dayGridMonth");
-  }, [isMobile]);
+    let stored: CalendarViewName = "upcoming";
+    try {
+      const raw = localStorage.getItem(VIEW_STORAGE_KEY);
+      if (isViewName(raw)) stored = raw;
+    } catch { /* blocked storage → default */ }
+    const params = new URLSearchParams(window.location.search);
+    const date = params.get("date");
+    const hasDeepLink = !!(date || params.get("event"));
+    let next = stored;
+    if (hasDeepLink) {
+      deepLinkRef.current = true;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore on mount
+      if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) setInitialDate(date);
+      if (stored === "upcoming") next = "dayGridMonth";
+    }
+    setView(next);
+    setViewReady(true);
+  }, []);
+
+  const changeViewTo = useCallback((next: CalendarViewName) => {
+    setView(next);
+    try { localStorage.setItem(VIEW_STORAGE_KEY, next); } catch { /* non-fatal */ }
+  }, []);
+
+  // Refetch the agenda window after any mutation so the Upcoming view stays current.
+  const calendarsRef = useRef(calendars);
+  useEffect(() => { calendarsRef.current = calendars; }, [calendars]);
+  const refreshAgenda = useCallback(async () => {
+    try {
+      const now = Date.now();
+      const params = new URLSearchParams({
+        start: new Date(now - AGENDA_PAST_DAYS * 86400000).toISOString(),
+        end: new Date(now + AGENDA_FUTURE_DAYS * 86400000).toISOString(),
+      });
+      const res = await fetch(`/api/events?${params}`);
+      if (!res.ok) return;
+      const data: EventType[] = await res.json();
+      if (Array.isArray(data)) setAgendaEvents(data.map((e) => eventToAgenda(e, calendarsRef.current)));
+    } catch { /* keep the existing agenda */ }
+  }, []);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
@@ -160,6 +247,11 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     // Jump FC to the event's month so it's visible
     const api: CalendarApi | undefined = calendarRef.current?.getApi();
     if (api) api.gotoDate(e.startTime);
+    // Deep link: if FullCalendar isn't mounted yet, make it start on the event's date
+    if (deepLinkRef.current) {
+      deepLinkRef.current = false;
+      setInitialDate((prev) => prev ?? new Date(e.startTime).toLocaleDateString("en-CA"));
+    }
     setSelectedRange(null);
     setSelectedEvent(e);
     setModalOpen(true);
@@ -168,19 +260,24 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
 
   // Open event modal when triggered from external source (e.g. search dialog)
   // Falls back to a direct API fetch when the event is outside the current view.
-  useEffect(() => {
-    if (!openEventId) return;
-    const local = events.find((ev) => ev.id === openEventId);
+  const openById = (id: string, done?: () => void) => {
+    const local = events.find((ev) => ev.id === id);
     if (local) {
       openEventById(local);
-      onOpenEventHandled?.();
+      done?.();
     } else {
-      fetch(`/api/events/${openEventId}`)
+      fetch(`/api/events/${id}`)
         .then((r) => r.ok ? r.json() : null)
         .then((e) => { if (e) openEventById(e); })
         .catch(() => null)
-        .finally(() => onOpenEventHandled?.());
+        .finally(() => done?.());
     }
+  };
+
+  useEffect(() => {
+    if (!openEventId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- external trigger opens the modal
+    openById(openEventId, onOpenEventHandled);
   }, [openEventId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Returns true if the user can write to the given calendar
@@ -198,7 +295,13 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
     .filter((c) => c.isVisible)
     .map((c) => c.id);
 
-  const filteredEvents = events.filter((e) => {
+  // One predicate for FullCalendar events and the Upcoming agenda
+  const passesFilters = (e: {
+    calendarId: string;
+    title: string;
+    category?: string | null;
+    location?: string | null;
+  }) => {
     if (!visibleCalendarIds.includes(e.calendarId)) return false;
     if (categoryFilter && e.category !== categoryFilter) return false;
     if (locationFilter) {
@@ -211,7 +314,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       if (!matchesTag && !loc.toLowerCase().includes(locationFilter.toLowerCase())) return false;
     }
     return true;
-  });
+  };
+
+  const filteredEvents = events.filter(passesFilters);
+  const filteredAgendaEvents = agendaEvents.filter(passesFilters);
 
   const fcEvents = filteredEvents.map((event) => {
     // Multi-day timed events (e.g. popup stores, multi-week runs) are displayed as
@@ -230,6 +336,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           .toLocaleDateString("en-CA")
       : event.endTime;
 
+    // Ordering rank: sales and short events first, long (>=3 day) runs last
+    const isSale = event.calendar?.name === SALE_TICKET_CALENDAR_NAME;
+    const isLong = !isSale && isLongEvent(eventToAgenda(event, calendars), timeZone);
+
     return {
       id: event.id,
       title: event.title,
@@ -238,7 +348,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       allDay: event.allDay || isMultiDayTimed,
       backgroundColor: event.calendar?.color || "#4285f4",
       borderColor: event.calendar?.color || "#4285f4",
-      extendedProps: { event },
+      extendedProps: { event, isLong, rank: isSale ? 0 : isLong ? 2 : 1 },
     };
   });
 
@@ -307,6 +417,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       }
       const updated = await res.json();
       setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      void refreshAgenda();
     } catch {
       dropInfo.revert();
       toast.error("Couldn't move event — change reverted");
@@ -336,6 +447,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
       }
       const updated = await res.json();
       setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      void refreshAgenda();
     } catch {
       resizeInfo.revert();
       toast.error("Couldn't resize event — change reverted");
@@ -343,6 +455,11 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
   };
 
   const handleDatesSet = async (dateInfo: DatesSetArg) => {
+    // Remember the view the user navigated to via FullCalendar's own buttons
+    if (isViewName(dateInfo.view.type)) {
+      setView(dateInfo.view.type);
+      try { localStorage.setItem(VIEW_STORAGE_KEY, dateInfo.view.type); } catch { /* non-fatal */ }
+    }
     // Cancel any in-flight fetch from a previous navigation
     fetchAbortRef.current?.abort();
     const controller = new AbortController();
@@ -386,6 +503,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
           prev.map((e) => (e.id === updated.id ? updated : e))
         );
         toast.success("Event updated");
+        void refreshAgenda();
       } else {
         // Create
         const res = await fetch("/api/events", {
@@ -402,6 +520,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         setNewEventId(created.id);
         setTimeout(() => setNewEventId(null), 2000);
         toast.success("Event created");
+        void refreshAgenda();
       }
       setModalOpen(false);
     } catch {
@@ -423,6 +542,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         setNewEventId(created.id);
         setTimeout(() => setNewEventId(null), 2000);
         toast.success("Event duplicated");
+        void refreshAgenda();
       } else {
         toast.error("Couldn't duplicate event");
       }
@@ -447,6 +567,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         return;
       }
       setEvents((prev) => prev.filter((e) => e.id !== deleted.id));
+      setAgendaEvents((prev) => prev.filter((e) => e.id !== deleted.id));
       setModalOpen(false);
       toast.success("Event deleted", {
         action: {
@@ -480,6 +601,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               const restored = await res.json();
               setEvents((prev) => [...prev, restored]);
               toast.success("Event restored");
+              void refreshAgenda();
             } catch {
               toast.error("Couldn't restore event");
             }
@@ -632,7 +754,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             <ThemeSwitcher />
           </div>
           {/* Empty-state hint — guides new users / explains filtered-out views */}
-          {events.length === 0 ? (
+          {view === "upcoming" ? null : events.length === 0 ? (
             <div className="mb-2 flex items-center justify-center gap-2 rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
               <span>
                 No events this period — click any date to create one, or{" "}
@@ -648,6 +770,48 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             </div>
           ) : null}
           <div className="flex-1 min-h-0">
+          {!viewReady ? null : view === "upcoming" ? (
+            <div className="flex h-full flex-col" data-testid="upcoming-view">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                {isMobile && (
+                  <button
+                    type="button"
+                    className="fc-button fc-button-primary"
+                    aria-label="Open menu"
+                    onClick={() => mobileMenuRef.current?.()}
+                  >
+                    ☰
+                  </button>
+                )}
+                <div role="tablist" aria-label="Calendar view" className="flex flex-wrap gap-1">
+                  {VIEW_TABS.map((t) => (
+                    <button
+                      key={t.view}
+                      type="button"
+                      role="tab"
+                      aria-selected={t.view === "upcoming"}
+                      onClick={() => changeViewTo(t.view)}
+                      className={cn(
+                        "rounded-md border px-3 py-1 text-sm transition-colors",
+                        t.view === "upcoming"
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-input bg-background hover:bg-muted",
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <UpcomingAgenda
+                  events={filteredAgendaEvents}
+                  timeZone={timeZone}
+                  onEventClick={(id) => openById(id)}
+                />
+              </div>
+            </div>
+          ) : (
           <FullCalendar
             ref={calendarRef}
             plugins={[
@@ -662,6 +826,11 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
                 hint: "Open menu",
                 click: () => mobileMenuRef.current?.(),
               },
+              upcoming: {
+                text: "Upcoming",
+                hint: "Upcoming agenda",
+                click: () => changeViewTo("upcoming"),
+              },
               search: {
                 text: "🔍",
                 hint: "Search events (⌘K)",
@@ -675,13 +844,13 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             } : {
               left: "prev,next today",
               center: "title",
-              right: "dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+              right: "upcoming,dayGridMonth,timeGridWeek,timeGridDay,listWeek",
             }}
             // The mobile header has no room for view buttons, which previously
             // left phones with no way out of whatever view they started in.
             // Give them their own row instead of cramming the header.
             footerToolbar={isMobile ? {
-              center: "listWeek,dayGridMonth,timeGridDay",
+              center: "upcoming,listWeek,dayGridMonth,timeGridDay",
             } : false}
             buttonText={{
               today: "Today",
@@ -690,7 +859,9 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
               day: "Day",
               list: "List",
             }}
-            initialView={isMobile ? "listWeek" : "dayGridMonth"}
+            initialView={view}
+            initialDate={initialDate}
+            eventOrder="rank,start,-duration,allDay,title"
             editable={!isMobile}
             selectable={true}
             selectMirror={true}
@@ -699,6 +870,10 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             eventContent={renderEventContent}
             eventClassNames={(arg) => {
               const classes: string[] = [];
+              // Long runs (pop-ups, exhibitions, fairs): quiet style so they don't dominate
+              if (arg.event.extendedProps.isLong) {
+                classes.push("fc-event-long");
+              }
               // Timed events in month grid: transparent background, dot style
               if (!arg.event.allDay && arg.view.type.startsWith("dayGrid")) {
                 classes.push("fc-event-timed-dot");
@@ -720,6 +895,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
             nowIndicator={true}
             eventDisplay="block"
           />
+          )}
           </div>
         </div>
 
@@ -805,6 +981,7 @@ export function CalendarView({ initialEvents, calendars, openEventId, onOpenEven
         onSynced={(updated) => {
           setEvents((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
           setSelectedEvent(updated);
+          void refreshAgenda();
         }}
         onEventSelect={async (id, startTime) => {
           // Clicking a related event from the modal: navigate to its date and open

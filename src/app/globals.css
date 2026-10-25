@@ -164,6 +164,24 @@
   padding: 0;
 }
 
+/* ── Long multi-day events (pop-ups, exhibitions, fairs): thin, muted, colored left border ── */
+.fc .fc-event.fc-event-long {
+  background: transparent !important;
+  border-style: solid !important;
+  border-width: 0 0 0 3px !important;
+  box-shadow: none !important;
+  color: var(--foreground, inherit);
+  opacity: 0.8;
+  font-size: 0.7rem;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.fc .fc-event.fc-event-long .ec-event-title {
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
 /* Custom event content layouts */
 .ec-allday-event {
   display: flex;

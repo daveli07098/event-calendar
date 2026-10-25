@@ -11,16 +11,19 @@ import { SiteBanner } from "@/components/banner/SiteBanner";
 import { FootballMascot } from "@/components/theme/FootballMascot";
 import { TeamPicker } from "@/components/theme/TeamPicker";
 import { FlagBunting, WorldCupTabFlair } from "@/components/theme/WorldCupFlair";
+import type { AgendaEvent } from "@/lib/agenda";
 import type { CalendarType, EventType, EventCategory, BookmarkedEvent } from "@/types";
 
 interface CalendarPageClientProps {
   initialCalendars: CalendarType[];
   initialEvents: EventType[];
+  initialAgendaEvents?: AgendaEvent[];
 }
 
 export function CalendarPageClient({
   initialCalendars,
   initialEvents,
+  initialAgendaEvents,
 }: CalendarPageClientProps) {
   const [calendars, setCalendars] = useState<CalendarType[]>(initialCalendars);
   const [addCalendarOpen, setAddCalendarOpen] = useState(false);
@@ -208,6 +211,7 @@ export function CalendarPageClient({
         <CalendarView
           calendars={calendars}
           initialEvents={initialEvents}
+          initialAgendaEvents={initialAgendaEvents}
           openEventId={openEventId}
           onOpenEventHandled={() => setOpenEventId(null)}
           onEventOpen={handleEventOpen}
