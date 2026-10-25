@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canWriteToCalendar } from "@/lib/event-access";
+import { canWriteToCalendar, writableCalendarIds } from "@/lib/event-access";
 
 /** Returns all calendar IDs the user can read (owned + shared memberships) */
 async function accessibleCalendarIds(userId: string): Promise<string[]> {
@@ -125,7 +125,8 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const calIds = await accessibleCalendarIds(session.user.id);
+  // Write path: exclude read-only (broadcast / site-shared) memberships
+  const calIds = await writableCalendarIds(session.user.id);
 
   // Fetch all events whose description contains a Ticket URL
   const candidates = await prisma.event.findMany({

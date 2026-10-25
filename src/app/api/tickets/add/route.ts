@@ -156,7 +156,8 @@ export async function POST(req: NextRequest) {
     }
 
     // No explicit target — find or create own calendar
-    let calendar = await prisma.calendar.findFirst({ where: { userId: uid, name: calName } });
+    // Prefer the owner's site-shared calendar if they have duplicates by name
+    let calendar = await prisma.calendar.findFirst({ where: { userId: uid, name: calName }, orderBy: { isSiteShared: "desc" } });
     if (!calendar) {
       calendar = await prisma.calendar.create({
         data: { userId: uid, name: calName, color: calColor, isDefault: false, isVisible: true },
@@ -238,7 +239,7 @@ export async function POST(req: NextRequest) {
   if (saleWindows.length > 0) {
     const saleResolved = await resolveCalendar(targetSaleCalendarId, SALE_CALENDAR_NAME, SALE_CALENDAR_COLOR);
     const saleCalendar = saleResolved?.calendar ?? await (async () => {
-      let c = await prisma.calendar.findFirst({ where: { userId: uid, name: SALE_CALENDAR_NAME } });
+      let c = await prisma.calendar.findFirst({ where: { userId: uid, name: SALE_CALENDAR_NAME }, orderBy: { isSiteShared: "desc" } });
       if (!c) c = await prisma.calendar.create({ data: { userId: uid, name: SALE_CALENDAR_NAME, color: SALE_CALENDAR_COLOR, isDefault: false, isVisible: true } });
       return c;
     })();

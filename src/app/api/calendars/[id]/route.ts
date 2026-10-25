@@ -80,12 +80,27 @@ export async function DELETE(
       where: { calendarId_userId: { calendarId: id, userId: session.user.id } },
     });
     if (membership) {
+      // Site-shared calendars are re-joined automatically on load, so leaving would be a no-op
+      const shared = await prisma.calendar.findUnique({ where: { id }, select: { isSiteShared: true } });
+      if (shared?.isSiteShared) {
+        return NextResponse.json(
+          { error: "This is a site-wide calendar and cannot be removed. You can hide it instead." },
+          { status: 400 }
+        );
+      }
       await prisma.calendarMember.delete({
         where: { calendarId_userId: { calendarId: id, userId: session.user.id } },
       });
       return NextResponse.json({ success: true, left: true });
     }
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  if (calendar.isSiteShared) {
+    return NextResponse.json(
+      { error: "Cannot delete a site-wide shared calendar" },
+      { status: 400 }
+    );
   }
 
   if (calendar.isDefault) {

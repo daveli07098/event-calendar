@@ -40,3 +40,19 @@ export async function canAccessEvent(eventId: string, userId: string) {
   const canWrite = calendarIsWritable(event.calendar, userId);
   return { event, canWrite };
 }
+
+/**
+ * Calendar IDs the user may WRITE to: owned calendars + collaborative calendars
+ * where they are an editor. Broadcast / site-shared memberships (viewers) are
+ * excluded, so bulk-mutation routes can't touch read-only calendars.
+ */
+export async function writableCalendarIds(userId: string): Promise<string[]> {
+  const [owned, memberships] = await Promise.all([
+    prisma.calendar.findMany({ where: { userId }, select: { id: true } }),
+    prisma.calendarMember.findMany({
+      where: { userId, role: "editor", calendar: { shareMode: "collaborative" } },
+      select: { calendarId: true },
+    }),
+  ]);
+  return [...owned.map((c) => c.id), ...memberships.map((m) => m.calendarId)];
+}

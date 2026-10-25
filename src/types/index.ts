@@ -64,6 +64,7 @@ export interface CalendarType {
   googleCalendarId: string | null;
   shareToken: string | null;
   shareMode: "collaborative" | "broadcast" | null;
+  isSiteShared?: boolean; // admin-curated site-wide read-only calendar every user is auto-joined to
   // For member (non-owner) calendars
   memberRole?: "editor" | "viewer";
   members?: CalendarMemberType[];

@@ -30,6 +30,14 @@ export async function POST(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Site-wide calendars must stay broadcast (read-only for everyone else)
+  if (calendar.isSiteShared && mode !== "broadcast") {
+    return NextResponse.json(
+      { error: "A site-wide shared calendar must stay in broadcast mode." },
+      { status: 400 }
+    );
+  }
+
   if (mode === null) {
     // Disable sharing — clear token and remove all members
     await prisma.$transaction([

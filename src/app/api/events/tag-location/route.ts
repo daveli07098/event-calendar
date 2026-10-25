@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { writableCalendarIds } from "@/lib/event-access";
 // Rules shared with CalendarView's location filter — counts and filtering must agree.
 import { LOCATION_RULES, detectLocationTag as detectCountry } from "@/lib/location-tags";
 
@@ -44,11 +45,8 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({})) as { onlyUntagged?: boolean; calendarIds?: string[] };
   const onlyUntagged = body.onlyUntagged !== false; // default true
 
-  const [owned, memberships] = await Promise.all([
-    prisma.calendar.findMany({ where: { userId: session.user.id }, select: { id: true } }),
-    prisma.calendarMember.findMany({ where: { userId: session.user.id }, select: { calendarId: true } }),
-  ]);
-  const accessibleCalIds = new Set([...owned.map((c) => c.id), ...memberships.map((m) => m.calendarId)]);
+  // Write path: only calendars the user can edit (not read-only broadcast / site-shared)
+  const accessibleCalIds = new Set(await writableCalendarIds(session.user.id));
 
   let calIds: string[];
   if (body.calendarIds?.length) {

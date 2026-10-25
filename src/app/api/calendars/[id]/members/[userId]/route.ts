@@ -29,6 +29,14 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Site-shared memberships are re-created automatically, so removal is blocked
+  if (calendar.isSiteShared) {
+    return NextResponse.json(
+      { error: "This is a site-wide calendar; membership cannot be removed. You can hide it instead." },
+      { status: 400 }
+    );
+  }
+
   await prisma.calendarMember.deleteMany({ where: { calendarId: id, userId } });
   return NextResponse.json({ success: true });
 }

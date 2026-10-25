@@ -116,3 +116,36 @@ describe("DELETE /api/calendars/:id", () => {
     expect(prismaMock.calendar.delete).toHaveBeenCalledWith({ where: { id: "cal-2" } });
   });
 });
+
+describe("site-shared calendars", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockSession(mockSession);
+  });
+
+  it("blocks a member from leaving a site-shared calendar", async () => {
+    prismaMock.calendar.findFirst.mockResolvedValue(null);
+    prismaMock.calendarMember.findUnique.mockResolvedValue({ id: "m1", calendarId: "cal-9", userId: "user-1", role: "viewer", joinedAt: new Date() });
+    prismaMock.calendar.findUnique.mockResolvedValue(mockCalendar({ id: "cal-9", isSiteShared: true }));
+    const req = new NextRequest("http://localhost/api/calendars/cal-9", { method: "DELETE" });
+    const res = await DELETE(req, makeParams("cal-9"));
+    expect(res.status).toBe(400);
+    expect(prismaMock.calendarMember.delete).not.toHaveBeenCalled();
+  });
+
+  it("blocks the owner from deleting a site-shared calendar", async () => {
+    prismaMock.calendar.findFirst.mockResolvedValue(mockCalendar({ id: "cal-9", isSiteShared: true }));
+    const req = new NextRequest("http://localhost/api/calendars/cal-9", { method: "DELETE" });
+    const res = await DELETE(req, makeParams("cal-9"));
+    expect(res.status).toBe(400);
+    expect(prismaMock.calendar.delete).not.toHaveBeenCalled();
+  });
+
+  it("viewer cannot rename (PUT is owner-only)", async () => {
+    prismaMock.calendar.findFirst.mockResolvedValue(null);
+    const req = new NextRequest("http://localhost/api/calendars/cal-9", { method: "PUT", body: JSON.stringify({ name: "x" }) });
+    const res = await PUT(req, makeParams("cal-9"));
+    expect(res.status).toBe(404);
+    expect(prismaMock.calendar.update).not.toHaveBeenCalled();
+  });
+});

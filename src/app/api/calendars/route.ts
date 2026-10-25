@@ -7,7 +7,7 @@ function serializeCal(
   cal: {
     id: string; userId: string; name: string; color: string;
     isDefault: boolean; isVisible: boolean; googleCalendarId: string | null;
-    shareToken: string | null; shareMode: string | null;
+    shareToken: string | null; shareMode: string | null; isSiteShared: boolean;
     createdAt: Date; updatedAt: Date;
     members?: { id: string; userId: string; calendarId: string; role: string; joinedAt: Date;
       user: { id: string; name: string | null; email: string | null; image: string | null } }[];

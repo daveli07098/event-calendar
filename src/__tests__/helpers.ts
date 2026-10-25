@@ -81,6 +81,7 @@ export function mockCalendar(overrides: Record<string, unknown> = {}) {
     googleCalendarId: null as string | null,
     shareToken: null as string | null,
     shareMode: null as string | null,
+    isSiteShared: false,
     createdAt: new Date("2025-01-01T00:00:00.000Z"),
     updatedAt: new Date("2025-01-01T00:00:00.000Z"),
     ...overrides,
