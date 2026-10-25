@@ -20,6 +20,8 @@ import { GoogleCalendarImport } from "@/components/settings/GoogleCalendarImport
 import { ICSImport } from "@/components/settings/ICSImport";
 import { AppearanceSettings } from "@/components/settings/AppearanceSettings";
 import { BannerSettings } from "@/components/settings/BannerSettings";
+import { CalendarFeedSettings } from "@/components/settings/CalendarFeedSettings";
+import { PushSettings } from "@/components/settings/PushSettings";
 import { ArrowLeft, Trash2, Share2, LogOut, Copy, FileDown, RefreshCw, Tag } from "lucide-react";
 import {
   Popover,
@@ -434,6 +436,21 @@ export function SettingsClient({ user }: SettingsClientProps) {
             }
           }}
         />
+
+        {/* Reminders — work even when the app is closed */}
+        <Card id="reminders" className="mb-6 scroll-mt-16">
+          <CardHeader>
+            <CardTitle>Reminders</CardTitle>
+            <CardDescription>
+              Get alerted about events and ticket sales even when the app is closed
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <CalendarFeedSettings />
+            <Separator />
+            <PushSettings />
+          </CardContent>
+        </Card>
 
         {/* Appearance */}
         <Card className="mb-6">
