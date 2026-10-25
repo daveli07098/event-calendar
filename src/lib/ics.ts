@@ -1,0 +1,184 @@
+import { SALE_TICKET_CALENDAR_NAME } from "@/lib/calendar-names";
+
+// ── ICS helpers (RFC 5545) ────────────────────────────────────────────────────
+
+/** Fold long lines at 75 octets as required by RFC 5545 §3.1 */
+export function fold(line: string): string {
+  const chunks: string[] = [];
+  while (line.length > 75) {
+    chunks.push(line.slice(0, 75));
+    line = " " + line.slice(75);
+  }
+  chunks.push(line);
+  return chunks.join("\r\n");
+}
+
+/** Escape TEXT values: backslash, semicolon, comma, newlines */
+export function esc(s: string): string {
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/;/g, "\;")
+    .replace(/,/g, "\\,")
+    .replace(/\r\n|\r|\n/g, "\\n");
+}
+
+/** Format a Date as ICS UTC datetime: 20260426T090000Z */
+export function fmtUtc(d: Date): string {
+  return d.toISOString().replace(/[-:]/g, "").slice(0, 15) + "Z";
+}
+
+/** Format a Date as ICS date-only: 20260426 */
+export function fmtDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dy = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${dy}`;
+}
+
+export interface IcsEvent {
+  id: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  startTime: Date;
+  endTime: Date;
+  allDay: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * Build the VEVENT lines for one event. `extra` lines (URL, VALARMs) are
+ * inserted before STATUS so the export route can omit them entirely.
+ */
+export function buildVevent(
+  event: IcsEvent,
+  dtstamp: string,
+  extra: string[] = [],
+): string[] {
+  const lines: string[] = [
+    "BEGIN:VEVENT",
+    fold(`UID:${event.id}@event-calendar`),
+    fold(`SUMMARY:${esc(event.title)}`),
+    `DTSTAMP:${dtstamp}`,
+    `CREATED:${fmtUtc(event.createdAt)}`,
+    `LAST-MODIFIED:${fmtUtc(event.updatedAt)}`,
+  ];
+
+  if (event.allDay) {
+    lines.push(`DTSTART;VALUE=DATE:${fmtDate(event.startTime)}`);
+    // ICS all-day DTEND is exclusive — advance by one day
+    const endExclusive = new Date(event.endTime);
+    endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+    lines.push(`DTEND;VALUE=DATE:${fmtDate(endExclusive)}`);
+  } else {
+    lines.push(`DTSTART:${fmtUtc(event.startTime)}`);
+    lines.push(`DTEND:${fmtUtc(event.endTime)}`);
+  }
+
+  if (event.description) {
+    lines.push(fold(`DESCRIPTION:${esc(event.description)}`));
+  }
+  if (event.location) {
+    lines.push(fold(`LOCATION:${esc(event.location)}`));
+  }
+
+  lines.push(...extra);
+  lines.push("STATUS:CONFIRMED");
+  lines.push("END:VEVENT");
+  return lines;
+}
+
+// ── Subscription feed ────────────────────────────────────────────────────────
+
+export interface FeedEvent extends IcsEvent {
+  /** Name of the owning calendar; "sale-ticket" events get sale-specific alarms. */
+  calendarName: string;
+  referenceUrl?: string | null;
+}
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+/** Events spanning this many days or more are alerted by calendar date, not start time. */
+const LONG_EVENT_DAYS = 3;
+/** Hong Kong is UTC+8 with no DST: 09:00 HKT = 01:00Z, 20:00 HKT = 12:00Z. */
+const MORNING_OF_UTC_HOUR = 1;
+const EVENING_BEFORE_UTC_HOUR = 12;
+
+function alarm(trigger: string, description: string): string[] {
+  return [
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    fold(`DESCRIPTION:${esc(description)}`),
+    trigger,
+    "END:VALARM",
+  ];
+}
+
+function utcAt(day: Date, dayOffset: number, hour: number): Date {
+  return new Date(
+    Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + dayOffset, hour),
+  );
+}
+
+/**
+ * Alarm rules (documented in docs/ if you change them):
+ * - sale events:          -P1D and -PT15M before start.
+ * - all-day or >= 3 days: absolute alarms at 09:00 Asia/Hong_Kong on the start
+ *                         day and 20:00 HKT the day before (sent as UTC "Z").
+ * - other timed events:   -P1D and -PT1H before start.
+ */
+export function buildAlarms(event: FeedEvent): string[] {
+  const title = event.title;
+  if (event.calendarName === SALE_TICKET_CALENDAR_NAME) {
+    return [
+      ...alarm("TRIGGER:-P1D", `🎫 Sale opens tomorrow: ${title}`),
+      ...alarm("TRIGGER:-PT15M", `🎫 Sale opens in 15 min: ${title}`),
+    ];
+  }
+  const spanDays = (event.endTime.getTime() - event.startTime.getTime()) / DAY_MS;
+  if (event.allDay || spanDays >= LONG_EVENT_DAYS) {
+    return [
+      ...alarm(
+        `TRIGGER;VALUE=DATE-TIME:${fmtUtc(utcAt(event.startTime, -1, EVENING_BEFORE_UTC_HOUR))}`,
+        `⏰ Tomorrow: ${title}`,
+      ),
+      ...alarm(
+        `TRIGGER;VALUE=DATE-TIME:${fmtUtc(utcAt(event.startTime, 0, MORNING_OF_UTC_HOUR))}`,
+        `⏰ Today: ${title}`,
+      ),
+    ];
+  }
+  return [
+    ...alarm("TRIGGER:-P1D", `⏰ Tomorrow: ${title}`),
+    ...alarm("TRIGGER:-PT1H", `⏰ In 1 hour: ${title}`),
+  ];
+}
+
+export function buildCalendarFeed(opts: {
+  name: string;
+  events: FeedEvent[];
+  now: Date;
+}): string {
+  const dtstamp = fmtUtc(opts.now);
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Event Calendar//Event Calendar//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    fold(`X-WR-CALNAME:${esc(opts.name)}`),
+    "X-WR-TIMEZONE:UTC",
+    "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+    "X-PUBLISHED-TTL:PT1H",
+  ];
+  for (const event of opts.events) {
+    const extra = [
+      ...(event.referenceUrl ? [fold(`URL:${event.referenceUrl}`)] : []),
+      ...buildAlarms(event),
+    ];
+    lines.push(...buildVevent(event, dtstamp, extra));
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n") + "\r\n";
+}
