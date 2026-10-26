@@ -3,6 +3,12 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { RRule } from "rrule";
 
+// Abuse limits: an uploaded RRULE:FREQ=SECONDLY would otherwise expand to ~10^8 rows.
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_INSTANCES_PER_EVENT = 1000;
+const MAX_EVENTS_PER_IMPORT = 5000;
+const INSERT_CHUNK_SIZE = 500;
+
 // ── ICS parser ──────────────────────────────────────────────────────────────
 
 function unfoldLines(ics: string): string {
@@ -156,9 +162,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const declaredLength = Number(req.headers.get("content-length") ?? 0);
+  if (declaredLength > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: "ICS file too large (max 2 MB)" }, { status: 413 });
+  }
+
   let body: { icsContent: string; calendarName?: string; color?: string };
   try {
-    body = await req.json();
+    // Read as text first so the limit also holds without a Content-Length header
+    const raw = await req.text();
+    if (Buffer.byteLength(raw) > MAX_UPLOAD_BYTES) {
+      return NextResponse.json({ error: "ICS file too large (max 2 MB)" }, { status: 413 });
+    }
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -185,11 +201,22 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Batch-insert events, expanding recurring events via rrule package
-  let imported = 0;
+  // Expand recurring events via rrule, then insert in chunks with createMany
   // Expand up to 3 years from today for recurring events
   const expandUntil = new Date();
   expandUntil.setFullYear(expandUntil.getFullYear() + 3);
+
+  type Row = {
+    title: string;
+    description: string | null;
+    location: string | null;
+    startTime: Date;
+    endTime: Date;
+    allDay: boolean;
+    calendarId: string;
+  };
+  const rows: Row[] = [];
+  let truncated = 0;
 
   for (const ev of events) {
     // Build a list of (startIso, endIso) pairs to insert
@@ -201,15 +228,22 @@ export async function POST(req: NextRequest) {
         const durationMs = new Date(ev.endIso).getTime() - dtstart.getTime();
         // rrule.fromString needs a RRULE: string without the key prefix
         const rule = RRule.fromString(`DTSTART:${dtstart.toISOString().replace(/[-:]/g, "").slice(0, 15)}Z\nRRULE:${ev.rrule}`);
-        const dates = rule.between(new Date(ev.startIso), expandUntil, true);
-        for (const d of dates) {
+        // Iterator form: returning false stops generation early (no generate-then-slice)
+        rule.all((d, i) => {
+          if (d > expandUntil) return false;
+          if (i >= MAX_INSTANCES_PER_EVENT) {
+            truncated++;
+            return false;
+          }
           instances.push({
             startIso: d.toISOString(),
             endIso: new Date(d.getTime() + durationMs).toISOString(),
           });
-        }
+          return true;
+        });
       } catch {
         // Fall back to single instance if rrule parsing fails
+        instances.length = 0;
         instances.push({ startIso: ev.startIso, endIso: ev.endIso });
       }
     } else {
@@ -217,22 +251,34 @@ export async function POST(req: NextRequest) {
     }
 
     for (const inst of instances) {
-      try {
-        await prisma.event.create({
-          data: {
-            title: ev.summary,
-            description: ev.description ?? null,
-            location: ev.location ?? null,
-            startTime: new Date(inst.startIso),
-            endTime: new Date(inst.endIso),
-            allDay: ev.allDay ?? false,
-            calendarId: calendar.id,
-          },
-        });
-        imported++;
-      } catch {
-        // Skip events that fail (e.g. invalid dates)
+      if (rows.length >= MAX_EVENTS_PER_IMPORT) {
+        truncated++;
+        continue;
       }
+      const startTime = new Date(inst.startIso);
+      const endTime = new Date(inst.endIso);
+      // Skip events with invalid dates
+      if (isNaN(startTime.getTime()) || isNaN(endTime.getTime())) continue;
+      rows.push({
+        title: ev.summary,
+        description: ev.description ?? null,
+        location: ev.location ?? null,
+        startTime,
+        endTime,
+        allDay: ev.allDay ?? false,
+        calendarId: calendar.id,
+      });
+    }
+  }
+
+  let imported = 0;
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + INSERT_CHUNK_SIZE);
+    try {
+      const res = await prisma.event.createMany({ data: chunk });
+      imported += res?.count ?? chunk.length;
+    } catch {
+      // Skip chunks that fail
     }
   }
 
@@ -241,5 +287,6 @@ export async function POST(req: NextRequest) {
     calendarName: name,
     importedEvents: imported,
     totalEvents: events.length,
+    truncated,
   });
 }
