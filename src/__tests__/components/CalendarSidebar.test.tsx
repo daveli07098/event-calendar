@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import type { CalendarType } from "@/types";
@@ -84,8 +84,23 @@ describe("CalendarSidebar", () => {
     }
   });
 
-  it("renders Settings link", () => {
+  it("does not duplicate the global nav links", () => {
     render(<CalendarSidebar {...defaultProps} />);
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+    expect(screen.queryByText("Event Section")).not.toBeInTheDocument();
+  });
+
+  it("labels visibility toggles and color swatches per calendar", () => {
+    render(<CalendarSidebar {...defaultProps} />);
+    const name = defaultProps.calendars[0].name;
+    expect(screen.getByRole("switch", { name: `Show calendar ${name}` })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: `${name} color` })).toBeInTheDocument();
+  });
+
+  it("closes the mobile drawer on Escape", () => {
+    const onMobileClose = vi.fn();
+    render(<CalendarSidebar {...defaultProps} mobileOpen onMobileClose={onMobileClose} />);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onMobileClose).toHaveBeenCalled();
   });
 });

@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
-import { Plus, ChevronLeft, ChevronRight, ChevronDown, Settings, Users, Megaphone, Ticket, X, Home } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight, ChevronDown, Users, Megaphone, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import Link from "next/link";
 import type { CalendarType, EventCategory } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
 import { TICKET_CALENDAR_NAMES } from "@/lib/calendar-names";
@@ -195,6 +194,16 @@ export function CalendarSidebar({
   const prevMonth = () => setMiniDate(new Date(year, month - 1, 1));
   const nextMonth = () => setMiniDate(new Date(year, month + 1, 1));
 
+  // Mobile drawer closes on Escape
+  useEffect(() => {
+    if (!mobileOpen || !onMobileClose) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onMobileClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen, onMobileClose]);
+
   if (collapsed) {
     return (
       // On mobile, collapsed sidebar is fully hidden (mobile uses drawer instead)
@@ -336,6 +345,8 @@ export function CalendarSidebar({
                 className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent group"
               >
                 <div
+                  role="img"
+                  aria-label={`${cal.name} color`}
                   className="size-3 rounded-sm shrink-0"
                   style={{ backgroundColor: cal.color }}
                 />
@@ -355,6 +366,7 @@ export function CalendarSidebar({
                 )}
                 <Switch
                   checked={cal.isVisible}
+                  aria-label={`Show calendar ${cal.name}`}
                   onCheckedChange={(checked) => onCalendarToggle(cal.id, checked)}
                   className="scale-75"
                 />
@@ -378,6 +390,8 @@ export function CalendarSidebar({
                   className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent group"
                 >
                   <div
+                    role="img"
+                    aria-label={`${cal.name} color`}
                     className="size-3 rounded-sm shrink-0"
                     style={{ backgroundColor: cal.color }}
                   />
@@ -387,6 +401,7 @@ export function CalendarSidebar({
                   </span>
                   <Switch
                     checked={cal.isVisible}
+                    aria-label={`Show calendar ${cal.name}`}
                     onCheckedChange={(checked) => onCalendarToggle(cal.id, checked)}
                     className="scale-75"
                   />
@@ -486,28 +501,6 @@ export function CalendarSidebar({
           </SidebarSection>
         )}
         </div>
-      </div>
-
-      {/* Bottom nav links */}
-      <div className="p-3 border-t border-border space-y-1">
-        <Link href="/">
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
-            <Home className="size-4" />
-            Home
-          </Button>
-        </Link>
-        <Link href="/tickets">
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
-            <Ticket className="size-4" />
-            Event Section
-          </Button>
-        </Link>
-        <Link href="/settings">
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2">
-            <Settings className="size-4" />
-            Settings
-          </Button>
-        </Link>
       </div>
     </div>
   );

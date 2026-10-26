@@ -127,9 +127,9 @@ describe("CalendarView — long event styling and ordering", () => {
     });
     const fc = latestFCProps?.events as { id: string; extendedProps: { isLong: boolean; rank: number } }[];
     const byId = Object.fromEntries(fc.map((e) => [e.id, e.extendedProps]));
-    expect(byId.short).toMatchObject({ isLong: false, rank: 1 });
-    expect(byId.long).toMatchObject({ isLong: true, rank: 2 });
-    expect(String(latestFCProps?.eventOrder).startsWith("rank,")).toBe(true);
+    expect(byId.short).toMatchObject({ isLong: false, rank: 0 });
+    expect(byId.long).toMatchObject({ isLong: true, rank: 1 });
+    expect(latestFCProps?.eventOrder).toBe("rank,start,-duration,allDay,title");
     const classNames = latestFCProps?.eventClassNames as (a: unknown) => string[];
     const mk = (isLong: boolean) => ({ event: { allDay: true, id: "x", extendedProps: { isLong } }, view: { type: "dayGridMonth" } });
     expect(classNames(mk(true))).toContain("fc-event-long");

@@ -28,7 +28,6 @@ import { detectLocationTag } from "@/lib/location-tags";
 import { DayDetailPanel } from "@/components/calendar/DayDetailPanel";
 import { BookmarkPopover } from "@/components/calendar/BookmarkPopover";
 import { EventReminder } from "@/components/calendar/EventReminder";
-import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import { useTheme } from "@/context/ThemeContext";
 import { parseGroupMatch, parseKnockoutMatch } from "@/lib/worldcup";
 import { getTeamFlag } from "@/lib/team-flags";
@@ -203,8 +202,15 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
     setViewReady(true);
   }, []);
 
+  const [dayPanelDate, setDayPanelDate] = useState<string | null>(null);
+
   const changeViewTo = useCallback((next: CalendarViewName) => {
-    setView(next);
+    // Switching FC -> FC keeps the mounted calendar (and its date); datesSet syncs `view`.
+    const api: CalendarApi | undefined = calendarRef.current?.getApi();
+    if (api && next !== "upcoming") api.changeView(next);
+    else setView(next);
+    // The day side panel belongs to the grid views; don't carry it into Upcoming.
+    if (next === "upcoming") setDayPanelDate(null);
     try { localStorage.setItem(VIEW_STORAGE_KEY, next); } catch { /* non-fatal */ }
   }, []);
 
@@ -233,7 +239,6 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
     end: string;
     allDay: boolean;
   } | null>(null);
-  const [dayPanelDate, setDayPanelDate] = useState<string | null>(null);
   const [copyData, setCopyData] = useState<EventFormData | null>(null);
   // Abort controller ref — cancels stale event fetches when the user navigates quickly
   const fetchAbortRef = useRef<AbortController | null>(null);
@@ -337,7 +342,9 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
           .toLocaleDateString("en-CA")
       : event.endTime;
 
-    // Ordering rank: sales and short events first, long (>=3 day) runs last
+    // Ordering rank: everything short (sales included) in plain time order,
+    // long (>=3 day) runs pushed below. Sales stay prominent via the Upcoming
+    // view's Sales strip.
     const isSale = event.calendar?.name === SALE_TICKET_CALENDAR_NAME;
     const isLong = !isSale && isLongEvent(eventToAgenda(event, calendars), timeZone);
 
@@ -349,7 +356,7 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
       allDay: event.allDay || isMultiDayTimed,
       backgroundColor: event.calendar?.color || "#4285f4",
       borderColor: event.calendar?.color || "#4285f4",
-      extendedProps: { event, isLong, rank: isSale ? 0 : isLong ? 2 : 1 },
+      extendedProps: { event, isLong, rank: isLong ? 1 : 0 },
     };
   });
 
@@ -385,6 +392,15 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
   };
 
   const handleEventClick = (clickInfo: EventClickArg) => {
+    // List rows open the event modal directly (there's no day grid to anchor a panel to)
+    if (clickInfo.view.type.startsWith("list")) {
+      const listEv = clickInfo.event.extendedProps.event as EventType;
+      setSelectedRange(null);
+      setSelectedEvent(listEv);
+      setModalOpen(true);
+      onEventOpen?.(listEv.id, listEv.startTime);
+      return;
+    }
     // Clicking an event in the calendar grid shows the day panel first
     // so the user sees all events for that day before choosing to edit.
     const ev = clickInfo.event.extendedProps.event as EventType;
@@ -730,12 +746,12 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
       />
       {/* Calendar + optional day-detail panel side by side */}
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 min-w-0 p-1 md:p-4 flex flex-col">
-          {/* Top row: search bar (desktop) + theme switcher pinned top-right.
-              On mobile the search lives in the FC toolbar, so this row carries
-              just the theme switcher, kept right-aligned. */}
+        <div className="flex-1 min-w-0 px-3 py-1 md:p-4 flex flex-col">
+          {/* Top row: search (desktop), the one view switcher shared by every
+              view (Upcoming included), then bookmarks + theme. On mobile the
+              search lives in the FC toolbar, so the switcher takes the width. */}
           <div className="mb-2 flex items-center gap-2">
-            {!isMobile ? (
+            {!isMobile && (
               <button
                 className="flex flex-1 items-center gap-2.5 h-9 px-3 rounded-md border border-input bg-muted/30 text-sm text-muted-foreground hover:bg-muted/60 transition-colors cursor-pointer text-left"
                 onClick={() => searchOpenRef.current?.()}
@@ -745,14 +761,35 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
                 <span className="flex-1">Search events…</span>
                 <kbd className="hidden sm:inline text-xs border border-border rounded px-1 py-0.5 bg-background font-mono">⌘K</kbd>
               </button>
-            ) : (
-              <div className="flex-1" />
             )}
+            <div
+              role="tablist"
+              aria-label="Calendar view"
+              className={cn("flex gap-0.5 rounded-md border border-input bg-muted/30 p-0.5", isMobile && "flex-1")}
+            >
+              {VIEW_TABS.map((t) => (
+                <button
+                  key={t.view}
+                  type="button"
+                  role="tab"
+                  aria-selected={t.view === view}
+                  onClick={() => changeViewTo(t.view)}
+                  className={cn(
+                    "rounded px-2 py-1 text-xs md:px-3 md:text-sm transition-colors",
+                    isMobile && "flex-1 min-h-8",
+                    t.view === view
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-muted",
+                  )}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
             {/* Bookmarked events — always one click away, on mobile too */}
             {onBookmarkSelect && (
               <BookmarkPopover bookmarks={bookmarks ?? []} onSelect={onBookmarkSelect} />
             )}
-            <ThemeSwitcher />
           </div>
           {/* Empty-state hint — guides new users / explains filtered-out views */}
           {view === "upcoming" ? null : events.length === 0 ? (
@@ -773,7 +810,7 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
           <div className="flex-1 min-h-0">
           {!viewReady ? null : view === "upcoming" ? (
             <div className="flex h-full flex-col" data-testid="upcoming-view">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div className={cn("mb-3 flex flex-wrap items-center gap-2", !isMobile && "hidden")}>
                 {isMobile && (
                   <button
                     type="button"
@@ -784,25 +821,6 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
                     ☰
                   </button>
                 )}
-                <div role="tablist" aria-label="Calendar view" className="flex flex-wrap gap-1">
-                  {VIEW_TABS.map((t) => (
-                    <button
-                      key={t.view}
-                      type="button"
-                      role="tab"
-                      aria-selected={t.view === "upcoming"}
-                      onClick={() => changeViewTo(t.view)}
-                      className={cn(
-                        "rounded-md border px-3 py-1 text-sm transition-colors",
-                        t.view === "upcoming"
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-input bg-background hover:bg-muted",
-                      )}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <UpcomingAgenda
@@ -828,11 +846,6 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
                 hint: "Open menu",
                 click: () => mobileMenuRef.current?.(),
               },
-              upcoming: {
-                text: "Upcoming",
-                hint: "Upcoming agenda",
-                click: () => changeViewTo("upcoming"),
-              },
               search: {
                 text: "🔍",
                 hint: "Search events (⌘K)",
@@ -846,14 +859,8 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
             } : {
               left: "prev,next today",
               center: "title",
-              right: "upcoming,dayGridMonth,timeGridWeek,timeGridDay,listWeek",
+              right: "",
             }}
-            // The mobile header has no room for view buttons, which previously
-            // left phones with no way out of whatever view they started in.
-            // Give them their own row instead of cramming the header.
-            footerToolbar={isMobile ? {
-              center: "upcoming,listWeek,dayGridMonth,timeGridDay",
-            } : false}
             buttonText={{
               today: "Today",
               month: "Month",

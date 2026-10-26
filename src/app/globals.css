@@ -71,6 +71,27 @@
   --fc-page-bg-color: var(--background);
   --fc-neutral-bg-color: var(--muted);
   --fc-neutral-text-color: var(--muted-foreground);
+  /* List view row hover: FC defaults to #f5f5f5, which turns rows near-white in dark mode */
+  --fc-list-event-hover-bg-color: var(--accent);
+}
+
+/* List view: keep text on theme tokens in hover/focus so rows stay readable in both themes */
+.fc .fc-list-event:hover td,
+.fc .fc-list-event:focus-within td {
+  background-color: var(--accent);
+  color: var(--accent-foreground);
+}
+.fc .fc-list-event:hover a,
+.fc .fc-list-event:focus-within a {
+  color: inherit;
+}
+.fc .fc-list-day-cushion {
+  background-color: var(--muted);
+  color: var(--foreground);
+}
+.fc .fc-list-empty {
+  background-color: var(--muted);
+  color: var(--muted-foreground);
 }
 
 /* ── Toolbar buttons — clean, minimal, shadcn-style ── */
@@ -180,6 +201,22 @@
 .fc .fc-event.fc-event-long .ec-event-title {
   font-size: 0.7rem;
   font-weight: 400;
+  color: var(--foreground);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bar has no fill, so FC's default white event text must not leak through;
+   clip to the bar so the title ellipsizes instead of spilling across cells. */
+.fc .fc-event.fc-event-long,
+.fc .fc-event.fc-event-long .fc-event-main {
+  color: var(--foreground);
+  overflow: hidden;
+}
+.fc .fc-event.fc-event-long .ec-allday-event {
+  min-width: 0;
 }
 
 /* Custom event content layouts */

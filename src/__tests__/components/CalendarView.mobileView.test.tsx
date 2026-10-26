@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, act } from "@testing-library/react";
+import { render, act, screen } from "@testing-library/react";
 import React from "react";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import type { CalendarType } from "@/types";
@@ -137,26 +137,26 @@ describe("CalendarView — mobile layout", () => {
     expect(changeViewSpy).not.toHaveBeenCalled();
   });
 
-  it("gives mobile a footer view-switcher starting with upcoming", async () => {
+  it("shows one five-tab view switcher on mobile, with no FC footer toolbar", async () => {
     stubMatchMedia(true);
     localStorage.setItem("calendar.view", "listWeek");
     await act(async () => {
       render(<CalendarView initialEvents={[]} calendars={calendars} />);
     });
-    expect(latestFCProps?.footerToolbar).toEqual({
-      center: "upcoming,listWeek,dayGridMonth,timeGridDay",
-    });
+    expect(latestFCProps?.footerToolbar).toBeUndefined();
+    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Upcoming", "Month", "Week", "Day", "List"]);
   });
 
-  it("gives desktop no footer toolbar and Upcoming as the first header tab", async () => {
+  it("shows the same switcher on desktop and keeps view buttons out of the FC header", async () => {
     stubMatchMedia(false);
     localStorage.setItem("calendar.view", "dayGridMonth");
     await act(async () => {
       render(<CalendarView initialEvents={[]} calendars={calendars} />);
     });
-    expect(latestFCProps?.footerToolbar).toBe(false);
-    expect((latestFCProps?.headerToolbar as { right: string }).right).toBe(
-      "upcoming,dayGridMonth,timeGridWeek,timeGridDay,listWeek",
-    );
+    expect(latestFCProps?.footerToolbar).toBeUndefined();
+    expect((latestFCProps?.headerToolbar as { right: string }).right).toBe("");
+    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Upcoming", "Month", "Week", "Day", "List"]);
   });
 });
