@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Inter, Roboto, Poppins, Lato } from "next/font/google";
-import { Toaster } from "sonner";
 import { Providers } from "@/components/Providers";
 import { AppNav } from "@/components/nav/AppNav";
 import { InstallPrompt } from "@/components/pwa/InstallPrompt";
@@ -112,7 +111,6 @@ export default function RootLayout({
             {children}
           </div>
           <InstallPrompt />
-          <Toaster />
         </Providers>
       </body>
     </html>

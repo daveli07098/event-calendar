@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { CalendarDays, Home, Settings, Ticket } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 
 // Height of the bar; the layout wrapper subtracts it from h-screen/min-h-screen pages.
 export const APP_NAV_HEIGHT = "2.75rem";
@@ -33,7 +34,7 @@ export function AppNav() {
     <nav
       aria-label="Main"
       style={{ height: APP_NAV_HEIGHT }}
-      className="sticky top-0 z-30 flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border bg-card px-2 sm:px-4"
+      className="sticky top-0 z-30 flex shrink-0 items-center gap-1 border-b border-border bg-card px-2 sm:px-4"
     >
       {LINKS.map(({ href, label, icon: Icon }) => {
         const active = isActive(pathname, href);
@@ -42,6 +43,8 @@ export function AppNav() {
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
+            aria-label={label}
+            title={label}
             className={cn(
               "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium transition-colors",
               active
@@ -50,10 +53,12 @@ export function AppNav() {
             )}
           >
             <Icon className="size-4" />
-            <span className="max-sm:text-xs">{label}</span>
+            {/* Icon-only below sm so all four links plus the theme switcher fit a 390px phone. */}
+            <span className="max-sm:sr-only">{label}</span>
           </Link>
         );
       })}
+      <ThemeSwitcher className="ml-auto h-8 shrink-0" />
     </nav>
   );
 }

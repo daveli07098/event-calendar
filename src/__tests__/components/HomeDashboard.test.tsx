@@ -30,7 +30,8 @@ describe("HomeDashboard", () => {
     render(<HomeDashboard {...base} />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Good morning, Dave");
     expect(screen.getByText("Monday 26 October")).toBeTruthy();
-    expect(screen.getByText("Nothing on today")).toBeTruthy();
+    expect(screen.queryByText("Nothing on today")).toBeNull();
+    expect(screen.getByRole("link", { name: /Create your first event/ }).getAttribute("href")).toBe("/calendar");
   });
 
   it("shows countdown tiles and the empty hint", () => {
@@ -47,9 +48,9 @@ describe("HomeDashboard", () => {
       />,
     );
     const tiles = screen.getAllByTestId("countdown-tile");
-    expect(tiles[0].textContent).toContain("12");
+    expect(tiles[0].textContent).toContain("in 12 days");
     expect(tiles[0].textContent).toContain("NCT 127");
-    expect(tiles[1].textContent).toContain("Today!");
+    expect(tiles[1].textContent).toContain("in 8 h");
   });
 
   it("saves a URL note optimistically and links to the Event Section", async () => {

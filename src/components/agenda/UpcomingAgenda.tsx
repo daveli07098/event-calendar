@@ -65,10 +65,13 @@ function Accent({ color }: { color: string }) {
   return <span aria-hidden className="absolute inset-y-0 left-0 w-1 rounded-l-lg" style={{ backgroundColor: color }} />;
 }
 
-function SaleCard({ e, now, onClick }: { e: AgendaEvent; now: number; onClick?: (id: string) => void }) {
+function SaleCard({
+  e, now, timeZone, onClick,
+}: { e: AgendaEvent; now: number; timeZone: string; onClick?: (id: string) => void }) {
   const diff = new Date(e.start).getTime() - now;
   const urgent = diff < 60 * MIN;
   const label = diff <= 0 ? "open now" : `opens in ${span(diff)}`;
+  const chipText = e.allDay ? label : `${clock(e.start, timeZone)} · ${label}`;
   return (
     <button
       type="button"
@@ -89,7 +92,7 @@ function SaleCard({ e, now, onClick }: { e: AgendaEvent; now: number; onClick?: 
             urgent ? "bg-red-500 text-white" : "bg-purple-500/15 text-purple-700 dark:text-purple-300",
           )}
         >
-          {label}
+          {chipText}
         </span>
       </div>
     </button>
@@ -218,7 +221,7 @@ export function UpcomingAgenda({ events, timeZone, days, onEventClick, compact =
           <Heading>Sales opening</Heading>
           <div className="space-y-1.5">
             {groups.sales.map((e) => (
-              <SaleCard key={e.id} e={e} now={now} onClick={onEventClick} />
+              <SaleCard key={e.id} e={e} now={now} timeZone={timeZone} onClick={onEventClick} />
             ))}
           </div>
         </section>

@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CalendarDays, Check, Pin, PinOff, Ticket, Trash2 } from "lucide-react";
+import { Bell, CalendarDays, Check, Pin, PinOff, Plus, Ticket, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dayKey, groupAgenda, type AgendaEvent } from "@/lib/agenda";
 import { urlFromText } from "@/lib/notes";
@@ -58,16 +59,35 @@ export function daysUntil(startIso: string, now: Date, timeZone: string): number
   return Math.round((b - a) / 86_400_000);
 }
 
-function countdownLabel(days: number): { big: string; small: string } {
-  if (days <= 0) return { big: "Today!", small: "" };
-  return { big: String(days), small: days === 1 ? "day" : "days" };
+function clockIn(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(
+    new Date(iso),
+  );
+}
+
+/** Relative wording: "in 2 h", "Tomorrow 19:30", "in 5 days". */
+export function countdownLabel(
+  p: Pick<HomeBookmark, "start" | "allDay">,
+  now: Date,
+  timeZone: string,
+): string {
+  const days = daysUntil(p.start, now, timeZone);
+  const ms = new Date(p.start).getTime() - now.getTime();
+  if (days <= 0) {
+    if (p.allDay || ms <= 0) return "Today";
+    if (ms < HOUR_MS) return `in ${Math.max(Math.round(ms / 60_000), 1)} min`;
+    return `in ${Math.round(ms / HOUR_MS)} h`;
+  }
+  if (days === 1) return p.allDay ? "Tomorrow" : `Tomorrow ${clockIn(p.start, timeZone)}`;
+  return `in ${days} days`;
 }
 
 function summarize(events: AgendaEvent[], now: Date, timeZone: string): string {
   const g = groupAgenda(events, now, timeZone, 14);
   const parts: string[] = [];
   const n = g.today.length;
-  parts.push(n === 0 ? "Nothing on today" : `${n} event${n === 1 ? "" : "s"} today`);
+  // With no events the Upcoming list already says "Nothing today" — don't repeat it here.
+  if (n > 0) parts.push(`${n} event${n === 1 ? "" : "s"} today`);
   const next = g.sales.find((s) => new Date(s.start).getTime() > now.getTime());
   if (next) {
     const h = Math.max(Math.round((new Date(next.start).getTime() - now.getTime()) / HOUR_MS), 1);
@@ -149,8 +169,9 @@ export function HomeDashboard(props: HomeDashboardProps) {
     }
   }
 
-  async function mutateNote(note: HomeNote, init: RequestInit) {
+  async function mutateNote(note: HomeNote, init: RequestInit, kind: "done" | "delete") {
     const prev = notes;
+    const index = prev.findIndex((n) => n.id === note.id);
     setNotes((l) => l.filter((n) => n.id !== note.id));
     try {
       const res = await fetch(`/api/notes/${note.id}`, init);
@@ -158,9 +179,47 @@ export function HomeDashboard(props: HomeDashboardProps) {
     } catch {
       setNotes(prev);
       setError("Could not update the note");
+      return;
+    }
+    toast(kind === "done" ? "Note marked done" : "Note deleted", {
+      action: { label: "Undo", onClick: () => void undoNote(note, index, kind) },
+    });
+  }
+
+  async function undoNote(note: HomeNote, index: number, kind: "done" | "delete") {
+    const restore = (n: HomeNote) =>
+      setNotes((l) => {
+        const next = [...l];
+        next.splice(Math.min(Math.max(index, 0), next.length), 0, n);
+        return next;
+      });
+    try {
+      // A deleted note is gone server-side, so undo re-creates it (new id).
+      const res =
+        kind === "done"
+          ? await fetch(`/api/notes/${note.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ done: false }),
+            })
+          : await fetch("/api/notes", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text: note.text }),
+            });
+      if (!res.ok) throw new Error();
+      if (kind === "delete") {
+        const saved: HomeNote = await res.json();
+        restore({ id: saved.id, text: saved.text, url: saved.url });
+      } else {
+        restore(note);
+      }
+    } catch {
+      setError("Could not undo");
     }
   }
 
+  const isEmpty = events.length === 0 && bookmarks.length === 0;
   const shownPins = pinned.slice(0, MAX_COUNTDOWNS);
 
   return (
@@ -171,7 +230,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
           {firstName ? `, ${firstName}` : ""}
         </h1>
         <p className="text-sm text-muted-foreground">{dateLabel}</p>
-        <p className="mt-1 text-sm">{summary}</p>
+        {summary && <p className="mt-1 text-sm">{summary}</p>}
       </header>
 
       {error && (
@@ -183,6 +242,14 @@ export function HomeDashboard(props: HomeDashboardProps) {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <section aria-label="Upcoming" className="min-w-0">
           <UpcomingAgenda events={events} timeZone={timeZone} days={14} onEventClick={openEvent} initialNow={props.nowIso} />
+          {isEmpty && (
+            <div className="mt-4 text-center">
+              {/* /calendar has no "create" query param, so this opens the calendar where the + button lives. */}
+              <Link href="/calendar" className={buttonVariants({ size: "sm" })}>
+                <Plus /> Create your first event
+              </Link>
+            </div>
+          )}
         </section>
 
         <aside className="min-w-0 space-y-4">
@@ -193,7 +260,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
             ) : (
               <ul className="grid grid-cols-2 gap-2">
                 {shownPins.map((p) => {
-                  const { big, small } = countdownLabel(daysUntil(p.start, now, timeZone));
+                  const label = countdownLabel(p, now, timeZone);
                   return (
                     <li
                       key={p.eventId}
@@ -202,8 +269,8 @@ export function HomeDashboard(props: HomeDashboardProps) {
                     >
                       <span aria-hidden className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: p.color }} />
                       <div className="pl-1">
-                        <div className="text-2xl font-bold leading-none text-primary">
-                          {big} <span className="text-sm font-medium text-muted-foreground">{small}</span>
+                        <div className="text-xl font-bold leading-none text-primary">
+                          {label}
                         </div>
                         <div className="mt-1 truncate text-xs text-muted-foreground">{p.title}</div>
                       </div>
@@ -291,10 +358,11 @@ export function HomeDashboard(props: HomeDashboardProps) {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ done: true }),
-                      })}
-                      className="mt-0.5 shrink-0 rounded border p-0.5 text-muted-foreground hover:bg-accent"
+                      }, "done")}
+                      className="group/check mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-muted-foreground/60 hover:bg-accent"
                     >
-                      <Check className="size-3" />
+                      {/* Unchecked until hovered/focused, so it never looks already ticked. */}
+                      <Check className="size-3 text-primary opacity-0 transition-opacity group-hover/check:opacity-60 group-focus-visible/check:opacity-60" />
                     </button>
                     <div className="min-w-0 flex-1">
                       <div className="break-words">{n.text}</div>
@@ -310,7 +378,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
                     <button
                       type="button"
                       aria-label={`Delete note: ${n.text}`}
-                      onClick={() => mutateNote(n, { method: "DELETE" })}
+                      onClick={() => mutateNote(n, { method: "DELETE" }, "delete")}
                       className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
                     >
                       <Trash2 className="size-3.5" />

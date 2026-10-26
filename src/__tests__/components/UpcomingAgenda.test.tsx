@@ -52,8 +52,8 @@ describe("UpcomingAgenda", () => {
     const cards = screen.getAllByTestId("sale-card");
     expect(cards[0].getAttribute("data-urgent")).toBe("true");
     expect(cards[1].getAttribute("data-urgent")).toBe("false");
-    expect(screen.getByText("opens in 35 min")).toBeTruthy();
-    expect(screen.getByText("opens in 2 d")).toBeTruthy();
+    expect(screen.getByText(/· opens in 35 min$/)).toBeTruthy();
+    expect(screen.getByText(/· opens in 2 d$/)).toBeTruthy();
   });
 
   it("groups upcoming days under a header", () => {

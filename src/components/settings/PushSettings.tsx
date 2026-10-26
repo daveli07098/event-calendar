@@ -110,9 +110,6 @@ export function PushSettings() {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Get a notification for ticket sales and events even when the app is closed.
-      </p>
       {!supported ? (
         <p className="text-sm text-muted-foreground">
           Push notifications are not supported in this browser. On iPhone they work only after
@@ -140,6 +137,11 @@ export function PushSettings() {
       {permission === "denied" && (
         <p className="text-sm text-destructive">
           Notifications are blocked. Allow them in your browser or system settings, then try again.
+          <span className="mt-1 block text-xs text-muted-foreground">
+            How to unblock: open your browser&apos;s site settings for this page and set Notifications to
+            Allow. On iPhone, first Add to Home Screen, then enable notifications in Settings &gt;
+            Notifications.
+          </span>
         </p>
       )}
       <p className="text-xs text-muted-foreground">

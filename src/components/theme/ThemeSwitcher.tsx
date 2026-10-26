@@ -71,7 +71,7 @@ export function ThemeSwitcher({ className }: { className?: string }) {
           {activeEvent ? activeEvent.label : ACCENT_COLORS[theme.accent].label}
         </span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-52">
+      <DropdownMenuContent align="end" className="w-52 bg-popover opacity-100 shadow-lg">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Mode</DropdownMenuLabel>
           {MODES.map((m) => (

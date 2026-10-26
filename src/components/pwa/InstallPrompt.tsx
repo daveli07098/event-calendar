@@ -118,11 +118,12 @@ export function InstallPrompt() {
 
   if (!visible) return null;
 
+  // bottom-24 keeps the banner above the calendar's floating + button (fixed bottom-6, 3.5rem tall).
   return (
     <div
       className={cn(
-        "fixed inset-x-3 bottom-3 z-[60] mx-auto max-w-md rounded-xl border border-border",
-        "bg-card/95 shadow-lg backdrop-blur md:hidden",
+        "fixed inset-x-3 bottom-24 z-[60] mx-auto max-w-md rounded-xl border border-border",
+        "bg-card shadow-lg md:hidden",
       )}
       role="dialog"
       aria-label="Install app"
