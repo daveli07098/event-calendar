@@ -26,6 +26,9 @@ interface CalendarSidebarProps {
   locationCounts?: Record<string, number>;
   /** Called when user clicks a date on the mini calendar */
   onMiniDateClick?: (date: Date) => void;
+  /** Start of the main calendar's visible period; the mini calendar jumps to
+   *  its month whenever it changes (local browsing in between is kept). */
+  visibleDate?: Date | null;
 }
 
 /** Collapsible sidebar section with a chevron header, optional header action,
@@ -145,6 +148,7 @@ export function CalendarSidebar({
   onLocationFilter,
   locationCounts,
   onMiniDateClick,
+  visibleDate,
 }: CalendarSidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -175,6 +179,15 @@ export function CalendarSidebar({
 
   // Mini calendar state
   const [miniDate, setMiniDate] = useState(new Date());
+  // Follow the main calendar: when its visible month changes, jump there.
+  // Adjusted during render (keyed by month) rather than in an effect, so a
+  // same-month navigation doesn't undo the user's own mini-calendar browsing.
+  const visibleKey = visibleDate ? `${visibleDate.getFullYear()}-${visibleDate.getMonth()}` : null;
+  const [syncedKey, setSyncedKey] = useState<string | null>(null);
+  if (visibleDate && visibleKey !== syncedKey) {
+    setSyncedKey(visibleKey);
+    setMiniDate(new Date(visibleDate.getFullYear(), visibleDate.getMonth(), 1));
+  }
   const year = miniDate.getFullYear();
   const month = miniDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -259,11 +272,11 @@ export function CalendarSidebar({
         <div className="flex items-center justify-between mb-2">
           {/* Larger tap targets on touch, original density on desktop — this
               mini calendar is reused verbatim inside the mobile drawer. */}
-          <Button variant="ghost" size="icon" onClick={prevMonth} className="size-9 md:size-6" aria-label="Previous month" title="Previous month">
+          <Button variant="ghost" size="icon" onClick={prevMonth} className="size-9 md:size-6" aria-label="Previous month (mini calendar)" title="Previous month">
             <ChevronLeft className="size-4 md:size-3" />
           </Button>
           <span className="text-xs font-medium" aria-live="polite">{monthName}</span>
-          <Button variant="ghost" size="icon" onClick={nextMonth} className="size-9 md:size-6" aria-label="Next month" title="Next month">
+          <Button variant="ghost" size="icon" onClick={nextMonth} className="size-9 md:size-6" aria-label="Next month (mini calendar)" title="Next month">
             <ChevronRight className="size-4 md:size-3" />
           </Button>
         </div>
@@ -396,9 +409,16 @@ export function CalendarSidebar({
                     style={{ backgroundColor: cal.color }}
                   />
                   <span className="text-sm flex-1 truncate">{cal.name}</span>
-                  <span className="text-[10px] text-muted-foreground capitalize">
-                    {cal.memberRole}
-                  </span>
+                  {/* Site-wide and view-only calendars can't be edited — say so */}
+                  {cal.isSiteShared || cal.memberRole === "viewer" ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                      Read-only
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground capitalize">
+                      {cal.memberRole}
+                    </span>
+                  )}
                   <Switch
                     checked={cal.isVisible}
                     aria-label={`Show calendar ${cal.name}`}

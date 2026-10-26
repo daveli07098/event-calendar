@@ -43,6 +43,8 @@ export function CalendarPageClient({
   const [bookmarks, setBookmarks] = useState<BookmarkedEvent[]>([]);
   // Ref to CalendarView's gotoDate function (set by CalendarView via callback)
   const gotoDateRef = useRef<((date: Date) => void) | null>(null);
+  // Start of the main calendar's visible period — the sidebar mini calendar follows it
+  const [visibleDate, setVisibleDate] = useState<Date | null>(null);
 
   // On mount: open event + navigate to date if URL has ?event=id
   useEffect(() => {
@@ -210,6 +212,7 @@ export function CalendarPageClient({
           onLocationFilter={setLocationFilter}
           locationCounts={locationCounts}
           onMiniDateClick={(date) => gotoDateRef.current?.(date)}
+          visibleDate={visibleDate}
         />
         <CalendarView
           calendars={calendars}
@@ -225,6 +228,7 @@ export function CalendarPageClient({
           categoryFilter={categoryFilter}
           locationFilter={locationFilter}
           onGotoDateReady={(fn) => { gotoDateRef.current = fn; }}
+          onVisibleDateChange={setVisibleDate}
           bookmarks={bookmarks}
           onBookmarkSelect={(id) => setOpenEventId(id)}
           onBookmarkToggle={handleBookmarkToggle}

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, act, screen } from "@testing-library/react";
+import { render, act, screen, within } from "@testing-library/react";
 import React from "react";
 import { CalendarView } from "@/components/calendar/CalendarView";
 import type { CalendarType } from "@/types";
@@ -144,8 +144,20 @@ describe("CalendarView — mobile layout", () => {
       render(<CalendarView initialEvents={[]} calendars={calendars} />);
     });
     expect(latestFCProps?.footerToolbar).toBeUndefined();
-    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    const group = screen.getByRole("group", { name: "Calendar view" });
+    const tabs = within(group).getAllByRole("button").map((t) => t.textContent);
     expect(tabs).toEqual(["Upcoming", "Month", "Week", "Day", "List"]);
+  });
+
+  it("offers search next to the menu in the mobile Upcoming view", async () => {
+    stubMatchMedia(true);
+    const onSearchOpen = vi.fn();
+    await act(async () => {
+      render(<CalendarView initialEvents={[]} calendars={calendars} onSearchOpen={onSearchOpen} />);
+    });
+    expect(screen.getByTestId("agenda-mock")).toBeInTheDocument();
+    screen.getByRole("button", { name: "Search events" }).click();
+    expect(onSearchOpen).toHaveBeenCalled();
   });
 
   it("shows the same switcher on desktop and keeps view buttons out of the FC header", async () => {
@@ -156,7 +168,8 @@ describe("CalendarView — mobile layout", () => {
     });
     expect(latestFCProps?.footerToolbar).toBeUndefined();
     expect((latestFCProps?.headerToolbar as { right: string }).right).toBe("");
-    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    const group = screen.getByRole("group", { name: "Calendar view" });
+    const tabs = within(group).getAllByRole("button").map((t) => t.textContent);
     expect(tabs).toEqual(["Upcoming", "Month", "Week", "Day", "List"]);
   });
 });

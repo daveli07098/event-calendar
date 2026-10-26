@@ -97,6 +97,31 @@ describe("CalendarSidebar", () => {
     expect(screen.getByRole("img", { name: `${name} color` })).toBeInTheDocument();
   });
 
+  it("mini calendar follows the main calendar's visible month, with its own arrow labels", () => {
+    const { rerender } = render(<CalendarSidebar {...defaultProps} visibleDate={new Date(2026, 11, 1)} />);
+    expect(screen.getByText("December 2026")).toBeInTheDocument();
+    // Local browsing is kept until the main calendar moves to another month
+    fireEvent.click(screen.getByRole("button", { name: "Next month (mini calendar)" }));
+    expect(screen.getByText("January 2027")).toBeInTheDocument();
+    rerender(<CalendarSidebar {...defaultProps} visibleDate={new Date(2026, 11, 1)} />);
+    expect(screen.getByText("January 2027")).toBeInTheDocument();
+    rerender(<CalendarSidebar {...defaultProps} visibleDate={new Date(2027, 2, 1)} />);
+    expect(screen.getByText("March 2027")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Previous month (mini calendar)" })).toBeInTheDocument();
+  });
+
+  it("marks site-shared and viewer calendars as read-only", () => {
+    const shared: CalendarType[] = [
+      ...calendars,
+      { ...calendars[0], id: "s1", name: "Site Events", memberRole: "viewer", isSiteShared: true },
+      { ...calendars[0], id: "s2", name: "Team", memberRole: "editor" },
+      { ...calendars[0], id: "s3", name: "Friends", memberRole: "viewer" },
+    ];
+    render(<CalendarSidebar {...defaultProps} calendars={shared} />);
+    expect(screen.getAllByText("Read-only")).toHaveLength(2);
+    expect(screen.getByText("editor")).toBeInTheDocument();
+  });
+
   it("closes the mobile drawer on Escape", () => {
     const onMobileClose = vi.fn();
     render(<CalendarSidebar {...defaultProps} mobileOpen onMobileClose={onMobileClose} />);

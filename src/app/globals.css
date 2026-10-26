@@ -521,8 +521,29 @@
   .fc .fc-toolbar {
     gap: 4px;
   }
+  /* Header stays one row: the button chunks keep their size, the title chunk
+     takes what's left and truncates (long list/week ranges used to wrap the
+     toolbar and misalign the buttons). */
+  .fc .fc-header-toolbar {
+    flex-wrap: nowrap;
+  }
+  .fc .fc-header-toolbar .fc-toolbar-chunk {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .fc .fc-header-toolbar .fc-toolbar-chunk:nth-child(2) {
+    flex: 1 1 auto;
+    flex-shrink: 1;
+    justify-content: center;
+  }
   .fc .fc-toolbar-title {
-    font-size: 0.95rem !important;
+    font-size: 0.85rem !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
   /* Toolbar buttons used to shrink here, which put every primary nav control
      (prev/next/today/search) at ~26px on exactly the breakpoint where input is

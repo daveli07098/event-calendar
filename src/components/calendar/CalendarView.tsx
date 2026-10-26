@@ -132,6 +132,8 @@ interface CalendarViewProps {
   locationFilter?: string | null;
   /** Called on mount with a gotoDate function so parent can navigate the calendar */
   onGotoDateReady?: (fn: (date: Date) => void) => void;
+  /** Called whenever FullCalendar's visible period changes (current-range start) — keeps the sidebar mini calendar in step */
+  onVisibleDateChange?: (date: Date) => void;
   /** Bookmarked events (all calendars) — shown in the header 🔖 popover */
   bookmarks?: BookmarkedEvent[];
   /** Open a bookmarked event from the popover */
@@ -140,15 +142,22 @@ interface CalendarViewProps {
   onBookmarkToggle?: (eventId: string, bookmarked: boolean) => Promise<void>;
 }
 
-export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
+export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, onVisibleDateChange, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>(initialAgendaEvents ?? []);
   // Always starts as "upcoming" (SSR-safe); the stored / deep-link view is
   // resolved after mount, and the body renders nothing until then.
   const [view, setView] = useState<CalendarViewName>("upcoming");
   const [viewReady, setViewReady] = useState(false);
+  // Only read by FullCalendar at construction; cleared after the first datesSet
+  // so a later remount (Upcoming -> Month) starts on today, not the old deep link.
   const [initialDate, setInitialDate] = useState<string | undefined>(undefined);
   const deepLinkRef = useRef(false);
+  // Set when a deep link forced the starting view: that view must not be
+  // persisted as the user's choice by the first datesSet.
+  const skipPersistViewRef = useRef(false);
+  // Local YYYY-MM-DD start of FullCalendar's visible range (list rows collapse onto it)
+  const [rangeStartLocal, setRangeStartLocal] = useState<string | null>(null);
   const timeZone = useMemo(() => browserTimeZone(), []);
   const calendarRef = useRef<FullCalendar>(null);
   const [isMobile, setIsMobile] = useState(false);
@@ -196,7 +205,10 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
       deepLinkRef.current = true;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore on mount
       if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) setInitialDate(date);
-      if (stored === "upcoming") next = "dayGridMonth";
+      if (stored === "upcoming") {
+        next = "dayGridMonth";
+        skipPersistViewRef.current = true;
+      }
     }
     setView(next);
     setViewReady(true);
@@ -217,7 +229,12 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
   // Refetch the agenda window after any mutation so the Upcoming view stays current.
   const calendarsRef = useRef(calendars);
   useEffect(() => { calendarsRef.current = calendars; }, [calendars]);
+  // Sequence number: only the most recently started refresh may apply its
+  // result, so concurrent refreshes can't land out of order. Local agenda
+  // edits (delete) bump it too, so an in-flight refresh can't resurrect a row.
+  const agendaSeqRef = useRef(0);
   const refreshAgenda = useCallback(async () => {
+    const seq = ++agendaSeqRef.current;
     try {
       const now = Date.now();
       const params = new URLSearchParams({
@@ -225,11 +242,22 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
         end: new Date(now + AGENDA_FUTURE_DAYS * 86400000).toISOString(),
       });
       const res = await fetch(`/api/events?${params}`);
-      if (!res.ok) return;
+      if (!res.ok || seq !== agendaSeqRef.current) return;
       const data: EventType[] = await res.json();
+      if (seq !== agendaSeqRef.current) return;
       if (Array.isArray(data)) setAgendaEvents(data.map((e) => eventToAgenda(e, calendarsRef.current)));
     } catch { /* keep the existing agenda */ }
   }, []);
+
+  // Coming back to the tab (phone unlock, tab switch) refetches the agenda so
+  // it reflects changes made elsewhere.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void refreshAgenda();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refreshAgenda]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventType | null>(null);
@@ -254,9 +282,10 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
     const api: CalendarApi | undefined = calendarRef.current?.getApi();
     if (api) api.gotoDate(e.startTime);
     // Deep link: if FullCalendar isn't mounted yet, make it start on the event's date
+    // (once mounted, gotoDate above already moved it and initialDate stays cleared)
     if (deepLinkRef.current) {
       deepLinkRef.current = false;
-      setInitialDate((prev) => prev ?? new Date(e.startTime).toLocaleDateString("en-CA"));
+      if (!api) setInitialDate((prev) => prev ?? new Date(e.startTime).toLocaleDateString("en-CA"));
     }
     setSelectedRange(null);
     setSelectedEvent(e);
@@ -348,14 +377,38 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
     const isSale = event.calendar?.name === SALE_TICKET_CALENDAR_NAME;
     const isLong = !isSale && isLongEvent(eventToAgenda(event, calendars), timeZone);
 
-    return {
+    const base = {
       id: event.id,
       title: event.title,
+      backgroundColor: event.calendar?.color || "#4285f4",
+      borderColor: event.calendar?.color || "#4285f4",
+    };
+
+    // List view: FullCalendar repeats a multi-day event under every day it
+    // covers. Collapse it to one all-day row on its first visible day and
+    // carry the (inclusive) last day so the row can say "until <date>".
+    if (view === "listWeek") {
+      const lastDayLocal = event.allDay && event.endTime
+        ? new Date(new Date(event.endTime).getTime() - 1).toLocaleDateString("en-CA")
+        : endDateLocal;
+      if (lastDayLocal > startDateLocal) {
+        const rowDay = rangeStartLocal && rangeStartLocal > startDateLocal ? rangeStartLocal : startDateLocal;
+        const rowEnd = new Date(new Date(rowDay + "T00:00:00").getTime() + 86400000).toLocaleDateString("en-CA");
+        return {
+          ...base,
+          start: rowDay,
+          end: rowEnd,
+          allDay: true,
+          extendedProps: { event, isLong, rank: isLong ? 1 : 0, untilDate: lastDayLocal },
+        };
+      }
+    }
+
+    return {
+      ...base,
       start: isMultiDayTimed ? startDateLocal : event.startTime,
       end: fcEnd,
       allDay: event.allDay || isMultiDayTimed,
-      backgroundColor: event.calendar?.color || "#4285f4",
-      borderColor: event.calendar?.color || "#4285f4",
       extendedProps: { event, isLong, rank: isLong ? 1 : 0 },
     };
   });
@@ -472,11 +525,19 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
   };
 
   const handleDatesSet = async (dateInfo: DatesSetArg) => {
-    // Remember the view the user navigated to via FullCalendar's own buttons
+    // Remember the view the user navigated to via FullCalendar's own buttons —
+    // except the one a deep link forced on mount, which isn't the user's choice.
     if (isViewName(dateInfo.view.type)) {
       setView(dateInfo.view.type);
-      try { localStorage.setItem(VIEW_STORAGE_KEY, dateInfo.view.type); } catch { /* non-fatal */ }
+      if (skipPersistViewRef.current) skipPersistViewRef.current = false;
+      else {
+        try { localStorage.setItem(VIEW_STORAGE_KEY, dateInfo.view.type); } catch { /* non-fatal */ }
+      }
     }
+    // FullCalendar has consumed initialDate; drop it so a remount starts fresh.
+    setInitialDate(undefined);
+    setRangeStartLocal(dateInfo.start.toLocaleDateString("en-CA"));
+    onVisibleDateChange?.(dateInfo.view.currentStart);
     // Cancel any in-flight fetch from a previous navigation
     fetchAbortRef.current?.abort();
     const controller = new AbortController();
@@ -584,6 +645,8 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
         return;
       }
       setEvents((prev) => prev.filter((e) => e.id !== deleted.id));
+      // Invalidate any in-flight agenda refresh so it can't bring the row back
+      agendaSeqRef.current++;
       setAgendaEvents((prev) => prev.filter((e) => e.id !== deleted.id));
       setModalOpen(false);
       toast.success("Event deleted", {
@@ -665,10 +728,18 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
 
     // List view — title + optional region badge; FC handles dot + time columns
     if (viewType.startsWith("list")) {
+      // Collapsed multi-day row (see fcEvents) — show where the run ends
+      const untilDate = event.extendedProps.untilDate as string | undefined;
+      const untilLabel = untilDate
+        ? new Date(untilDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : null;
       return (
         <span className="text-sm flex items-center gap-1.5 flex-wrap">
           {wcToday && <span title="Match today" aria-label="Match today">🔴</span>}
           <span>{titleText}</span>
+          {untilLabel && (
+            <span className="text-xs text-muted-foreground shrink-0">until {untilLabel}</span>
+          )}
           {locShort && (
             <span className="text-xs text-muted-foreground truncate max-w-[180px]">📍 {locShort}</span>
           )}
@@ -763,7 +834,7 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
               </button>
             )}
             <div
-              role="tablist"
+              role="group"
               aria-label="Calendar view"
               className={cn("flex gap-0.5 rounded-md border border-input bg-muted/30 p-0.5", isMobile && "flex-1")}
             >
@@ -771,8 +842,7 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
                 <button
                   key={t.view}
                   type="button"
-                  role="tab"
-                  aria-selected={t.view === view}
+                  aria-pressed={t.view === view}
                   onClick={() => changeViewTo(t.view)}
                   className={cn(
                     "rounded px-2 py-1 text-xs md:px-3 md:text-sm transition-colors",
@@ -819,6 +889,18 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
                     onClick={() => mobileMenuRef.current?.()}
                   >
                     ☰
+                  </button>
+                )}
+                {/* The FC toolbar (and its 🔍) isn't mounted in Upcoming, so
+                    mobile gets its own search entry next to the menu. */}
+                {isMobile && (
+                  <button
+                    type="button"
+                    className="fc-button fc-button-primary"
+                    aria-label="Search events"
+                    onClick={() => searchOpenRef.current?.()}
+                  >
+                    🔍
                   </button>
                 )}
               </div>
@@ -868,6 +950,8 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
               day: "Day",
               list: "List",
             }}
+            // Short list-week title on phones ("Oct 26 – Nov 1") so the toolbar stays one row
+            views={isMobile ? { listWeek: { titleFormat: { month: "short", day: "numeric" } } } : undefined}
             initialView={view}
             initialDate={initialDate}
             eventOrder="rank,start,-duration,allDay,title"
