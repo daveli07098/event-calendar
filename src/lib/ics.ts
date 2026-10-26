@@ -2,14 +2,25 @@ import { SALE_TICKET_CALENDAR_NAME } from "@/lib/calendar-names";
 
 // ── ICS helpers (RFC 5545) ────────────────────────────────────────────────────
 
-/** Fold long lines at 75 octets as required by RFC 5545 §3.1 */
+/** Fold long lines at 75 octets (UTF-8) as required by RFC 5545 §3.1; never splits a code point. */
 export function fold(line: string): string {
+  const enc = new TextEncoder();
   const chunks: string[] = [];
-  while (line.length > 75) {
-    chunks.push(line.slice(0, 75));
-    line = " " + line.slice(75);
+  let cur = "";
+  let curBytes = 0;
+  let budget = 75;
+  for (const ch of line) {
+    const n = enc.encode(ch).length;
+    if (curBytes + n > budget) {
+      chunks.push(cur);
+      cur = " ";
+      curBytes = 1;
+      budget = 75;
+    }
+    cur += ch;
+    curBytes += n;
   }
-  chunks.push(line);
+  chunks.push(cur);
   return chunks.join("\r\n");
 }
 
@@ -17,9 +28,20 @@ export function fold(line: string): string {
 export function esc(s: string): string {
   return s
     .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\;")
+    .replace(/;/g, "\\;")
     .replace(/,/g, "\\,")
     .replace(/\r\n|\r|\n/g, "\\n");
+}
+
+/** Only http(s) URLs without control characters are safe to emit as a URL property. */
+export function safeUrl(u: string | null | undefined): string | null {
+  if (!u || /[\x00-\x1f\x7f]/.test(u)) return null;
+  try {
+    const p = new URL(u);
+    return p.protocol === "http:" || p.protocol === "https:" ? u : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Format a Date as ICS UTC datetime: 20260426T090000Z */
@@ -67,9 +89,15 @@ export function buildVevent(
 
   if (event.allDay) {
     lines.push(`DTSTART;VALUE=DATE:${fmtDate(event.startTime)}`);
-    // ICS all-day DTEND is exclusive — advance by one day
+    // All-day dates are stored as UTC midnight with an EXCLUSIVE end (Google import,
+    // FullCalendar selection; CalendarView feeds endTime straight to FullCalendar),
+    // which is already the ICS DTEND convention. Zero/negative spans (e.g. events
+    // imported from single-day .ics, where end == start) render as one day, so do the same.
     const endExclusive = new Date(event.endTime);
-    endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+    if (endExclusive.getTime() <= event.startTime.getTime()) {
+      endExclusive.setTime(event.startTime.getTime());
+      endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+    }
     lines.push(`DTEND;VALUE=DATE:${fmtDate(endExclusive)}`);
   } else {
     lines.push(`DTSTART:${fmtUtc(event.startTime)}`);
@@ -173,8 +201,9 @@ export function buildCalendarFeed(opts: {
     "X-PUBLISHED-TTL:PT1H",
   ];
   for (const event of opts.events) {
+    const url = safeUrl(event.referenceUrl);
     const extra = [
-      ...(event.referenceUrl ? [fold(`URL:${event.referenceUrl}`)] : []),
+      ...(url ? [fold(`URL:${url}`)] : []),
       ...buildAlarms(event),
     ];
     lines.push(...buildVevent(event, dtstamp, extra));

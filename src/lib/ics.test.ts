@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCalendarFeed, esc, fold, type FeedEvent } from "./ics";
+import { buildCalendarFeed, esc, fold, safeUrl, type FeedEvent } from "./ics";
 
 const base: FeedEvent = {
   id: "e1",
@@ -22,7 +22,23 @@ describe("ics helpers", () => {
     expect(out[1].startsWith(" ")).toBe(true);
   });
   it("escapes text", () => {
-    expect(esc("a,b;c\\d\ne")).toBe("a\\,b\;c\\\\d\\ne");
+    expect(esc("a,b;c\\d\ne")).toBe("a\\,b\\;c\\\\d\\ne");
+    expect(esc("x\r\ny")).toBe("x\\ny");
+  });
+  it("folds by UTF-8 octets without splitting surrogate pairs", () => {
+    const orig = "SUMMARY:" + "演唱會🎤".repeat(40);
+    const folded = fold(orig);
+    const lines = folded.split("\r\n");
+    const enc = new TextEncoder();
+    for (const l of lines) expect(enc.encode(l).length).toBeLessThanOrEqual(75);
+    expect(lines.length).toBeGreaterThan(1);
+    expect(folded.replace(/\r\n /g, "")).toBe(orig);
+  });
+  it("safeUrl accepts only clean http(s) URLs", () => {
+    expect(safeUrl("https://x.test/a?b=1")).toBe("https://x.test/a?b=1");
+    expect(safeUrl("javascript:alert(1)")).toBeNull();
+    expect(safeUrl("https://x.test/\r\nEND:VEVENT")).toBeNull();
+    expect(safeUrl("not a url")).toBeNull();
   });
 });
 
@@ -65,6 +81,19 @@ describe("buildCalendarFeed", () => {
     expect(out).toContain("DTEND;VALUE=DATE:20261111");
     expect(out).toContain("TRIGGER;VALUE=DATE-TIME:20261110T010000Z");
     expect(out).toContain("TRIGGER;VALUE=DATE-TIME:20261109T120000Z");
+  });
+  it("all-day multi-day events keep the stored exclusive end", () => {
+    const out = feed({
+      allDay: true,
+      startTime: new Date("2026-11-10T00:00:00Z"),
+      endTime: new Date("2026-11-13T00:00:00Z"),
+    });
+    expect(out).toContain("DTSTART;VALUE=DATE:20261110");
+    expect(out).toContain("DTEND;VALUE=DATE:20261113");
+  });
+  it("drops injected referenceUrl", () => {
+    const out = feed({ referenceUrl: "https://x.test/\r\nEND:VEVENT" });
+    expect(out).not.toContain("URL:");
   });
   it("long timed events (>=3 days) use date-based alarms", () => {
     const out = feed({ endTime: new Date("2026-11-14T12:00:00Z") });

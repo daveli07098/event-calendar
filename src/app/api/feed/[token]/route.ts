@@ -48,7 +48,7 @@ export async function GET(
   return new NextResponse(body, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": "private, no-store",
     },
   });
 }
