@@ -13,6 +13,9 @@
 - fix(ics): semicolon escaping, UTF-8 line folding, URL sanitizing, exclusive all-day end, no public caching of the feed ([e16a13e])
 - fix(push): all-day/long events reminded, failed sends retried, batched dispatch, constant-time secret, push-service allowlist ([c4b1e0f])
 - fix(agenda): hydration-safe clock; site-calendar membership check no longer writes on every visit ([107a4bd])
+- fix(events): all-day end dates stored exclusive everywhere — form, FullCalendar, Google/.ics import, feed ([d1e280b])
+- fix(ui): mobile nav fits, theme switcher in the nav, themed top-center toasts, install banner clear of the + button, opaque theme menu, relative countdowns, sale times, note undo ([068d12f])
+- fix(calendar): time-ordered days, readable dark list rows and long-event bars, one view switcher, sidebar a11y labels, Esc closes the drawer ([5ef6318])
 ### Changed
 - chore(theme): drop World Cup as the default skin and banner ([2d2b943])
 
