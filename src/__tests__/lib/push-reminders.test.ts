@@ -44,6 +44,21 @@ describe("dueReminders", () => {
     expect(kinds([sale], new Date(base.getTime() + MIN))).toEqual([]);
   });
 
+  it("fires event-day for UTC-midnight all-day events (Google import / ICS storage)", () => {
+    const allDay = ev({
+      allDay: true,
+      startTime: new Date("2026-11-10T00:00:00Z"),
+      endTime: new Date("2026-11-11T00:00:00Z"),
+    });
+    expect(kinds([allDay], new Date("2026-11-10T01:05:00Z"))).toEqual(["event-day"]);
+    expect(kinds([allDay], new Date("2026-11-09T01:05:00Z"))).toEqual([]);
+  });
+
+  it("fires event-day on a multi-day event's start day even though it started earlier that day", () => {
+    const long = ev({ startTime: new Date("2026-11-09T16:00:00Z"), endTime: new Date("2026-11-14T16:00:00Z") });
+    expect(kinds([long], new Date("2026-11-10T01:05:00Z"))).toEqual(["event-day"]);
+  });
+
   it("fires event-day at 09:00 HKT for all-day and long events", () => {
     // 2026-11-10 09:00 HKT = 01:00 UTC
     const allDay = ev({

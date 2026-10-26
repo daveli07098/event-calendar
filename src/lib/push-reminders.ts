@@ -49,9 +49,16 @@ export function hkDateKey(d: Date): string {
   return new Date(d.getTime() + HK_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-/** 09:00 HKT on the HKT calendar day the event starts. */
-function eventDayFireTime(start: Date): Date {
-  const dayStartUtc = Date.parse(`${hkDateKey(start)}T00:00:00Z`) - HK_OFFSET_MS;
+/**
+ * 09:00 HKT on the day the event starts. All-day events are stored as the
+ * viewer's local midnight (EventModal) or UTC midnight (Google import), so an
+ * exact UTC-midnight all-day start means that UTC date; anything else is
+ * resolved on the HKT calendar.
+ */
+function eventDayFireTime(start: Date, allDay: boolean): Date {
+  const utcMidnight = allDay && start.getTime() % DAY === 0;
+  const dateKey = utcMidnight ? start.toISOString().slice(0, 10) : hkDateKey(start);
+  const dayStartUtc = Date.parse(`${dateKey}T00:00:00Z`) - HK_OFFSET_MS;
   return new Date(dayStartUtc + EVENT_DAY_HOUR_HKT * HOUR);
 }
 
@@ -75,7 +82,7 @@ export function dueReminders(events: ReminderEvent[], now: Date): DueReminder[] 
     const long = e.endTime.getTime() - startMs >= LONG_EVENT_MS;
 
     if (e.allDay || long) {
-      const fireAt = eventDayFireTime(e.startTime);
+      const fireAt = eventDayFireTime(e.startTime, e.allDay);
       const f = fireAt.getTime();
       if (f <= nowMs && f > nowMs - LATE_GRACE_MS) {
         out.push({ eventId: e.id, kind: "event-day", fireAt });

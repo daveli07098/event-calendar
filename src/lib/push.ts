@@ -15,6 +15,25 @@ export function pushConfigured(): boolean {
   return true;
 }
 
+/** Only real browser push services; the dispatcher POSTs to these URLs server-side (SSRF guard). */
+export function isAllowedPushEndpoint(endpoint: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+  const host = url.hostname.toLowerCase();
+  return (
+    host === "fcm.googleapis.com" ||
+    host === "updates.push.services.mozilla.com" ||
+    host === "web.push.apple.com" ||
+    host.endsWith(".push.apple.com") ||
+    host.endsWith(".notify.windows.com")
+  );
+}
+
 export interface PushTarget {
   endpoint: string;
   p256dh: string;

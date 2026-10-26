@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { isAllowedPushEndpoint } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export async function POST(req: NextRequest) {
   const p256dh = body?.keys?.p256dh;
   const authKey = body?.keys?.auth;
   if (
-    typeof endpoint !== "string" || !endpoint.startsWith("https://") || endpoint.length > 2048 ||
+    typeof endpoint !== "string" || endpoint.length > 2048 || !isAllowedPushEndpoint(endpoint) ||
     typeof p256dh !== "string" || typeof authKey !== "string"
   ) {
     return NextResponse.json({ error: "endpoint and keys{p256dh,auth} are required" }, { status: 400 });
