@@ -40,7 +40,7 @@ export interface PushTarget {
   auth: string;
 }
 
-/** Sends one notification; prunes the subscription when the push service says it is gone. */
+/** Sends one notification; prunes the subscription when the push service says it is gone or its stored keys are invalid. */
 export async function sendPush(
   sub: PushTarget,
   payload: Pick<PushPayload, "title" | "body" | "url"> & Partial<PushPayload>,
@@ -57,6 +57,13 @@ export async function sendPush(
     const status = (err as { statusCode?: number }).statusCode;
     if (status === 404 || status === 410) {
       await prisma.pushSubscription.deleteMany({ where: { endpoint: sub.endpoint } });
+      return "gone";
+    }
+    // web-push throws a plain Error (no statusCode) when the stored keys are malformed
+    // ("... p256dh/auth ... must be ..."); such a subscription can never succeed, so prune it.
+    if (status === undefined && /p256dh|auth secret|auth key|subscription.*(key|invalid)/i.test((err as Error).message ?? "")) {
+      await prisma.pushSubscription.deleteMany({ where: { endpoint: sub.endpoint } });
+      console.warn("[push] pruned subscription with invalid keys");
       return "gone";
     }
     console.error("[push] send failed", status ?? (err as Error).message);

@@ -105,4 +105,15 @@ describe("push dispatch", () => {
     await call(good);
     expect(m.sendPush).not.toHaveBeenCalled();
   });
+
+  it("pages through all subscribed users in id order instead of capping", async () => {
+    const mk = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ id: `u${i}`, pushSubscriptions: [], calendars: [], calendarMemberships: [] }));
+    m.userFind.mockResolvedValueOnce(mk(200)).mockResolvedValueOnce(mk(5));
+    const res = await call(good);
+    expect((await res.json()).users).toBe(205);
+    expect(m.userFind).toHaveBeenCalledTimes(2);
+    expect(m.userFind.mock.calls[0][0].orderBy).toEqual({ id: "asc" });
+    expect(m.userFind.mock.calls[1][0]).toMatchObject({ cursor: { id: "u199" }, skip: 1 });
+  });
 });

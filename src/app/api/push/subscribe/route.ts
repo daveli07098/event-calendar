@@ -7,6 +7,11 @@ export const dynamic = "force-dynamic";
 
 const MAX_SUBSCRIPTIONS_PER_USER = 20;
 
+// Browser keys are base64url: p256dh is a 65-byte P-256 point (87 chars), auth is 16 bytes (22 chars).
+const BASE64URL = /^[A-Za-z0-9_-]+$/;
+const validP256dh = (v: unknown): v is string => typeof v === "string" && v.length >= 80 && v.length <= 100 && BASE64URL.test(v);
+const validAuth = (v: unknown): v is string => typeof v === "string" && v.length >= 16 && v.length <= 24 && BASE64URL.test(v);
+
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,7 +23,7 @@ export async function POST(req: NextRequest) {
   const authKey = body?.keys?.auth;
   if (
     typeof endpoint !== "string" || endpoint.length > 2048 || !isAllowedPushEndpoint(endpoint) ||
-    typeof p256dh !== "string" || typeof authKey !== "string"
+    !validP256dh(p256dh) || !validAuth(authKey)
   ) {
     return NextResponse.json({ error: "endpoint and keys{p256dh,auth} are required" }, { status: 400 });
   }

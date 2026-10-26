@@ -7,7 +7,7 @@ import { buildPayload, dueReminders, type ReminderEvent } from "@/lib/push-remin
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const MAX_USERS = 200;
+const USER_BATCH = 200;
 const MAX_EVENTS = 5000;
 const SEND_CONCURRENCY = 10;
 const HOUR = 3_600_000;
@@ -33,9 +33,16 @@ async function pool<T>(items: T[], limit: number, worker: (item: T) => Promise<v
 
 /**
  * Push reminder dispatcher, hit every 5 minutes by a GitHub Action
- * (.github/workflows/push-reminders.yml). Auth: `Authorization: Bearer <CRON_SECRET>`
+ * (.github/workflows/push-reminders.yml, POST). Auth: `Authorization: Bearer <CRON_SECRET>`
  * only (no query-string secrets, which leak into logs).
  */
+type UserRow = {
+  id: string;
+  pushSubscriptions: { endpoint: string; p256dh: string; auth: string }[];
+  calendars: { id: string }[];
+  calendarMemberships: { calendarId: string }[];
+};
+
 async function handle(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (!secret) {
@@ -55,16 +62,25 @@ async function handle(req: NextRequest) {
   const windowStart = new Date(now.getTime() - 36 * HOUR);
   const windowEnd = new Date(now.getTime() + 25 * HOUR);
 
-  const users = await prisma.user.findMany({
-    where: { pushSubscriptions: { some: {} } },
-    select: {
-      id: true,
-      pushSubscriptions: { select: { endpoint: true, p256dh: true, auth: true } },
-      calendars: { where: { isVisible: true }, select: { id: true } },
-      calendarMemberships: { select: { calendarId: true } },
-    },
-    take: MAX_USERS,
-  });
+  // Page through every subscribed user (stable id order) rather than silently capping.
+  const users: UserRow[] = [];
+  for (let cursor: string | undefined; ; ) {
+    const batch: UserRow[] = await prisma.user.findMany({
+      where: { pushSubscriptions: { some: {} } },
+      select: {
+        id: true,
+        pushSubscriptions: { select: { endpoint: true, p256dh: true, auth: true } },
+        calendars: { where: { isVisible: true }, select: { id: true } },
+        calendarMemberships: { select: { calendarId: true } },
+      },
+      orderBy: { id: "asc" },
+      take: USER_BATCH,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    });
+    users.push(...batch);
+    if (batch.length < USER_BATCH) break;
+    cursor = batch[batch.length - 1].id;
+  }
 
   const calendarIds = new Set<string>();
   const userCalendars = new Map<string, Set<string>>();
@@ -96,6 +112,10 @@ async function handle(req: NextRequest) {
     orderBy: { startTime: "asc" },
     take: MAX_EVENTS,
   });
+
+  if (rows.length >= MAX_EVENTS) {
+    console.warn(`[push] dispatch hit the MAX_EVENTS cap (${MAX_EVENTS}); some reminders may be skipped`);
+  }
 
   const eventsByCalendar = new Map<string, ReminderEvent[]>();
   for (const r of rows) {
@@ -164,5 +184,4 @@ async function handle(req: NextRequest) {
   return NextResponse.json({ users: users.length, reminders, sent, failed, gone });
 }
 
-export const GET = handle;
 export const POST = handle;

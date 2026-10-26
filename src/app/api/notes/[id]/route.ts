@@ -13,6 +13,9 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
   }
   const { id } = await params;
   const body = await req.json().catch(() => null);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: "Body must be a JSON object" }, { status: 400 });
+  }
   const data: { done?: boolean; text?: string; url?: string | null } = {};
   if (body && "done" in body) {
     if (typeof body.done !== "boolean") {

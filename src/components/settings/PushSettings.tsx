@@ -14,7 +14,21 @@ function urlBase64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+/** `serviceWorker.ready` never resolves when no SW is registered (dev, failed registration). */
+function swReady(timeoutMs = 3000): Promise<ServiceWorkerRegistration> {
+  return Promise.race([
+    navigator.serviceWorker.ready,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("The service worker is not active yet. Reload the page and try again.")),
+        timeoutMs,
+      ),
+    ),
+  ]);
+}
+
 export function PushSettings() {
+  const [loading, setLoading] = useState(true);
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission>("default");
@@ -28,13 +42,15 @@ export function PushSettings() {
       return;
     }
     setPermission(Notification.permission);
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await swReady();
     setEnabled(!!(await reg.pushManager.getSubscription()));
   }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- sync with browser push state on mount
-    void refresh().catch(() => setSupported(false));
+    void refresh()
+      .catch(() => setError("Push is unavailable: the service worker is not active. Reload the page to retry."))
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   async function enable() {
@@ -46,7 +62,7 @@ export function PushSettings() {
       const result = await Notification.requestPermission();
       setPermission(result);
       if (result !== "granted") throw new Error("Notification permission was not granted.");
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await swReady();
       const sub =
         (await reg.pushManager.getSubscription()) ??
         (await reg.pushManager.subscribe({
@@ -73,7 +89,7 @@ export function PushSettings() {
     setError(null);
     setMessage(null);
     try {
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await swReady();
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
         await fetch("/api/push/subscribe", {
@@ -85,8 +101,8 @@ export function PushSettings() {
       }
       setEnabled(false);
       setMessage("Push notifications disabled on this device.");
-    } catch {
-      setError("Could not disable push notifications.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not disable push notifications.");
     } finally {
       setBusy(false);
     }
@@ -97,7 +113,7 @@ export function PushSettings() {
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/push/test");
+      const res = await fetch("/api/push/test", { method: "POST" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Test failed.");
       setMessage(`Test sent to ${data.sent} device(s).`);
@@ -110,7 +126,11 @@ export function PushSettings() {
 
   return (
     <div className="space-y-3">
-      {!supported ? (
+      {loading ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" /> Checking push status...
+        </p>
+      ) : !supported ? (
         <p className="text-sm text-muted-foreground">
           Push notifications are not supported in this browser. On iPhone they work only after
           Add to Home Screen.
