@@ -31,14 +31,41 @@ export async function canWriteToCalendar(calendarId: string, userId: string): Pr
   return calendarIsWritable(calendar, userId);
 }
 
+/**
+ * Loads an event the caller may READ (calendar owner or member, viewers
+ * included); returns null otherwise so callers answer 404 without leaking
+ * existence. The calendar on the returned event is trimmed to display fields —
+ * shareToken / shareMode must never reach non-owners (a collaborative
+ * shareToken grants editor access via /api/join/<token>).
+ */
 export async function canAccessEvent(eventId: string, userId: string) {
-  const event = await prisma.event.findUnique({
+  const found = await prisma.event.findUnique({
     where: { id: eventId },
-    include: { calendar: { include: { members: { where: { userId } } } } },
+    include: {
+      calendar: {
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          userId: true,
+          shareMode: true,
+          members: { where: { userId }, select: { role: true } },
+        },
+      },
+    },
   });
-  if (!event) return null;
-  const canWrite = calendarIsWritable(event.calendar, userId);
+  if (!found) return null;
+  const { calendar, ...rest } = found;
+  const canRead = calendar.userId === userId || calendar.members.length > 0;
+  if (!canRead) return null;
+  const canWrite = calendarIsWritable(calendar, userId);
+  const event = { ...rest, calendar: { id: calendar.id, name: calendar.name, color: calendar.color } };
   return { event, canWrite };
+}
+
+/** True if the user can see the event (owner or any member, viewers included). */
+export async function canReadEvent(eventId: string, userId: string): Promise<boolean> {
+  return (await canAccessEvent(eventId, userId)) !== null;
 }
 
 /**

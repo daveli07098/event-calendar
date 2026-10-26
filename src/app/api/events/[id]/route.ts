@@ -27,8 +27,31 @@ export async function PUT(
   }
 
   const { id } = await params;
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
   const { title, description, location, startTime, endTime, allDay, calendarId, category, artist, referenceUrl } = body;
+
+  if (title !== undefined && typeof title !== "string") {
+    return NextResponse.json({ error: "title must be a string" }, { status: 400 });
+  }
+  if (description !== undefined && description !== null && typeof description !== "string") {
+    return NextResponse.json({ error: "description must be a string" }, { status: 400 });
+  }
+  if (calendarId !== undefined && typeof calendarId !== "string") {
+    return NextResponse.json({ error: "calendarId must be a string" }, { status: 400 });
+  }
+  const parseDate = (v: unknown): Date | null => {
+    if (typeof v !== "string" && typeof v !== "number") return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const newStart = startTime !== undefined ? parseDate(startTime) : undefined;
+  const newEnd = endTime !== undefined ? parseDate(endTime) : undefined;
+  if (newStart === null || newEnd === null) {
+    return NextResponse.json({ error: "Invalid date" }, { status: 400 });
+  }
 
   const access = await canAccessEvent(id, session.user.id);
   if (!access) {
@@ -51,19 +74,24 @@ export async function PUT(
       ...(title !== undefined && { title: title.trim() }),
       ...(description !== undefined && { description }),
       ...(location !== undefined && { location }),
-      ...(startTime !== undefined && { startTime: new Date(startTime) }),
-      ...(endTime !== undefined && { endTime: new Date(endTime) }),
+      ...(startTime !== undefined && { startTime: newStart }),
+      ...(endTime !== undefined && { endTime: newEnd }),
       ...(allDay !== undefined && { allDay }),
       ...(calendarId !== undefined && { calendarId }),
       ...(category !== undefined && { category: category || null }),
       ...(artist !== undefined && { artist: artist || null }),
       ...(referenceUrl !== undefined && { referenceUrl: referenceUrl || null }),
     },
-    include: { calendar: true },
+    include: { calendar: { select: { id: true, name: true, color: true } } },
   });
 
+  // Rescheduled: clear sent-reminder markers so push reminders fire again.
+  if (newStart && newStart.getTime() !== access.event.startTime.getTime()) {
+    await prisma.pushReminderLog.deleteMany({ where: { eventId: id } });
+  }
+
   // Propagate seating plan changes to all related events that share the same Ticket URL
-  if (description !== undefined) {
+  if (typeof description === "string") {
     const ticketUrl = description.match(/Ticket URL: (https?:\/\/[^\s]+)/)?.[1] ?? null;
     const seatingUrl = description.match(/^Seating Plan: (https?:\/\/[^\s]+)/m)?.[1] ?? null;
     if (ticketUrl) {

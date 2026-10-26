@@ -15,7 +15,7 @@ import {
 vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/auth", () => ({ auth: vi.fn(() => Promise.resolve(getMockSession())) }));
 
-import { PUT, DELETE } from "@/app/api/events/[id]/route";
+import { GET, PUT, DELETE } from "@/app/api/events/[id]/route";
 
 const makeParams = (id: string) => ({ params: Promise.resolve({ id }) });
 
@@ -99,6 +99,57 @@ describe("PUT /api/events/:id", () => {
     const res = await PUT(req, makeParams("evt-1"));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(toJson(updated));
+  });
+});
+
+describe("access + validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockSession(mockSession);
+  });
+
+  it("GET returns 404 for an event on someone else's calendar and never leaks shareToken", async () => {
+    const other = withOwnerCalendar(mockEvent({ id: "evt-1", calendarId: "cal-9" }), "someone-else");
+    prismaMock.event.findUnique.mockResolvedValue(other);
+    const res = await GET(new NextRequest("http://localhost/api/events/evt-1"), makeParams("evt-1"));
+    expect(res.status).toBe(404);
+  });
+
+  it("GET trims calendar to id/name/color for members", async () => {
+    const ev = withOwnerCalendar(mockEvent({ id: "evt-1", calendarId: "cal-9" }), "someone-else");
+    ev.calendar.members = [{ role: "viewer" }] as never;
+    prismaMock.event.findUnique.mockResolvedValue({ ...ev, calendar: { ...ev.calendar, shareToken: "secret" } } as never);
+    const res = await GET(new NextRequest("http://localhost/api/events/evt-1"), makeParams("evt-1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Object.keys(body.calendar).sort()).toEqual(["color", "id", "name"]);
+  });
+
+  it("PUT returns 400 for malformed JSON, bad title and bad dates", async () => {
+    for (const raw of ["not json", "[]", JSON.stringify({ title: 5 }), JSON.stringify({ startTime: "garbage" })]) {
+      const res = await PUT(
+        new NextRequest("http://localhost/api/events/evt-1", { method: "PUT", body: raw }),
+        makeParams("evt-1"),
+      );
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("PUT clears push reminder logs when startTime changes", async () => {
+    const deleteMany = vi.fn();
+    (prismaMock as unknown as { pushReminderLog: unknown }).pushReminderLog = { deleteMany };
+    const existing = withOwnerCalendar(mockEvent({ id: "evt-1", calendarId: "cal-1" }));
+    prismaMock.event.findUnique.mockResolvedValue(existing);
+    prismaMock.event.update.mockResolvedValue(mockEvent({ id: "evt-1", calendarId: "cal-1" }));
+    const res = await PUT(
+      new NextRequest("http://localhost/api/events/evt-1", {
+        method: "PUT",
+        body: JSON.stringify({ startTime: "2031-01-01T10:00:00.000Z" }),
+      }),
+      makeParams("evt-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(deleteMany).toHaveBeenCalledWith({ where: { eventId: "evt-1" } });
   });
 });
 

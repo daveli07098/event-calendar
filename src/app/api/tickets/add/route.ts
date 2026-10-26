@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { calendarIsWritable } from "@/lib/event-access";
 import { enrichLocationWithCountry } from "@/lib/detect-country";
 
 const TICKET_CALENDAR_NAME = "event-reminders";
@@ -151,7 +152,7 @@ export async function POST(req: NextRequest) {
       const membership = await prisma.calendarMember.findUnique({
         where: { calendarId_userId: { calendarId: targetId, userId: uid } },
       });
-      if (!membership || cal.shareMode !== "collaborative") return null;
+      if (!membership || !calendarIsWritable({ ...cal, members: [membership] }, uid)) return null;
       return { calendar: cal, isCollaborative: true };
     }
 

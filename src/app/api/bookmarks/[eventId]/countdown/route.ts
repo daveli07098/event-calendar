@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canAccessEvent } from "@/lib/event-access";
+import { canReadEvent } from "@/lib/event-access";
 
 /**
  * Pin / unpin a countdown card for an event: body { countdown: boolean }.
@@ -20,8 +20,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ even
   }
   const userId = session.user.id;
 
-  const access = await canAccessEvent(eventId, userId);
-  if (!access || !(access.event.calendar.userId === userId || access.event.calendar.members.length > 0)) {
+  if (!(await canReadEvent(eventId, userId))) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
