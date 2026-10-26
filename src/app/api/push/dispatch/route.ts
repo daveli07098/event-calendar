@@ -137,6 +137,7 @@ async function handle(req: NextRequest) {
     subs: (typeof users)[number]["pushSubscriptions"];
     event: ReminderEvent;
     kind: ReturnType<typeof dueReminders>[number]["kind"];
+    supersededKinds: ReturnType<typeof dueReminders>[number]["kind"][];
   };
   const jobs: Job[] = [];
   for (const user of users) {
@@ -146,7 +147,7 @@ async function handle(req: NextRequest) {
       for (const e of eventsByCalendar.get(calId) ?? []) byId.set(e.id, e);
     }
     for (const d of dueReminders([...byId.values()], now)) {
-      jobs.push({ userId: user.id, subs: user.pushSubscriptions, event: byId.get(d.eventId)!, kind: d.kind });
+      jobs.push({ userId: user.id, subs: user.pushSubscriptions, event: byId.get(d.eventId)!, kind: d.kind, supersededKinds: d.supersededKinds ?? [] });
     }
   }
 
@@ -156,6 +157,14 @@ async function handle(req: NextRequest) {
   let gone = 0;
 
   await pool(jobs, SEND_CONCURRENCY, async (job) => {
+    // Older kinds made obsolete by a more imminent one are claimed without sending,
+    // so they can never fire later.
+    if (job.supersededKinds.length > 0) {
+      await prisma.pushReminderLog.createMany({
+        data: job.supersededKinds.map((kind) => ({ userId: job.userId, eventId: job.event.id, kind })),
+        skipDuplicates: true,
+      });
+    }
     // Claim first: the unique (userId, eventId, kind) makes concurrent runs race-safe.
     // createMany's count is 1 only for the run that inserted the row, so only it sends.
     const claimed = await prisma.pushReminderLog.createMany({

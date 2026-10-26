@@ -106,6 +106,28 @@ describe("push dispatch", () => {
     expect(m.sendPush).not.toHaveBeenCalled();
   });
 
+  it("claims superseded older kinds without sending them", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-10T09:45:00Z")); // 15 min before start
+    seed({
+      calendarName: "x",
+      calendar: { name: "sale-ticket" },
+      allDay: false,
+      startTime: new Date("2026-11-10T10:00:00Z"),
+      endTime: new Date("2026-11-10T12:00:00Z"),
+    });
+    expect(await (await call(good)).json()).toMatchObject({ reminders: 1, sent: 1 });
+    expect(m.sendPush).toHaveBeenCalledTimes(1);
+    expect(m.logCreate).toHaveBeenCalledWith({
+      data: [{ userId: "u1", eventId: "e1", kind: "sale-1h" }],
+      skipDuplicates: true,
+    });
+    expect(m.logCreate).toHaveBeenCalledWith({
+      data: [{ userId: "u1", eventId: "e1", kind: "sale-15m" }],
+      skipDuplicates: true,
+    });
+  });
+
   it("pages through all subscribed users in id order instead of capping", async () => {
     const mk = (n: number) =>
       Array.from({ length: n }, (_, i) => ({ id: `u${i}`, pushSubscriptions: [], calendars: [], calendarMemberships: [] }));

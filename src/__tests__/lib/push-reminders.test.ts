@@ -24,7 +24,7 @@ describe("dueReminders", () => {
     const sale = ev({ calendarName: "sale-ticket" });
     expect(kinds([sale], new Date(base.getTime() - 24 * HOUR))).toEqual(["sale-1d"]);
     expect(kinds([sale], new Date(base.getTime() - HOUR))).toEqual(["sale-1h"]);
-    expect(kinds([sale], new Date(base.getTime() - 15 * MIN))).toEqual(["sale-1h", "sale-15m"]); // 1h still in the grace window
+    expect(kinds([sale], new Date(base.getTime() - 15 * MIN))).toEqual(["sale-15m"]); // 1h superseded
   });
 
   it("fires event kinds for other timed events", () => {
@@ -32,6 +32,15 @@ describe("dueReminders", () => {
     expect(kinds([ev()], new Date(base.getTime() - HOUR))).toEqual(["event-1h"]);
     expect(kinds([ev()], new Date(base.getTime() - 15 * MIN))).toEqual(["event-1h"]); // still in the grace window
     expect(kinds([ev()], new Date(base.getTime() - 90 * MIN))).toEqual([]);
+  });
+
+  it("returns only the most imminent due kind and reports the older ones as superseded", () => {
+    const sale = ev({ calendarName: "sale-ticket" });
+    const due = dueReminders([sale], new Date(base.getTime() - 15 * MIN));
+    expect(due).toHaveLength(1);
+    expect(due[0].kind).toBe("sale-15m");
+    expect(due[0].supersededKinds).toEqual(["sale-1h"]);
+    expect(dueReminders([sale], new Date(base.getTime() - HOUR))[0].supersededKinds).toBeUndefined();
   });
 
   it("tolerates a late cron within 60 min but not beyond", () => {

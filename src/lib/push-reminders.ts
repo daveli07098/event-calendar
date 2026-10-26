@@ -23,6 +23,8 @@ export interface DueReminder {
   eventId: string;
   kind: ReminderKind;
   fireAt: Date;
+  /** Older kinds also due in the grace window; the caller marks them sent without sending. */
+  supersededKinds?: ReminderKind[];
 }
 
 export interface PushPayload {
@@ -96,11 +98,20 @@ export function dueReminders(events: ReminderEvent[], now: Date): DueReminder[] 
     if (startMs <= nowMs) continue;
 
     const offsets = e.calendarName === SALE_TICKET_CALENDAR_NAME ? SALE_OFFSETS : EVENT_OFFSETS;
+    // Offsets run largest to smallest; only the most imminent due kind is sent,
+    // the older ones are reported as superseded so they never fire later.
+    const due: DueReminder[] = [];
     for (const [kind, offset] of offsets) {
       const f = startMs - offset;
       if (f <= nowMs && f > nowMs - LATE_GRACE_MS) {
-        out.push({ eventId: e.id, kind, fireAt: new Date(f) });
+        due.push({ eventId: e.id, kind, fireAt: new Date(f) });
       }
+    }
+    if (due.length) {
+      const latest = due[due.length - 1];
+      out.push(
+        due.length > 1 ? { ...latest, supersededKinds: due.slice(0, -1).map((d) => d.kind) } : latest,
+      );
     }
   }
   return out;
