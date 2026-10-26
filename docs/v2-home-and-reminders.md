@@ -47,6 +47,8 @@ Deep link format used everywhere (tickets, venues, home, push clicks):
 | In-tab toasts | lead time from `ec-reminder-lead-minutes` | Only while the app is open |
 
 `PushReminderLog` (unique `userId,eventId,kind`) guarantees each push is sent once.
+GitHub disables scheduled workflows after 60 days without repo activity — if push reminders
+stop, re-enable `push-reminders` under the repo's Actions tab.
 The feed token is a secret URL — regenerate it in Settings if it leaks.
 
 ## Gemini
