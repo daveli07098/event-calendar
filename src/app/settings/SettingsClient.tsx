@@ -403,17 +403,20 @@ export function SettingsClient({ user }: SettingsClientProps) {
                     />
                     <span className="flex-1 text-sm truncate">{cal.name}</span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground capitalize">
-                      {cal.memberRole}
+                      {cal.isSiteShared || cal.memberRole === "viewer" ? "Read-only" : cal.memberRole}
                     </span>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => leaveCalendar(cal.id)}
-                      className="size-8 text-muted-foreground hover:text-destructive"
-                      title="Leave calendar"
-                    >
-                      <LogOut className="size-4" />
-                    </Button>
+                    {/* Site-wide calendars can't be left (the API returns 400); hide them in the calendar sidebar instead */}
+                    {!cal.isSiteShared && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => leaveCalendar(cal.id)}
+                        className="size-8 text-muted-foreground hover:text-destructive"
+                        title="Leave calendar"
+                      >
+                        <LogOut className="size-4" />
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>

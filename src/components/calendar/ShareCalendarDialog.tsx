@@ -142,8 +142,12 @@ export function ShareCalendarDialog({
             )}
             <button
               onClick={() => enableSharing("collaborative")}
-              disabled={saving || currentMode === "collaborative"}
-              title={currentMode === "collaborative" ? "Already collaborative" : undefined}
+              disabled={saving || currentMode === "collaborative" || !!calendar?.isSiteShared}
+              title={
+                calendar?.isSiteShared
+                  ? "Site-wide calendars are broadcast only"
+                  : currentMode === "collaborative" ? "Already collaborative" : undefined
+              }
               className={`rounded-lg border p-3.5 text-left text-sm transition-colors ${
                 currentMode === "collaborative"
                   ? "border-primary bg-primary/10 ring-1 ring-primary"

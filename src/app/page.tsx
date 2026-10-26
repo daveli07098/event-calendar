@@ -56,6 +56,7 @@ export default async function HomePage() {
     eventId: b.event.id,
     title: b.event.title,
     start: b.event.startTime.toISOString(),
+    end: b.event.endTime.toISOString(),
     allDay: b.event.allDay,
     color: b.event.calendar.color,
     countdown: b.countdown,
