@@ -1,5 +1,3 @@
-◇ injected env (11) from .env.local // tip: ⌘ suppress logs { quiet: true }
-◇ injected env (0) from .env // tip: ⌘ enable debugging { debug: true }
 -- AlterTable
 ALTER TABLE "User" ADD COLUMN     "feedToken" TEXT;
 
