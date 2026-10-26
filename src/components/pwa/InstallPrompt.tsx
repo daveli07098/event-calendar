@@ -119,10 +119,11 @@ export function InstallPrompt() {
   if (!visible) return null;
 
   // bottom-24 keeps the banner above the calendar's floating + button (fixed bottom-6, 3.5rem tall).
+  // z-40: above the + button (z-20) but under dialogs (z-50), so it never blocks modal buttons.
   return (
     <div
       className={cn(
-        "fixed inset-x-3 bottom-24 z-[60] mx-auto max-w-md rounded-xl border border-border",
+        "fixed inset-x-3 bottom-24 z-40 mx-auto max-w-md rounded-xl border border-border",
         "bg-card shadow-lg md:hidden",
       )}
       role="dialog"
