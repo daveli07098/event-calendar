@@ -68,20 +68,52 @@ export function addDaysToKey(key: string, n: number): string {
   return new Date((keyToUtcDay(key) + n) * 86_400_000).toISOString().slice(0, 10);
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * Calendar date (YYYY-MM-DD) a stored instant belongs to. All-day events are
+ * normally stored at UTC midnight (Google import, current form), so an exact
+ * UTC-midnight all-day instant means that UTC date whatever `timeZone` is;
+ * older rows stored at local (HKT) midnight, and timed events, resolve in `timeZone`.
+ */
+export function storedDateKey(date: Date, allDay: boolean, timeZone: string): string {
+  if (allDay && date.getTime() % DAY_MS === 0) return date.toISOString().slice(0, 10);
+  return dayKey(date, timeZone);
+}
+
+type Span = { start: string | Date; end: string | Date; allDay: boolean };
+
 /** First and last calendar day (inclusive) an event touches in `timeZone`. */
-function dayRange(e: AgendaEvent, timeZone: string): { first: string; last: string } {
+function dayRange(e: Span, timeZone: string): { first: string; last: string } {
   const s = new Date(e.start);
   const en = new Date(e.end);
-  const first = dayKey(s, timeZone);
+  const first = storedDateKey(s, e.allDay, timeZone);
   // End is exclusive (all-day convention; also a timed event ending exactly at
   // midnight does not touch the next day).
-  const last = en.getTime() > s.getTime() ? dayKey(new Date(en.getTime() - 1), timeZone) : first;
+  let last = first;
+  if (en.getTime() > s.getTime()) {
+    last = e.allDay
+      ? addDaysToKey(storedDateKey(en, true, timeZone), -1)
+      : dayKey(new Date(en.getTime() - 1), timeZone);
+  }
   return { first, last: last < first ? first : last };
 }
 
-export function isLongEvent(e: AgendaEvent, timeZone: string): boolean {
+/**
+ * The single definition of a "long" event (collapsed as ongoing in the UI, one
+ * morning-of reminder in ICS/push): touches at least LONG_EVENT_DAYS calendar
+ * days AND lasts at least 48h, so a short overnight event is not long.
+ */
+export function isLongSpan(e: Span, timeZone: string): boolean {
   const { first, last } = dayRange(e, timeZone);
-  return keyToUtcDay(last) - keyToUtcDay(first) + 1 >= LONG_EVENT_DAYS;
+  const durationMs = new Date(e.end).getTime() - new Date(e.start).getTime();
+  return (
+    keyToUtcDay(last) - keyToUtcDay(first) + 1 >= LONG_EVENT_DAYS && durationMs >= 2 * DAY_MS
+  );
+}
+
+export function isLongEvent(e: AgendaEvent, timeZone: string): boolean {
+  return isLongSpan(e, timeZone);
 }
 
 export function groupAgenda(
@@ -107,7 +139,7 @@ export function groupAgenda(
     .filter((e) => !e.isSale)
     .map((e) => {
       const r = dayRange(e, timeZone);
-      return { e, ...r, long: keyToUtcDay(r.last) - keyToUtcDay(r.first) + 1 >= LONG_EVENT_DAYS };
+      return { e, ...r, long: isLongSpan(e, timeZone) };
     });
 
   const ongoing = entries

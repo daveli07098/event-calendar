@@ -24,18 +24,35 @@ describe("dueReminders", () => {
     const sale = ev({ calendarName: "sale-ticket" });
     expect(kinds([sale], new Date(base.getTime() - 24 * HOUR))).toEqual(["sale-1d"]);
     expect(kinds([sale], new Date(base.getTime() - HOUR))).toEqual(["sale-1h"]);
-    expect(kinds([sale], new Date(base.getTime() - 15 * MIN))).toEqual(["sale-15m"]);
+    expect(kinds([sale], new Date(base.getTime() - 15 * MIN))).toEqual(["sale-1h", "sale-15m"]); // 1h still in the grace window
   });
 
   it("fires event kinds for other timed events", () => {
     expect(kinds([ev()], new Date(base.getTime() - 24 * HOUR))).toEqual(["event-1d"]);
     expect(kinds([ev()], new Date(base.getTime() - HOUR))).toEqual(["event-1h"]);
-    expect(kinds([ev()], new Date(base.getTime() - 15 * MIN))).toEqual([]);
+    expect(kinds([ev()], new Date(base.getTime() - 15 * MIN))).toEqual(["event-1h"]); // still in the grace window
+    expect(kinds([ev()], new Date(base.getTime() - 90 * MIN))).toEqual([]);
   });
 
-  it("tolerates a late cron within 30 min but not beyond", () => {
-    expect(kinds([ev()], new Date(base.getTime() - HOUR + 29 * MIN))).toEqual(["event-1h"]);
-    expect(kinds([ev()], new Date(base.getTime() - HOUR + 31 * MIN))).toEqual([]);
+  it("tolerates a late cron within 60 min but not beyond", () => {
+    expect(kinds([ev()], new Date(base.getTime() - HOUR + 59 * MIN))).toEqual(["event-1h"]);
+    const sale = ev({ calendarName: "sale-ticket" });
+    expect(kinds([sale], new Date(base.getTime() - 24 * HOUR + 59 * MIN))).toEqual(["sale-1d"]);
+    expect(kinds([sale], new Date(base.getTime() - 24 * HOUR + 61 * MIN))).toEqual([]);
+  });
+
+  it("28h overnight event is not long; 72h timed event is", () => {
+    const overnight = ev({
+      startTime: new Date("2026-10-30T14:00:00Z"),
+      endTime: new Date("2026-10-31T18:00:00Z"),
+    });
+    expect(kinds([overnight], new Date("2026-10-30T13:00:00Z"))).toEqual(["event-1h"]);
+    const long = ev({
+      startTime: new Date("2026-11-10T02:00:00Z"),
+      endTime: new Date("2026-11-13T02:00:00Z"),
+    });
+    expect(kinds([long], new Date("2026-11-10T01:05:00Z"))).toEqual(["event-day"]);
+    expect(kinds([long], new Date("2026-11-10T01:00:00Z"))).toEqual(["event-day"]);
   });
 
   it("does not fire before the fire time or after the event started", () => {
@@ -68,7 +85,7 @@ describe("dueReminders", () => {
     });
     expect(kinds([allDay], new Date("2026-11-10T01:05:00Z"))).toEqual(["event-day"]);
     expect(kinds([allDay], new Date("2026-11-10T00:59:00Z"))).toEqual([]);
-    expect(kinds([allDay], new Date("2026-11-10T01:31:00Z"))).toEqual([]);
+    expect(kinds([allDay], new Date("2026-11-10T02:05:00Z"))).toEqual([]);
 
     const long = ev({ startTime: new Date("2026-11-10T04:00:00Z"), endTime: new Date("2026-11-14T04:00:00Z") });
     expect(kinds([long], new Date("2026-11-10T01:00:00Z"))).toEqual(["event-day"]);

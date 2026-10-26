@@ -43,7 +43,7 @@ Deep link format used everywhere (tickets, venues, home, push clicks):
 | Channel | Timing | Reliability |
 |---|---|---|
 | Calendar feed (VALARM) | sales −1 d, −15 min · timed events −1 d, −1 h · all-day/long: 20:00 day before, 09:00 on the day | Best — the phone's own calendar fires it; feed refreshes ~hourly |
-| Web push | sales −1 d, −1 h, −15 min · timed −1 d, −1 h · all-day/long 09:00 HKT | GitHub cron is best-effort (can run 10–30 min late); a reminder fires if due within the last 30 min |
+| Web push | sales −1 d, −1 h, −15 min · timed −1 d, −1 h · all-day/long 09:00 HKT | GitHub cron is best-effort (can run 10–30 min late); a reminder fires if due within the last 60 min |
 | In-tab toasts | lead time from `ec-reminder-lead-minutes` | Only while the app is open |
 
 `PushReminderLog` (unique `userId,eventId,kind`) guarantees each push is sent once.

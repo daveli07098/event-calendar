@@ -1,4 +1,5 @@
 import { SALE_TICKET_CALENDAR_NAME } from "@/lib/calendar-names";
+import { isLongSpan, storedDateKey } from "@/lib/agenda";
 
 // ── ICS helpers (RFC 5545) ────────────────────────────────────────────────────
 
@@ -126,9 +127,7 @@ export interface FeedEvent extends IcsEvent {
 }
 
 const HOUR_MS = 3_600_000;
-const DAY_MS = 24 * HOUR_MS;
-/** Events spanning this many days or more are alerted by calendar date, not start time. */
-const LONG_EVENT_DAYS = 3;
+const TIME_ZONE = "Asia/Hong_Kong";
 /** Hong Kong is UTC+8 with no DST: 09:00 HKT = 01:00Z, 20:00 HKT = 12:00Z. */
 const MORNING_OF_UTC_HOUR = 1;
 const EVENING_BEFORE_UTC_HOUR = 12;
@@ -143,16 +142,16 @@ function alarm(trigger: string, description: string): string[] {
   ];
 }
 
-function utcAt(day: Date, dayOffset: number, hour: number): Date {
-  return new Date(
-    Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate() + dayOffset, hour),
-  );
+/** `hour` UTC on the HKT start date (UTC date for UTC-midnight all-day) plus `dayOffset` days. */
+function utcAt(event: FeedEvent, dayOffset: number, hour: number): Date {
+  const [y, m, d] = storedDateKey(event.startTime, event.allDay, TIME_ZONE).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + dayOffset, hour));
 }
 
 /**
  * Alarm rules (documented in docs/ if you change them):
  * - sale events:          -P1D and -PT15M before start.
- * - all-day or >= 3 days: absolute alarms at 09:00 Asia/Hong_Kong on the start
+ * - all-day or long (see isLongSpan): absolute alarms at 09:00 Asia/Hong_Kong on the start
  *                         day and 20:00 HKT the day before (sent as UTC "Z").
  * - other timed events:   -P1D and -PT1H before start.
  */
@@ -164,15 +163,18 @@ export function buildAlarms(event: FeedEvent): string[] {
       ...alarm("TRIGGER:-PT15M", `🎫 Sale opens in 15 min: ${title}`),
     ];
   }
-  const spanDays = (event.endTime.getTime() - event.startTime.getTime()) / DAY_MS;
-  if (event.allDay || spanDays >= LONG_EVENT_DAYS) {
+  const long = isLongSpan(
+    { start: event.startTime, end: event.endTime, allDay: event.allDay },
+    TIME_ZONE,
+  );
+  if (event.allDay || long) {
     return [
       ...alarm(
-        `TRIGGER;VALUE=DATE-TIME:${fmtUtc(utcAt(event.startTime, -1, EVENING_BEFORE_UTC_HOUR))}`,
+        `TRIGGER;VALUE=DATE-TIME:${fmtUtc(utcAt(event, -1, EVENING_BEFORE_UTC_HOUR))}`,
         `⏰ Tomorrow: ${title}`,
       ),
       ...alarm(
-        `TRIGGER;VALUE=DATE-TIME:${fmtUtc(utcAt(event.startTime, 0, MORNING_OF_UTC_HOUR))}`,
+        `TRIGGER;VALUE=DATE-TIME:${fmtUtc(utcAt(event, 0, MORNING_OF_UTC_HOUR))}`,
         `⏰ Today: ${title}`,
       ),
     ];

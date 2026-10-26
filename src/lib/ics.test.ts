@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCalendarFeed, esc, fold, safeUrl, type FeedEvent } from "./ics";
+import { buildAlarms, buildCalendarFeed, esc, fold, safeUrl, type FeedEvent } from "./ics";
 
 const base: FeedEvent = {
   id: "e1",
@@ -99,5 +99,50 @@ describe("buildCalendarFeed", () => {
     const out = feed({ endTime: new Date("2026-11-14T12:00:00Z") });
     expect(out).toContain("TRIGGER;VALUE=DATE-TIME:20261110T010000Z");
     expect(out).not.toContain("TRIGGER:-PT1H");
+  });
+});
+
+describe("buildAlarms long/date rules", () => {
+  const triggers = (e: Partial<FeedEvent>) =>
+    buildAlarms({ ...base, ...e })
+      .filter((l) => l.startsWith("TRIGGER"))
+      .map((l) => l.replace(/^TRIGGER(;VALUE=DATE-TIME)?:/, ""));
+
+  it("long timed event uses the HKT start date, not the UTC date", () => {
+    // Nov 1 03:00 HKT, 3 days
+    expect(
+      triggers({
+        startTime: new Date("2026-10-31T19:00:00Z"),
+        endTime: new Date("2026-11-03T19:00:00Z"),
+      }),
+    ).toEqual(["20261031T120000Z", "20261101T010000Z"]);
+  });
+
+  it("28h overnight event is not long: relative alarms", () => {
+    expect(
+      triggers({
+        startTime: new Date("2026-10-30T14:00:00Z"),
+        endTime: new Date("2026-10-31T18:00:00Z"),
+      }),
+    ).toEqual(["-P1D", "-PT1H"]);
+  });
+
+  it("exactly 72h timed event is long", () => {
+    expect(
+      triggers({
+        startTime: new Date("2026-11-10T02:00:00Z"),
+        endTime: new Date("2026-11-13T02:00:00Z"),
+      }),
+    ).toEqual(["20261109T120000Z", "20261110T010000Z"]);
+  });
+
+  it("UTC-midnight all-day uses its UTC date", () => {
+    expect(
+      triggers({
+        allDay: true,
+        startTime: new Date("2026-11-01T00:00:00Z"),
+        endTime: new Date("2026-11-02T00:00:00Z"),
+      }),
+    ).toEqual(["20261031T120000Z", "20261101T010000Z"]);
   });
 });

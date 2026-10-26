@@ -35,7 +35,9 @@ interface FormSnapshot {
 const toLocalDateInput = (value: string) => {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("en-CA");
+  // All-day values are stored at UTC midnight, so read the UTC date (a local
+  // format would show the previous day in negative-offset browsers).
+  return d.toISOString().slice(0, 10);
 };
 
 const toLocalDateTimeInput = (value: string) => {

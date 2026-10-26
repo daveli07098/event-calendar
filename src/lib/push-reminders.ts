@@ -1,3 +1,4 @@
+import { isLongSpan, storedDateKey } from "@/lib/agenda";
 import { SALE_TICKET_CALENDAR_NAME } from "@/lib/calendar-names";
 
 export type ReminderKind =
@@ -37,9 +38,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 /** The cron may run late; a reminder stays due this long after its fire time. */
-export const LATE_GRACE_MS = 30 * MIN;
-/** Events this long or longer get a single morning-of reminder instead. */
-const LONG_EVENT_MS = 3 * DAY;
+export const LATE_GRACE_MS = 60 * MIN;
 const TIME_ZONE = "Asia/Hong_Kong";
 const HK_OFFSET_MS = 8 * HOUR; // Hong Kong has no DST
 const EVENT_DAY_HOUR_HKT = 9;
@@ -56,8 +55,7 @@ export function hkDateKey(d: Date): string {
  * resolved on the HKT calendar.
  */
 function eventDayFireTime(start: Date, allDay: boolean): Date {
-  const utcMidnight = allDay && start.getTime() % DAY === 0;
-  const dateKey = utcMidnight ? start.toISOString().slice(0, 10) : hkDateKey(start);
+  const dateKey = storedDateKey(start, allDay, TIME_ZONE);
   const dayStartUtc = Date.parse(`${dateKey}T00:00:00Z`) - HK_OFFSET_MS;
   return new Date(dayStartUtc + EVENT_DAY_HOUR_HKT * HOUR);
 }
@@ -79,7 +77,11 @@ export function dueReminders(events: ReminderEvent[], now: Date): DueReminder[] 
 
   for (const e of events) {
     const startMs = e.startTime.getTime();
-    const long = e.endTime.getTime() - startMs >= LONG_EVENT_MS;
+    // Long events get a single morning-of reminder instead.
+    const long = isLongSpan(
+      { start: e.startTime, end: e.endTime, allDay: e.allDay },
+      TIME_ZONE,
+    );
 
     if (e.allDay || long) {
       const fireAt = eventDayFireTime(e.startTime, e.allDay);
