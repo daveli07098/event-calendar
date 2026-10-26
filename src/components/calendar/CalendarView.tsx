@@ -33,7 +33,7 @@ import { parseGroupMatch, parseKnockoutMatch } from "@/lib/worldcup";
 import { getTeamFlag } from "@/lib/team-flags";
 import { cn } from "@/lib/utils";
 import { UpcomingAgenda } from "@/components/agenda/UpcomingAgenda";
-import { isLongEvent, type AgendaEvent } from "@/lib/agenda";
+import { addDaysToKey, isLongEvent, storedDateKey, type AgendaEvent } from "@/lib/agenda";
 import { SALE_TICKET_CALENDAR_NAME } from "@/lib/calendar-names";
 
 /** "upcoming" is our own agenda (outside FullCalendar); the rest are FC view names. */
@@ -388,11 +388,16 @@ export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, c
     // covers. Collapse it to one all-day row on its first visible day and
     // carry the (inclusive) last day so the row can say "until <date>".
     if (view === "listWeek") {
+      // All-day rows are stored at UTC midnight with an exclusive end, so read
+      // them through storedDateKey — the browser-local end-1ms is a day late.
+      const firstDay = event.allDay
+        ? storedDateKey(new Date(event.startTime), true, timeZone)
+        : startDateLocal;
       const lastDayLocal = event.allDay && event.endTime
-        ? new Date(new Date(event.endTime).getTime() - 1).toLocaleDateString("en-CA")
+        ? addDaysToKey(storedDateKey(new Date(event.endTime), true, timeZone), -1)
         : endDateLocal;
-      if (lastDayLocal > startDateLocal) {
-        const rowDay = rangeStartLocal && rangeStartLocal > startDateLocal ? rangeStartLocal : startDateLocal;
+      if (lastDayLocal > firstDay) {
+        const rowDay = rangeStartLocal && rangeStartLocal > firstDay ? rangeStartLocal : firstDay;
         const rowEnd = new Date(new Date(rowDay + "T00:00:00").getTime() + 86400000).toLocaleDateString("en-CA");
         return {
           ...base,

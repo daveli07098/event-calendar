@@ -193,6 +193,21 @@ describe("CalendarView — list view collapses multi-day events", () => {
     expect(byId.short.extendedProps.untilDate).toBeUndefined();
     vi.unstubAllGlobals();
   });
+
+  it("reads all-day rows (UTC midnight, exclusive end) without a day of drift", async () => {
+    const oneDay = { ...ev("one", "2026-10-27T00:00:00.000Z", "2026-10-28T00:00:00.000Z"), allDay: true } as EventType;
+    const twoDay = { ...ev("two", "2026-10-27T00:00:00.000Z", "2026-10-29T00:00:00.000Z"), allDay: true } as EventType;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => [oneDay, twoDay] }));
+    await act(async () => {
+      render(<CalendarView initialEvents={[oneDay, twoDay]} calendars={calendars} />);
+    });
+    await act(async () => { await fireDatesSet("listWeek", "2026-10-25", "2026-11-01"); });
+    const fc = latestFCProps?.events as { id: string; extendedProps: { untilDate?: string } }[];
+    const byId = Object.fromEntries(fc.map((e) => [e.id, e]));
+    expect(byId.one.extendedProps.untilDate).toBeUndefined();
+    expect(byId.two.extendedProps.untilDate).toBe("2026-10-28");
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("CalendarView — long event styling and ordering", () => {
