@@ -201,7 +201,8 @@
 .fc .fc-event.fc-event-long .ec-event-title {
   font-size: 0.7rem;
   font-weight: 400;
-  color: var(--foreground);
+  /* !important: FullCalendar's white --fc-event-text-color wins on load order in dev otherwise */
+  color: var(--foreground) !important;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -212,7 +213,7 @@
    clip to the bar so the title ellipsizes instead of spilling across cells. */
 .fc .fc-event.fc-event-long,
 .fc .fc-event.fc-event-long .fc-event-main {
-  color: var(--foreground);
+  color: var(--foreground) !important;
   overflow: hidden;
 }
 .fc .fc-event.fc-event-long .ec-allday-event {
