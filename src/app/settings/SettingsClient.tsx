@@ -528,7 +528,7 @@ export function SettingsClient({ user }: SettingsClientProps) {
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <p className="text-sm text-muted-foreground">
-              Scans every event and assigns the best-matching category using Gemini AI.
+              Scans every event and assigns the best-matching category using AI.
               Events are processed in batches — this may take a few seconds for large calendars.
               Only unclassified events are processed by default.
             </p>

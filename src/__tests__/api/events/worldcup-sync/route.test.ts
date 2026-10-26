@@ -132,4 +132,43 @@ describe("POST /api/events/worldcup-sync — Gemini grounded model selection", (
     const res = await POST(makeReq({ eventId: EVENT_ID }));
     expect(res.status).toBe(502);
   });
+
+  it("asks OpenCode first and skips Gemini when it answers", async () => {
+    vi.stubEnv("OPENCODE_API_KEY", "oc-key");
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes("wikipedia.org")) {
+        return new Response(WIKIPEDIA_HTML, { status: 200 });
+      }
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '<think>Match 5…</think>{"team1":"Team E","team2":"Team F"}' } }] }),
+        { status: 200 },
+      );
+    });
+
+    const res = await POST(makeReq({ eventId: EVENT_ID }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.team1).toBe("Team E");
+    expect(json.team2).toBe("Team F");
+    const urls = fetchMock.mock.calls.map(([u]) => String(u));
+    expect(urls.some((u) => u.includes("opencode.ai/inference/go/openai/v1/chat/completions"))).toBe(true);
+    expect(urls.some((u) => u.includes("generativelanguage.googleapis.com"))).toBe(false);
+  });
+
+  it("works with only OPENCODE_API_KEY configured (no Gemini key)", async () => {
+    vi.stubEnv("GEMINI_API_KEY", "");
+    vi.stubEnv("OPENCODE_API_KEY", "oc-key");
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes("wikipedia.org")) {
+        return new Response(WIKIPEDIA_HTML, { status: 200 });
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"team1":"G","team2":"H"}' } }] }), {
+        status: 200,
+      });
+    });
+
+    const res = await POST(makeReq({ eventId: EVENT_ID }));
+    expect(res.status).toBe(200);
+    expect((await res.json()).team1).toBe("G");
+  });
 });

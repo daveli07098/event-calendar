@@ -296,6 +296,30 @@ describe("POST /api/tickets/scrape — duplicate-detection AI similarity model s
     expect(json.duplicateCandidates[0].similarityScore).toBe(0.95);
   });
 
+  it("skips AI similarity (exact-title fallback) when the request's AI budget is nearly spent", async () => {
+    const req = makeReq({ url: TIMABLE_URL });
+    // First Date.now() in the handler fixes the deadline; every later read is 50 s on,
+    // leaving < 4 s of the 52 s request budget for the optional similarity call.
+    const base = Date.now();
+    let first = true;
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      if (first) {
+        first = false;
+        return base;
+      }
+      return base + 50_000;
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Titles differ, so the exact-title fallback finds no duplicate.
+    expect(json.duplicateCandidates).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
   it("falls through to the next pool model on a 429 and still resolves duplicate scores", async () => {
     const calledModels: string[] = [];
     fetchMock.mockImplementation(async (url: string) => {
@@ -320,5 +344,83 @@ describe("POST /api/tickets/scrape — duplicate-detection AI similarity model s
     expect(calledModels).toEqual(geminiPool.lite());
     expect(json.duplicateCandidates).toHaveLength(1);
     expect(json.duplicateCandidates[0].similarityScore).toBe(0.9);
+  });
+});
+
+describe("POST /api/tickets/scrape — OpenCode first, Gemini fallback", () => {
+  const fetchMock = vi.fn();
+  const OPENCODE = "opencode.ai/inference/go/openai/v1/chat/completions";
+  const extraction = {
+    title: "Test Live in Hong Kong",
+    date: "2027-05-07",
+    time: "20:00",
+    venue: "Hong Kong Coliseum",
+    description: "A live concert at the Hong Kong Coliseum.",
+    category: "concert",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setMockSession(mockSession);
+    mockHtml.mockReturnValue(timableHtml("2027-05-07T12:00:00.000Z"));
+    mockAiResult.mockReturnValue(null); // cache miss → the provider cascade runs
+    prismaMock.calendar.findMany.mockResolvedValue([]);
+    prismaMock.calendarMember.findMany.mockResolvedValue([]);
+    prismaMock.event.findMany.mockResolvedValue([]);
+    vi.stubEnv("OPENCODE_API_KEY", "oc-key");
+    vi.stubEnv("GEMINI_API_KEY", "test-key");
+    vi.stubEnv("GITHUB_TOKEN", "");
+    vi.stubEnv("GROQ_API_KEY", "");
+    fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("extracts with OpenCode and never calls Gemini when it succeeds", async () => {
+    fetchMock.mockImplementation(async () =>
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: JSON.stringify(extraction) } }], usage: { total_tokens: 900 } }),
+        { status: 200 },
+      ),
+    );
+
+    const res = await POST(makeReq({ url: TIMABLE_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    expect(json.aiUsed).toBe("opencode:glm-5.3-flash");
+    expect(json.title).toBe("Test Live in Hong Kong");
+    const urls = fetchMock.mock.calls.map(([u]) => String(u));
+    expect(urls[0]).toContain(OPENCODE);
+    expect(urls.some((u) => u.includes("generativelanguage.googleapis.com"))).toBe(false);
+  });
+
+  it("falls back to Gemini when every OpenCode model fails", async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes(OPENCODE)) {
+        return new Response('{"error":{"message":"monthly limit reached"}}', { status: 429 });
+      }
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(extraction) }] } }] }),
+        { status: 200 },
+      );
+    });
+
+    const res = await POST(makeReq({ url: TIMABLE_URL }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+
+    const urls = fetchMock.mock.calls.map(([u]) => String(u));
+    // All three default OpenCode models tried first, then Gemini.
+    expect(urls.slice(0, 3).every((u) => u.includes(OPENCODE))).toBe(true);
+    expect(urls[3]).toContain("generativelanguage.googleapis.com");
+    expect(json.aiUsed).not.toMatch(/^opencode:/);
+    expect(geminiPool.cascade()).toContain(json.aiUsed);
   });
 });

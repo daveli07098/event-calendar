@@ -51,7 +51,6 @@ GitHub disables scheduled workflows after 60 days without repo activity — if p
 stop, re-enable `push-reminders` under the repo's Actions tab.
 The feed token is a secret URL — regenerate it in Settings if it leaks.
 
-## Gemini
+## AI providers
 
-`src/lib/ai/models.ts` holds the free-tier-only pool (checked 2026-10-26 with ListModels + a ping
-per model). Scrape route: `maxDuration = 60`, 12 s per model attempt, 40 s cascade budget.
+OpenCode first, Gemini fallback — provider order, env vars and time budgets: [ai-providers.md](ai-providers.md).

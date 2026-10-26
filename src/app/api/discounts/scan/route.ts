@@ -318,7 +318,10 @@ async function runAiExtraction(
       : `Links on the page: none found — every "url" field must be null.`;
 
   try {
-    const { data, provider, tokensUsed } = await aiExtractJson(DISCOUNT_PROMPT(pageText, sourceUrl, candidatesBlock));
+    const { data, provider, tokensUsed } = await aiExtractJson(
+      DISCOUNT_PROMPT(pageText, sourceUrl, candidatesBlock),
+      "discounts"
+    );
     console.log(
       `[discounts/scan] ${sourceUrl} → provider=${provider} tokens=${tokensUsed ?? "n/a"} hasDiscount=${Boolean(data.hasDiscount)}`
     );

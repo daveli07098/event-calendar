@@ -1,10 +1,11 @@
 /**
  * Shared AI extraction client — single home for the multi-provider cascade
- * (Gemini model family → Groq → GitHub Copilot) used by AI-powered features
- * (ticket scraping, discount scanning, …).
+ * (OpenCode models → Gemini model family → Groq → GitHub Copilot) used by
+ * AI-powered features (ticket scraping, discount scanning, …).
  *
- * All callers share GEMINI_API_KEY / GROQ_API_KEY / GITHUB_TOKEN env vars and
- * the per-user daily quota in src/lib/ai/quota.ts.
+ * All callers share OPENCODE_API_KEY / GEMINI_API_KEY / GROQ_API_KEY /
+ * GITHUB_TOKEN env vars and the per-user daily quota in src/lib/ai/quota.ts.
+ * Provider order per feature: docs/ai-providers.md.
  *
  * Routing around regional blocks (e.g. Gemini geo-blocks Hong Kong with
  * HTTP 400 "User location is not supported"):
@@ -16,6 +17,7 @@
  */
 import { ProxyAgent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { geminiPool } from "./models";
+import { hasOpenCode, openCodeChat } from "./opencode";
 import {
   availableCascade,
   isDailyQuotaError,
@@ -90,7 +92,20 @@ export const GROUNDED_MODELS = geminiPool.grounded();
 
 /** True when at least one AI provider is configured via env. */
 export function hasAiProvider(): boolean {
-  return !!(process.env.GEMINI_API_KEY || process.env.GITHUB_TOKEN || process.env.GROQ_API_KEY);
+  return !!(
+    hasOpenCode() ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GITHUB_TOKEN ||
+    process.env.GROQ_API_KEY
+  );
+}
+
+/**
+ * True when a provider that can READ an image/PDF is configured — Gemini (images + PDF) or
+ * Copilot (images). OpenCode is text-only here (vision unconfirmed), so it doesn't count.
+ */
+export function hasVisionProvider(): boolean {
+  return !!(process.env.GEMINI_API_KEY || process.env.GITHUB_TOKEN);
 }
 
 /**
@@ -199,7 +214,9 @@ export function isTransientAiError(msg: string): boolean {
     msg.toLowerCase().includes("socket") ||
     msg.toLowerCase().includes("econnrefused") ||
     msg.toLowerCase().includes("etimedout") ||
-    msg.toLowerCase().includes("network")
+    msg.toLowerCase().includes("network") ||
+    // openCodeChat already cascaded its own models — fall through to Gemini & co.
+    msg.toLowerCase().includes("opencode")
   );
 }
 
@@ -400,16 +417,33 @@ export async function callCopilotJson(prompt: string, githubToken: string): Prom
 
 /**
  * Run a JSON-extraction prompt through the full provider cascade.
- * Tries each Gemini model in priority order, then Groq, then Copilot;
+ * Tries the OpenCode models, then each Gemini model in priority order, then
+ * Groq, then Copilot;
  * transient errors (quota, model unavailable, network) fall through to the
  * next provider. Throws the last error if every provider fails.
  */
-export async function aiExtractJson(prompt: string): Promise<AiJsonResult> {
+export async function aiExtractJson(prompt: string, feature = "extract"): Promise<AiJsonResult> {
   const geminiKey = process.env.GEMINI_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
   const githubToken = process.env.GITHUB_TOKEN;
 
   const providers: Array<() => Promise<AiJsonResult>> = [];
+  if (hasOpenCode()) {
+    providers.push(async () => {
+      // 25 s per model, 45 s for the whole OpenCode cascade — leaves the
+      // Gemini fallback a chance instead of three stalled models eating it all.
+      const r = await openCodeChat({
+        prompt,
+        json: true,
+        maxTokens: 8192,
+        timeoutMs: 25_000,
+        deadline: Date.now() + 45_000,
+        feature,
+      });
+      if (!r) throw new Error("OpenCode: every model failed");
+      return { data: parseJsonLoose(r.text), provider: r.provider, tokensUsed: r.tokens };
+    });
+  }
   if (geminiKey) {
     // RPD-aware ordering: models with remaining daily quota first, exhausted
     // ones skipped — no doomed 429 hop at the head of every cascade.

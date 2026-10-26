@@ -13,3 +13,10 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useSearchParams: () => new URLSearchParams(),
 }));
+
+// Never let a real OpenCode key from the shell reach the suite: with it set,
+// every AI call site would try OpenCode before the Gemini URLs tests assert on.
+// Tests that exercise OpenCode opt in with vi.stubEnv("OPENCODE_API_KEY", …).
+delete process.env.OPENCODE_API_KEY;
+delete process.env.OPENCODE_MODELS;
+delete process.env.OPENCODE_BASE_URL;

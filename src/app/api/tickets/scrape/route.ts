@@ -26,6 +26,7 @@ import {
   scrapeCacheKey,
 } from "@/lib/ai/scrape-cache";
 import { parseJsonLoose } from "@/lib/ai/client";
+import { hasOpenCode, openCodeChat } from "@/lib/ai/opencode";
 import { detectTimezoneFromUrl } from "@/lib/source-timezone";
 
 // ---------------------------------------------------------------------------
@@ -1350,7 +1351,11 @@ function isKeywordSoup(s: string | null): boolean {
  * description — the AI's best job here is composing readable content, not
  * pulling it out of keyword-soup body text. Small, gated call (cheap lite model).
  */
-async function generateDescription(t: TicketData, apiKey: string): Promise<string | null> {
+async function generateDescription(
+  t: TicketData,
+  apiKey: string | undefined,
+  deadline: number,
+): Promise<string | null> {
   const facts = [
     `Title: ${t.title}`,
     t.date ? `Date: ${t.date}${t.time ? ` ${t.time}` : ""}` : null,
@@ -1360,9 +1365,25 @@ async function generateDescription(t: TicketData, apiKey: string): Promise<strin
   ].filter(Boolean).join("\n");
 
   const prompt = `Write ONE natural, concise calendar description (max 25 words) for this event, in the SAME language as the title. Say what it is and where/when. Output ONLY the sentence — no keywords, tags, hashtags, quotes, or labels.\n\n${facts}`;
+  const tidy = (raw: string) => raw.trim().replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s+/g, " ");
+
+  // OpenCode first. 1024 tokens (not Gemini's 120): reasoning models emit
+  // <think>…</think> in-band before the sentence and would truncate on a tiny cap.
+  const oc = await openCodeChat({
+    prompt,
+    maxTokens: 1024,
+    temperature: 0.4,
+    timeoutMs: 10_000,
+    deadline: Math.min(Date.now() + 15_000, deadline),
+    feature: "describe",
+  });
+  if (oc && tidy(oc.text)) return tidy(oc.text);
+  if (!apiKey) return null;
 
   // Lightweight task → use the pool's lite models with remaining daily quota.
   for (const model of await availableLite()) {
+    const remaining = deadline - Date.now();
+    if (remaining < MIN_GEMINI_ATTEMPT_MS) break; // request budget spent — keep the fallback
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -1374,7 +1395,7 @@ async function generateDescription(t: TicketData, apiKey: string): Promise<strin
             // A little warmth for natural phrasing; 120 tokens is plenty for a sentence.
             generationConfig: { maxOutputTokens: 120, temperature: 0.4 },
           }),
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(Math.min(12_000, remaining)),
         },
       );
       if (!res.ok) {
@@ -1388,7 +1409,7 @@ async function generateDescription(t: TicketData, apiKey: string): Promise<strin
       await recordModelCall(model); // count toward today's RPD budget
       const data = await res.json();
       const raw: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-      const clean = raw.trim().replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s+/g, " ");
+      const clean = tidy(raw);
       if (clean) return clean;
     } catch {
       // network/timeout — fall through to the next model, then give up
@@ -1543,8 +1564,17 @@ export const maxDuration = 60;
 // Wall-clock budget for the whole AI provider cascade; leaves headroom inside
 // maxDuration for fetching the page and saving results.
 const AI_CASCADE_BUDGET_MS = 40_000;
+// Hard cap for ANY AI work in one request (extraction + description + similarity),
+// measured from the start of the handler — keeps the response inside maxDuration.
+const REQUEST_AI_BUDGET_MS = 52_000;
+// Skip the optional description/similarity AI calls when less than this is left.
+const MIN_OPTIONAL_AI_MS = 4_000;
+// Don't start a Gemini fallback attempt with less than this before the deadline.
+const MIN_GEMINI_ATTEMPT_MS = 1_500;
 
 export async function POST(req: NextRequest) {
+  // Absolute deadline for every AI call in this request (see REQUEST_AI_BUDGET_MS).
+  const aiDeadline = Date.now() + REQUEST_AI_BUDGET_MS;
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -1663,7 +1693,8 @@ export async function POST(req: NextRequest) {
 
   // Only check quota if at least one AI provider is configured AND user didn't request OG-meta only.
   // Falls back to OG-meta if the user has hit their limit or no AI key exists.
-  const hasAiProvider = !forceOgMeta && !!(geminiKey || githubToken || groqKey);
+  const openCodeOn = hasOpenCode();
+  const hasAiProvider = !forceOgMeta && !!(openCodeOn || geminiKey || githubToken || groqKey);
   const withinLimit = hasAiProvider ? await checkRemainingAiLimit(uid) : false;
   // NOTE: remaining is read AFTER the AI call (below) so it reflects the post-increment value
 
@@ -1689,8 +1720,8 @@ export async function POST(req: NextRequest) {
   }
 
   // ---------------------------------------------------------------------------
-  // AI cascade: multiple Gemini models → Groq → Copilot
-  // Each Gemini model is tried in order; on 429 (quota) we fall through to next.
+  // AI cascade: OpenCode models → multiple Gemini models → Groq → Copilot
+  // Each model is tried in order; on 429 (quota) we fall through to next.
   // ---------------------------------------------------------------------------
   if (cacheHit) {
     // Served from cache — skip the cascade entirely.
@@ -1700,6 +1731,28 @@ export async function POST(req: NextRequest) {
   } else if (hasAiProvider && withinLimit) {
     // Try each provider in order; skip to next on 429
     const providers: Array<() => Promise<{ result: Partial<TicketData>; name: string }>> = [];
+    // Started before the providers run so OpenCode's internal model cascade
+    // shares the same AI_CASCADE_BUDGET_MS as the between-provider check below.
+    const cascadeStart = Date.now();
+
+    // OpenCode first: its own model cascade is capped at 12 s per model and
+    // stops ~12 s before the shared budget ends, so a Gemini attempt still fits.
+    if (openCodeOn) {
+      providers.push(async () => {
+        const r = await openCodeChat({
+          prompt: EXTRACT_PROMPT(pageText, url),
+          json: true,
+          maxTokens: 8192,
+          temperature: 0,
+          timeoutMs: 12_000,
+          deadline: Math.min(cascadeStart + AI_CASCADE_BUDGET_MS - 12_000, aiDeadline),
+          feature: "scrape",
+        });
+        if (!r) throw new Error("OpenCode: every model failed");
+        const parsed = parseJsonLoose(r.text) as Partial<TicketData>;
+        return { result: { ...parsed, _tokensUsed: r.tokens } as Partial<TicketData>, name: r.provider };
+      });
+    }
 
     // Gemini models sourced from the shared pool (see src/lib/ai/models.ts),
     // ordered by remaining free-tier DAILY quota: models with headroom first,
@@ -1735,7 +1788,6 @@ export async function POST(req: NextRequest) {
       }));
     }
 
-    const cascadeStart = Date.now();
     for (const provider of providers) {
       if (Date.now() - cascadeStart > AI_CASCADE_BUDGET_MS) {
         console.warn("[tickets/scrape] AI cascade budget exhausted — stopping");
@@ -1782,13 +1834,16 @@ export async function POST(req: NextRequest) {
           lower.includes("etimedout") ||
           lower.includes("timeout") ||
           lower.includes("abort") ||
-          lower.includes("network");
+          lower.includes("network") ||
+          // openCodeChat already cascaded its own models — fall through to Gemini.
+          lower.includes("opencode");
         if (isTransient) {
           const reason = msg.includes("400") ? "bad request / model unavailable (400)"
             : msg.includes("429") ? "quota exceeded (429)"
             : msg.includes("404") ? "not found (404)"
             : msg.includes("503") ? "unavailable (503)"
             : (lower.includes("timeout") || lower.includes("abort")) ? "request timed out"
+            : lower.includes("opencode") ? "every OpenCode model failed"
             : "network error";
           console.warn(`[tickets/scrape] ${reason} for ${currentProviderName} — trying next provider`);
           aiError = "AI temporarily unavailable — trying next provider";
@@ -1993,8 +2048,14 @@ export async function POST(req: NextRequest) {
   // dump (e.g. Timable's og:description) or no description at all, have the AI
   // compose a real one-sentence description from the facts we already trust.
   // Gated — only when AI is allowed and the description is genuinely unusable.
-  if (geminiKey && !forceOgMeta && isKeywordSoup(ticket.description)) {
-    const generated = await generateDescription(ticket, geminiKey);
+  // Skipped (keeping the page/meta description) when the request's AI budget is nearly spent.
+  if (
+    (geminiKey || openCodeOn) &&
+    !forceOgMeta &&
+    isKeywordSoup(ticket.description) &&
+    aiDeadline - Date.now() >= MIN_OPTIONAL_AI_MS
+  ) {
+    const generated = await generateDescription(ticket, geminiKey, aiDeadline);
     if (generated) {
       ticket.description = generated;
       console.log(`[tickets/scrape] generated description via AI (was keyword-soup/empty)`);
@@ -2042,7 +2103,8 @@ export async function POST(req: NextRequest) {
       if (eventsOnDay.length > 0) {
         // Try AI similarity scoring (batch all candidates in one call, cheap prompt)
         let aiScores: Record<string, number> | null = null;
-        if (geminiKey) {
+        // Skipped (exact-title fallback below) when the request's AI budget is nearly spent.
+        if ((geminiKey || openCodeOn) && aiDeadline - Date.now() >= MIN_OPTIONAL_AI_MS) {
           try {
             const candidateTitles = eventsOnDay.map((e, i) => `${i}: ${e.title}`).join("\n");
             const similarityPrompt = `Given the scraped event title and a list of existing calendar event titles, return a JSON object mapping each index (as a string key) to a similarity score between 0.0 and 1.0.
@@ -2056,38 +2118,59 @@ ${candidateTitles}
 
 Return ONLY a JSON object like {"0":0.95,"1":0.1,...}`;
 
-            // Lightweight task → use the pool's lite models with remaining daily quota,
-            // same fall-through-on-429 pattern as generateDescription() above.
-            for (const model of await availableLite()) {
-              try {
-                const simRes = await fetch(
-                  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-                  {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
-                    body: JSON.stringify({
-                      contents: [{ parts: [{ text: similarityPrompt }] }],
-                      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 256 },
-                    }),
-                    signal: AbortSignal.timeout(8000), // 8 s max for this lightweight call
-                  },
-                );
-                if (!simRes.ok) {
-                  // Per-DAY 429 → mark the model spent so later calls skip it today.
-                  if (simRes.status === 429) {
-                    const detail = await simRes.text().catch(() => "");
-                    if (isDailyQuotaError(detail)) await markModelExhausted(model);
+            // OpenCode first (1024 tokens: room for in-band <think> before the JSON).
+            const oc = await openCodeChat({
+              prompt: similarityPrompt,
+              json: true,
+              maxTokens: 1024,
+              temperature: 0,
+              timeoutMs: 8_000,
+              deadline: Math.min(Date.now() + 10_000, aiDeadline),
+              feature: "duplicates",
+            });
+            if (oc) {
+              const scores = parseJsonLoose(oc.text);
+              if (Object.keys(scores).length > 0) aiScores = scores as Record<string, number>;
+            }
+
+            // Gemini fallback — only when OpenCode produced no scores.
+            if (!aiScores && geminiKey) {
+              // Lightweight task → use the pool's lite models with remaining daily quota,
+              // same fall-through-on-429 pattern as generateDescription() above.
+              for (const model of await availableLite()) {
+                const remaining = aiDeadline - Date.now();
+                if (remaining < MIN_GEMINI_ATTEMPT_MS) break; // request budget spent
+                try {
+                  const simRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", "x-goog-api-key": geminiKey },
+                      body: JSON.stringify({
+                        contents: [{ parts: [{ text: similarityPrompt }] }],
+                        generationConfig: { responseMimeType: "application/json", maxOutputTokens: 256 },
+                      }),
+                      // 8 s max for this lightweight call, never past the request deadline
+                      signal: AbortSignal.timeout(Math.min(8000, remaining)),
+                    },
+                  );
+                  if (!simRes.ok) {
+                    // Per-DAY 429 → mark the model spent so later calls skip it today.
+                    if (simRes.status === 429) {
+                      const detail = await simRes.text().catch(() => "");
+                      if (isDailyQuotaError(detail)) await markModelExhausted(model);
+                    }
+                    continue; // 429/400 → try next lite model
                   }
-                  continue; // 429/400 → try next lite model
+                  await recordModelCall(model); // count toward today's RPD budget
+                  const simData = await simRes.json();
+                  const raw = simData.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+                  const cleaned = raw.replace(/```json\n?|```/g, "").trim();
+                  aiScores = JSON.parse(cleaned) as Record<string, number>;
+                  break;
+                } catch {
+                  // network/timeout/parse error — fall through to the next model, then give up
                 }
-                await recordModelCall(model); // count toward today's RPD budget
-                const simData = await simRes.json();
-                const raw = simData.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-                const cleaned = raw.replace(/```json\n?|```/g, "").trim();
-                aiScores = JSON.parse(cleaned) as Record<string, number>;
-                break;
-              } catch {
-                // network/timeout/parse error — fall through to the next model, then give up
               }
             }
           } catch {

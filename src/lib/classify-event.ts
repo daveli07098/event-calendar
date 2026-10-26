@@ -5,6 +5,8 @@ import {
   markModelExhausted,
   recordModelCall,
 } from "@/lib/ai/model-quota";
+import { hasOpenCode, openCodeChat } from "@/lib/ai/opencode";
+import { parseJsonLoose } from "@/lib/ai/client";
 
 const VALID_CATEGORIES = new Set<string>(EVENT_CATEGORIES);
 
@@ -22,6 +24,23 @@ const CATEGORY_PROMPT_LINES = `  concert    — live music, band show, K-pop con
   food       — food festival, wine tasting, dining event, craft beer event
   ticket     — ticket sale / presale reminder with no physical performance on that date
   other      — does not fit any above`;
+
+// OpenCode first; Gemini is the fallback when OpenCode is unconfigured or every
+// OpenCode model failed (see docs/ai-providers.md).
+async function callAi(prompt: string): Promise<string | null> {
+  const oc = await openCodeChat({
+    prompt,
+    json: true,
+    maxTokens: 2048,
+    temperature: 0,
+    timeoutMs: 20_000,
+    deadline: Date.now() + 30_000,
+    feature: "classify",
+  });
+  if (oc) return oc.text;
+  const apiKey = process.env.GEMINI_API_KEY;
+  return apiKey ? callGemini(prompt, apiKey) : null;
+}
 
 // Classification is a cheap, high-volume task — use the pool's lightweight
 // models, ordered by remaining free-tier DAILY quota (see model-quota.ts).
@@ -59,11 +78,11 @@ async function callGemini(prompt: string, apiKey: string): Promise<string | null
 }
 
 function parseCategories(raw: string): Record<string, EventCategory> {
-  const cleaned = raw.replace(/```json\n?|```/g, "").trim();
-  const parsed: Record<string, string> = JSON.parse(cleaned);
+  // Lenient parse: strips fences and salvages preambles/truncation.
+  const parsed = parseJsonLoose(raw);
   const result: Record<string, EventCategory> = {};
   for (const [k, v] of Object.entries(parsed)) {
-    if (VALID_CATEGORIES.has(v)) result[k] = v as EventCategory;
+    if (typeof v === "string" && VALID_CATEGORIES.has(v)) result[k] = v as EventCategory;
   }
   return result;
 }
@@ -74,8 +93,7 @@ function parseCategories(raw: string): Record<string, EventCategory> {
 export async function classifyBatch(
   events: Array<{ id: string; title: string; description: string | null; location: string | null }>
 ): Promise<Record<string, EventCategory>> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return {};
+  if (!process.env.GEMINI_API_KEY && !hasOpenCode()) return {};
 
   const list = events
     .map((e, i) =>
@@ -93,7 +111,7 @@ ${list}
 
 Return ONLY {"0":"concert","1":"exhibition",...} with no extra text.`;
 
-  const raw = await callGemini(prompt, apiKey);
+  const raw = await callAi(prompt);
   if (!raw) return {};
   try {
     return parseCategories(raw);
@@ -110,8 +128,7 @@ export async function classifySingleEvent(
   location: string | null,
   description: string | null
 ): Promise<EventCategory | null> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
+  if (!process.env.GEMINI_API_KEY && !hasOpenCode()) return null;
 
   const eventLine = `"${title}"${location ? ` at ${location}` : ""}${description ? ` — ${description.slice(0, 200)}` : ""}`;
 
@@ -125,7 +142,7 @@ Event:
 
 Return ONLY {"0":"concert"} with no extra text.`;
 
-  const raw = await callGemini(prompt, apiKey);
+  const raw = await callAi(prompt);
   if (!raw) return null;
   try {
     const parsed = parseCategories(raw);

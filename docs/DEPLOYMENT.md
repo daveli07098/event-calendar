@@ -62,7 +62,8 @@ In Vercel project → **Settings → Environment Variables**, add:
 | `AUTH_URL` | `https://your-project.vercel.app` | After first deploy, update this |
 | `GOOGLE_CLIENT_ID` | From Google Cloud Console | See below |
 | `GOOGLE_CLIENT_SECRET` | From Google Cloud Console | See below |
-| `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Google AI Studio |
+| `OPENCODE_API_KEY` | [opencode.ai](https://opencode.ai) | Primary AI provider — see [ai-providers.md](ai-providers.md) |
+| `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Google AI Studio — AI fallback; required for World Cup score grounding |
 | `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) | Optional |
 
 ### Step 7 — Google OAuth: add production redirect URI
@@ -155,8 +156,9 @@ DIRECT_URL=           # direct URL (port 5432) — migrations only
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
-# AI providers
-GEMINI_API_KEY=       # https://aistudio.google.com/apikey
+# AI providers (order + details: docs/ai-providers.md)
+OPENCODE_API_KEY=     # primary — https://opencode.ai
+GEMINI_API_KEY=       # fallback + World Cup grounding — https://aistudio.google.com/apikey
 GROQ_API_KEY=         # optional — https://console.groq.com
 GITHUB_TOKEN=         # optional — Copilot cascade fallback
 ```
@@ -354,8 +356,9 @@ DATABASE_URL=         # postgres://... (injected by Neon/Railway/Supabase)
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
-# AI providers
-GEMINI_API_KEY=       # https://aistudio.google.com/apikey
+# AI providers (order + details: docs/ai-providers.md)
+OPENCODE_API_KEY=     # primary — https://opencode.ai
+GEMINI_API_KEY=       # fallback + World Cup grounding — https://aistudio.google.com/apikey
 GROQ_API_KEY=         # https://console.groq.com (optional, cascade fallback)
 GITHUB_TOKEN=         # optional, Copilot cascade fallback
 

@@ -770,7 +770,7 @@ export function TicketSection() {
                   ? "bg-primary text-primary-foreground font-medium"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted"
               }`}
-              title="Use Gemini AI when available (uses quota)"
+              title="Use AI when available (uses quota)"
             >
               <Sparkles className="size-3 inline mr-1" />Auto
             </button>
@@ -1853,8 +1853,16 @@ export function TicketSection() {
             <p>The server checks for these env vars in order:</p>
             <ol className="list-decimal list-inside space-y-1 mt-1">
               <li>
+                <code className="bg-muted px-1 rounded">OPENCODE_API_KEY</code> — OpenCode
+                models (primary; see{" "}
+                <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer" className="underline">
+                  opencode.ai
+                </a>
+                )
+              </li>
+              <li>
                 <code className="bg-muted px-1 rounded">GEMINI_API_KEY</code> — Google Gemini
-                1.5 Flash (free: 1M tokens/day at{" "}
+                (fallback; free tier at{" "}
                 <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="underline">
                   aistudio.google.com
                 </a>

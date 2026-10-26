@@ -31,9 +31,11 @@ vi.mock("@/lib/safe-fetch", () => ({
 }));
 
 const hasAiProviderMock = vi.hoisted(() => vi.fn(() => true));
+const hasVisionProviderMock = vi.hoisted(() => vi.fn(() => true));
 const aiExtractJsonFromImageMock = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/ai/client", () => ({
   hasAiProvider: hasAiProviderMock,
+  hasVisionProvider: hasVisionProviderMock,
   aiExtractJsonFromImage: aiExtractJsonFromImageMock,
 }));
 
@@ -102,6 +104,7 @@ describe("POST /api/venues/[id]/seatmap/draft", () => {
     vi.clearAllMocks();
     setMockSession(mockSession);
     hasAiProviderMock.mockReturnValue(true);
+    hasVisionProviderMock.mockReturnValue(true);
     checkRemainingAiLimitMock.mockResolvedValue(true);
     getScrapeCacheMock.mockResolvedValue(null);
     prismaMock.eventVenue.findUnique.mockResolvedValue({
@@ -141,6 +144,17 @@ describe("POST /api/venues/[id]/seatmap/draft", () => {
     hasAiProviderMock.mockReturnValue(false);
     const res = await POST(makeReq({}), makeParams("venue-1"));
     expect(res.status).toBe(503);
+  });
+
+  it("returns an actionable 503 without touching quota when only a text-only provider (OpenCode) is configured", async () => {
+    hasVisionProviderMock.mockReturnValue(false);
+    const res = await POST(makeReq({}), makeParams("venue-1"));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.error).toBe("Image reading needs GEMINI_API_KEY or GITHUB_TOKEN (OpenCode is text-only here)");
+    expect(checkRemainingAiLimitMock).not.toHaveBeenCalled();
+    expect(incrementAiLimitMock).not.toHaveBeenCalled();
+    expect(aiExtractJsonFromImageMock).not.toHaveBeenCalled();
   });
 
   it("returns 400 when the plan url is private (SSRF guard)", async () => {

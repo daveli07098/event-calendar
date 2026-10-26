@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { hasAiProvider, aiExtractJsonFromImage } from "@/lib/ai/client";
+import { hasAiProvider, hasVisionProvider, aiExtractJsonFromImage } from "@/lib/ai/client";
 import { AI_DAILY_LIMIT, checkRemainingAiLimit, incrementAiLimit, getResetAt } from "@/lib/ai/quota";
 import { safeFetch, UnsafeUrlError } from "@/lib/safe-fetch";
 import { scrapeCacheKey, getScrapeCache, saveScrapeCache } from "@/lib/ai/scrape-cache";
@@ -98,6 +98,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     rawDraft = cached.result;
     cacheHit = true;
   } else {
+    // hasAiProvider() is also true for an OpenCode-only deploy, which can't read images — say
+    // so up front (503, no quota touched) instead of a generic 502 from the cascade.
+    if (!hasVisionProvider()) {
+      return NextResponse.json(
+        { error: "Image reading needs GEMINI_API_KEY or GITHUB_TOKEN (OpenCode is text-only here)" },
+        { status: 503 }
+      );
+    }
     if (!(await checkRemainingAiLimit(uid))) {
       return NextResponse.json(
         { error: `Daily AI limit reached (${AI_DAILY_LIMIT}/day)`, resetAt: getResetAt() },

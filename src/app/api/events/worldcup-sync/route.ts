@@ -8,6 +8,8 @@ import {
   markModelExhausted,
   recordModelCall,
 } from "@/lib/ai/model-quota";
+import { hasOpenCode, openCodeChat } from "@/lib/ai/opencode";
+import { parseJsonLoose } from "@/lib/ai/client";
 
 const WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/2026_FIFA_World_Cup_knockout_stage";
 const geminiEndpoint = (model: string) =>
@@ -38,12 +40,14 @@ async function fetchWikipediaText(): Promise<string> {
     .slice(0, 30000); // cap to avoid Gemini token limits
 }
 
-async function resolveTeamsFromGemini(
+async function resolveTeams(
   matchId: number,
   pageText: string,
 ): Promise<TeamResult> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not configured");
+  if (!apiKey && !hasOpenCode()) {
+    throw new Error("No AI provider configured (OPENCODE_API_KEY or GEMINI_API_KEY)");
+  }
 
   const prompt = `You are a sports data assistant. Below is extracted text from a Wikipedia article about the 2026 FIFA World Cup knockout stage.
 
@@ -57,6 +61,27 @@ If the teams are not yet determined (the match hasn't happened yet or the bracke
 
 Wikipedia text:
 ${pageText}`;
+
+  // OpenCode first — the Wikipedia text is in the prompt, so no web search is
+  // needed (see docs/ai-providers.md). Gemini below is the fallback.
+  const oc = await openCodeChat({
+    prompt,
+    json: true,
+    maxTokens: 2048,
+    temperature: 0,
+    timeoutMs: 25_000,
+    deadline: Date.now() + 40_000,
+    feature: "worldcup-sync",
+  });
+  if (oc) {
+    const parsed = parseJsonLoose(oc.text);
+    if ("team1" in parsed && "team2" in parsed) {
+      const name = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+      return { team1: name(parsed.team1), team2: name(parsed.team2) };
+    }
+    console.warn(`[worldcup-sync] ${oc.provider} returned no team1/team2 — falling back to Gemini`);
+  }
+  if (!apiKey) throw new Error("OpenCode did not return the teams and GEMINI_API_KEY is not configured");
 
   // Grounding-capable models only (only Gemini 2.5 still has free-tier Google
   // Search grounding — see the pool's comment) — try each in RPD headroom
@@ -160,11 +185,11 @@ export async function POST(req: NextRequest) {
   }
   const matchId = parseInt(matchIdStr, 10);
 
-  // 3. Fetch Wikipedia and ask Gemini for real team names
+  // 3. Fetch Wikipedia and ask the AI (OpenCode → Gemini) for real team names
   let teams: TeamResult;
   try {
     const pageText = await fetchWikipediaText();
-    teams = await resolveTeamsFromGemini(matchId, pageText);
+    teams = await resolveTeams(matchId, pageText);
   } catch (err) {
     console.error("[worldcup-sync] external fetch/AI error:", err);
     return NextResponse.json(
