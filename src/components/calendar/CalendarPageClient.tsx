@@ -18,12 +18,15 @@ interface CalendarPageClientProps {
   initialCalendars: CalendarType[];
   initialEvents: EventType[];
   initialAgendaEvents?: AgendaEvent[];
+  /** Server render time (ISO), keeps the agenda's first render hydration-safe. */
+  initialNow?: string;
 }
 
 export function CalendarPageClient({
   initialCalendars,
   initialEvents,
   initialAgendaEvents,
+  initialNow,
 }: CalendarPageClientProps) {
   const [calendars, setCalendars] = useState<CalendarType[]>(initialCalendars);
   const [addCalendarOpen, setAddCalendarOpen] = useState(false);
@@ -212,6 +215,7 @@ export function CalendarPageClient({
           calendars={calendars}
           initialEvents={initialEvents}
           initialAgendaEvents={initialAgendaEvents}
+          initialNow={initialNow}
           openEventId={openEventId}
           onOpenEventHandled={() => setOpenEventId(null)}
           onEventOpen={handleEventOpen}

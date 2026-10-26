@@ -13,6 +13,8 @@ interface UpcomingAgendaProps {
   onEventClick?: (id: string) => void;
   /** Smaller variant for the home widget (fewer upcoming days). */
   compact?: boolean;
+  /** Server render time (ISO) so the first client render matches the server HTML. */
+  initialNow?: string;
 }
 
 const MIN = 60_000;
@@ -193,9 +195,12 @@ function Heading({ children }: { children: React.ReactNode }) {
   return <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>;
 }
 
-export function UpcomingAgenda({ events, timeZone, days, onEventClick, compact = false }: UpcomingAgendaProps) {
-  const [now, setNow] = useState(() => Date.now());
+export function UpcomingAgenda({ events, timeZone, days, onEventClick, compact = false, initialNow }: UpcomingAgendaProps) {
+  const [now, setNow] = useState(() => (initialNow ? Date.parse(initialNow) : Date.now()));
   useEffect(() => {
+    // Catch up from the server render time straight away, then tick every minute.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing the external clock after hydration
+    setNow(Date.now());
     const t = setInterval(() => setNow(Date.now()), MIN);
     return () => clearInterval(t);
   }, []);

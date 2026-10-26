@@ -182,7 +182,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <section aria-label="Upcoming" className="min-w-0">
-          <UpcomingAgenda events={events} timeZone={timeZone} days={14} onEventClick={openEvent} />
+          <UpcomingAgenda events={events} timeZone={timeZone} days={14} onEventClick={openEvent} initialNow={props.nowIso} />
         </section>
 
         <aside className="min-w-0 space-y-4">

@@ -21,7 +21,7 @@ describe("site-calendar", () => {
     prismaMock.calendar.findMany.mockResolvedValue([{ id: "a" }, { id: "b" }] as never);
     await ensureSiteCalendarMembership("u1");
     expect(prismaMock.calendar.findMany).toHaveBeenCalledWith({
-      where: { isSiteShared: true, userId: { not: "u1" } },
+      where: { isSiteShared: true, userId: { not: "u1" }, members: { none: { userId: "u1" } } },
       select: { id: true },
     });
     expect(createMany).toHaveBeenCalledWith({

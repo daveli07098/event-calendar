@@ -114,6 +114,7 @@ interface CalendarViewProps {
   initialEvents: EventType[];
   /** Events for the Upcoming agenda (now-1d .. now+14d), loaded server-side */
   initialAgendaEvents?: AgendaEvent[];
+  initialNow?: string;
   calendars: CalendarType[];
   /** Called externally (e.g. search) to open a specific event by id in the modal */
   openEventId?: string | null;
@@ -140,7 +141,7 @@ interface CalendarViewProps {
   onBookmarkToggle?: (eventId: string, bookmarked: boolean) => Promise<void>;
 }
 
-export function CalendarView({ initialEvents, initialAgendaEvents, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
+export function CalendarView({ initialEvents, initialAgendaEvents, initialNow, calendars, openEventId, onOpenEventHandled, onSearchOpen, onMobileMenuOpen, onEventOpen, onEventClose, categoryFilter, locationFilter, onGotoDateReady, bookmarks, onBookmarkSelect, onBookmarkToggle }: CalendarViewProps) {
   const [events, setEvents] = useState<EventType[]>(initialEvents);
   const [agendaEvents, setAgendaEvents] = useState<AgendaEvent[]>(initialAgendaEvents ?? []);
   // Always starts as "upcoming" (SSR-safe); the stored / deep-link view is
@@ -808,6 +809,7 @@ export function CalendarView({ initialEvents, initialAgendaEvents, calendars, op
                   events={filteredAgendaEvents}
                   timeZone={timeZone}
                   onEventClick={(id) => openById(id)}
+                  initialNow={initialNow}
                 />
               </div>
             </div>

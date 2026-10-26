@@ -128,6 +128,7 @@ export default async function CalendarPage() {
       initialCalendars={serializedCalendars}
       initialEvents={serializedEvents}
       initialAgendaEvents={agendaEvents}
+      initialNow={now.toISOString()}
     />
   );
 }

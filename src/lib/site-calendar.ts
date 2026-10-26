@@ -11,13 +11,14 @@ export async function getSiteSharedCalendarIds(): Promise<string[]> {
 
 /**
  * Make sure `userId` is a read-only ("viewer") member of every site-shared
- * calendar they don't own. Idempotent: one findMany + one createMany with
- * skipDuplicates. Never throws — safe to call on every page load.
+ * calendar they don't own and haven't joined yet. Idempotent: one findMany, plus a
+ * createMany with skipDuplicates only when something is missing. Never throws — safe to call on every page load.
  */
 export async function ensureSiteCalendarMembership(userId: string): Promise<void> {
   try {
     const calendars = await prisma.calendar.findMany({
-      where: { isSiteShared: true, userId: { not: userId } },
+      // Skip calendars the user already joined, so repeat visits cost one read and no write.
+      where: { isSiteShared: true, userId: { not: userId }, members: { none: { userId } } },
       select: { id: true },
     });
     if (calendars.length === 0) return;
