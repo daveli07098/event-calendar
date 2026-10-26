@@ -1,3 +1,7 @@
+## [2026-10-27] — Session: OpenCode Go AI provider
+### Added
+- feat(ai): OpenCode Go as the primary text AI provider, Gemini kept for search grounding, images and fallback ([6058b8a])
+
 ## [2026-10-26] — Session: v2 personal home, shared ticket calendar, off-app reminders
 ### Added
 - feat(db): v2 schema — site-shared calendar flag, feed token, push subscriptions/log, notes, countdowns ([3a30349], [835c29e])
