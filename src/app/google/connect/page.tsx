@@ -94,7 +94,7 @@ export default function GoogleConnectPage() {
   // ── Prompt step ────────────────────────────────────────────────────────────
   if (step === "prompt") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="flex min-h-[calc(100dvh-var(--app-nav-h,0px))] items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
           <CardHeader className="text-center">
             <div className="mx-auto mb-3 flex size-14 items-center justify-center rounded-full bg-primary/10">
@@ -122,7 +122,7 @@ export default function GoogleConnectPage() {
   // ── Picker step ────────────────────────────────────────────────────────────
   if (step === "picker") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="flex min-h-[calc(100dvh-var(--app-nav-h,0px))] items-center justify-center bg-background p-4">
         <Card className="w-full max-w-lg duration-500 animate-in fade-in-0 slide-in-from-bottom-2">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -208,7 +208,7 @@ export default function GoogleConnectPage() {
   // ── Syncing step ───────────────────────────────────────────────────────────
   if (step === "syncing") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="flex min-h-[calc(100dvh-var(--app-nav-h,0px))] items-center justify-center bg-background p-4">
         <Card className="w-full max-w-sm text-center duration-500 animate-in fade-in-0 zoom-in-95">
           <CardContent className="pt-10 pb-10 flex flex-col items-center gap-4">
             <Loader2 className="size-10 animate-spin text-primary" />
@@ -223,7 +223,7 @@ export default function GoogleConnectPage() {
 
   // ── Done step ──────────────────────────────────────────────────────────────
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex min-h-[calc(100dvh-var(--app-nav-h,0px))] items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm duration-500 animate-in fade-in-0 zoom-in-95">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex size-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900">

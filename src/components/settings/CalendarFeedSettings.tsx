@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Check, Copy, Loader2, RefreshCw } from "lucide-react";
@@ -15,6 +15,8 @@ export function CalendarFeedSettings() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const call = useCallback(async (method: "POST" | "DELETE") => {
     setBusy(true);
@@ -49,11 +51,37 @@ export function CalendarFeedSettings() {
     };
   }, []);
 
+  useEffect(
+    () => () => {
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
   const copy = async () => {
     if (!feed?.url) return;
-    await navigator.clipboard.writeText(feed.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(feed.url);
+      setError(null);
+      setCopied(true);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API rejects on insecure contexts / denied permission: select the text so the user can copy manually.
+      inputRef.current?.focus();
+      inputRef.current?.select();
+      setError("Couldn't copy automatically. The link is selected, so press Ctrl/Cmd+C.");
+    }
+  };
+
+  const turnOff = () => {
+    if (
+      window.confirm(
+        "Turn off the link? Calendars subscribed to it will stop updating.",
+      )
+    ) {
+      void call("DELETE");
+    }
   };
 
   const regenerate = () => {
@@ -79,7 +107,9 @@ export function CalendarFeedSettings() {
         <div className="space-y-3">
           <div className="flex gap-2">
             <Input
+              ref={inputRef}
               readOnly
+              aria-label="Calendar subscription URL"
               value={feed.url}
               onFocus={(e) => e.currentTarget.select()}
               className="font-mono text-xs"
@@ -120,7 +150,7 @@ export function CalendarFeedSettings() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => call("DELETE")}
+              onClick={turnOff}
               disabled={busy}
             >
               Turn off

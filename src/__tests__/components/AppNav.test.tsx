@@ -38,4 +38,14 @@ describe("AppNav", () => {
     rerender(<AppNav />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it("renders a same-height placeholder while the session loads, except on auth pages", () => {
+    status = "loading";
+    const { container, rerender } = render(<AppNav />);
+    expect(container.querySelector("[data-app-nav]")).toHaveStyle({ height: "2.75rem" });
+    expect(screen.queryByRole("navigation")).toBeNull();
+    pathname = "/login";
+    rerender(<AppNav />);
+    expect(container).toBeEmptyDOMElement();
+  });
 });

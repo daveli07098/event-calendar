@@ -7,7 +7,7 @@ import { CalendarDays, Home, Settings, Ticket } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 
-// Height of the bar; the layout wrapper subtracts it from h-screen/min-h-screen pages.
+// Height of the bar; layout.tsx exposes it as --app-nav-h (via the data-app-nav marker) for full-height pages to subtract.
 export const APP_NAV_HEIGHT = "2.75rem";
 
 const LINKS = [
@@ -27,12 +27,24 @@ export function AppNav() {
   const pathname = usePathname() ?? "/";
   const { status } = useSession();
 
-  if (status !== "authenticated") return null;
   if (HIDDEN_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return null;
+  // Same-height placeholder while the session resolves so content doesn't jump when the bar pops in.
+  if (status === "loading") {
+    return (
+      <div
+        data-app-nav
+        aria-hidden="true"
+        style={{ height: APP_NAV_HEIGHT }}
+        className="sticky top-0 z-30 shrink-0 border-b border-border bg-card"
+      />
+    );
+  }
+  if (status !== "authenticated") return null;
 
   return (
     <nav
       aria-label="Main"
+      data-app-nav
       style={{ height: APP_NAV_HEIGHT }}
       className="sticky top-0 z-30 flex shrink-0 items-center gap-1 border-b border-border bg-card px-2 sm:px-4"
     >

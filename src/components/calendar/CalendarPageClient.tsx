@@ -192,7 +192,7 @@ export function CalendarPageClient({
   };
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-[calc(100dvh-var(--app-nav-h,0px))] overflow-hidden">
       {/* Site-wide announcement banner (e.g. World Cup) — full width, above all */}
       <SiteBanner />
       {/* Decorative pennant bunting under the banner (World Cup theme only) */}

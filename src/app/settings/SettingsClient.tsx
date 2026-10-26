@@ -216,7 +216,7 @@ export function SettingsClient({ user }: SettingsClientProps) {
   const joinedCalendars = calendars.filter((c) => c.memberRole);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-[calc(100dvh-var(--app-nav-h,0px))] bg-background">
       <div className="mx-auto max-w-2xl p-6">
         <div className="flex items-center gap-4 mb-6">
           <Link

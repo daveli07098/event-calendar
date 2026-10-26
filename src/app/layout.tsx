@@ -103,11 +103,11 @@ export default function RootLayout({
         */}
         <script id="theme-boot" dangerouslySetInnerHTML={{ __html: buildThemeBootScript() }} />
       </head>
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col [--app-nav-h:0px] has-[[data-app-nav]]:[--app-nav-h:2.75rem]">
         <Providers>
           <AppNav />
-          {/* Full-height pages (calendar, settings, tickets) give up the nav bar's height (2.75rem, see AppNav) so the page never scrolls past the viewport. */}
-          <div className="flex flex-1 flex-col [&_.h-screen]:h-[calc(100dvh-2.75rem)] [&_.min-h-screen]:min-h-[calc(100dvh-2.75rem)]">
+          {/* --app-nav-h (set on <body>: 2.75rem while AppNav or its loading placeholder is mounted, else 0) is subtracted by the full-height page shells (calendar, settings, tickets, error/not-found, google connect) so the page never scrolls past the viewport. Nested overlays are unaffected. */}
+          <div className="flex flex-1 flex-col">
             {children}
           </div>
           <InstallPrompt />

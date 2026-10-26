@@ -747,7 +747,7 @@ export function TicketSection() {
   const isLoading = ["scraping", "checking", "adding", "updating"].includes(status);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-[calc(100dvh-var(--app-nav-h,0px))] bg-background flex flex-col">
       {/* Header */}
       <header className="border-b border-border bg-card px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
         <a href="/calendar">
