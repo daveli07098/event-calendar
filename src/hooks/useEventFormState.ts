@@ -45,6 +45,27 @@ const toLocalDateTimeInput = (value: string) => {
   return local.toISOString().slice(0, 16);
 };
 
+const shiftDateInput = (date: string, days: number) => {
+  const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return date;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
+/**
+ * All-day events are stored with an EXCLUSIVE end (FullCalendar + Google + ICS
+ * DTEND), but the form's End field shows the inclusive last day. Legacy rows
+ * with end <= start still display as a single day.
+ */
+export const allDayEndToInput = (storedEnd: string, startInput: string) => {
+  const last = shiftDateInput(storedEnd, -1);
+  return last < startInput ? startInput : last;
+};
+
+/** Inverse of allDayEndToInput: inclusive form date -> exclusive stored end (ISO, UTC midnight). */
+export const allDayInputToStoredEnd = (endInput: string) =>
+  new Date(`${shiftDateInput(endInput, 1)}T00:00:00Z`).toISOString();
+
 /** Extracts "HH:MM" from a datetime-local value ("YYYY-MM-DDTHH:MM"); undefined for date-only values. */
 const timeOfDay = (value: string): string | undefined =>
   value.length > 10 ? value.slice(11, 16) : undefined;
@@ -136,7 +157,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
       const seating = eventDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
       const seatLine = eventDescription.match(/^Seat: (.+)$/m)?.[1]?.trim() ?? "";
       const start = event.allDay ? toLocalDateInput(event.startTime) : toLocalDateTimeInput(event.startTime);
-      const end = event.allDay ? toLocalDateInput(event.endTime) : toLocalDateTimeInput(event.endTime);
+      const end = event.allDay ? allDayEndToInput(toLocalDateInput(event.endTime), start) : toLocalDateTimeInput(event.endTime);
       next = {
         title: event.title ?? "",
         description: eventDescription,
@@ -156,7 +177,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
       const seating = copiedDescription.match(/^Seating Plan: (https?:\/\/\S+)/m)?.[1] ?? "";
       const seatLine = copiedDescription.match(/^Seat: (.+)$/m)?.[1]?.trim() ?? "";
       const start = initialData.allDay ? toLocalDateInput(initialData.startTime) : toLocalDateTimeInput(initialData.startTime);
-      const end = initialData.allDay ? toLocalDateInput(initialData.endTime) : toLocalDateTimeInput(initialData.endTime);
+      const end = initialData.allDay ? allDayEndToInput(toLocalDateInput(initialData.endTime), start) : toLocalDateTimeInput(initialData.endTime);
       next = {
         title: initialData.title ?? "",
         description: copiedDescription,
@@ -173,7 +194,7 @@ export function useEventFormState({ open, event, initialData, initialRange, defa
       };
     } else if (initialRange) {
       const start = initialRange.allDay ? initialRange.start.slice(0, 10) : toLocalDateTimeInput(initialRange.start);
-      const end = initialRange.allDay ? initialRange.end.slice(0, 10) : toLocalDateTimeInput(initialRange.end);
+      const end = initialRange.allDay ? allDayEndToInput(initialRange.end.slice(0, 10), start) : toLocalDateTimeInput(initialRange.end);
       next = {
         title: "",
         description: "",

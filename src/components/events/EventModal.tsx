@@ -32,7 +32,7 @@ import {
 import { Trash2, ExternalLink, Copy, ArrowRight, RefreshCw, Image as ImageIcon, Bookmark } from "lucide-react";
 import type { CalendarType, EventType, EventFormData, EventCategory } from "@/types";
 import { EVENT_CATEGORIES, CATEGORY_LABELS } from "@/types";
-import { useEventFormState } from "@/hooks/useEventFormState";
+import { useEventFormState, allDayInputToStoredEnd } from "@/hooks/useEventFormState";
 import { describeVenueTime } from "@/lib/event-timezone";
 import { parseSeat } from "@/lib/seat-parse";
 import { SeatBreakdown } from "@/components/events/SeatBreakdown";
@@ -438,7 +438,7 @@ export function EventModal({
         description: finalDescription || undefined,
         location: location || undefined,
         startTime: new Date(startTime).toISOString(),
-        endTime: new Date(endTime).toISOString(),
+        endTime: allDay ? allDayInputToStoredEnd(endTime.slice(0, 10)) : new Date(endTime).toISOString(),
         allDay,
         calendarId,
         category: category ?? null,
@@ -980,7 +980,7 @@ export function EventModal({
                     description: description || undefined,
                     location: location || undefined,
                     startTime: new Date(startTime).toISOString(),
-                    endTime: new Date(endTime).toISOString(),
+                    endTime: allDay ? allDayInputToStoredEnd(endTime.slice(0, 10)) : new Date(endTime).toISOString(),
                     allDay,
                     calendarId,
                     category: category ?? null,

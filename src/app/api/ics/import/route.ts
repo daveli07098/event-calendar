@@ -84,7 +84,6 @@ function parseICS(icsText: string): {
   let calName = "Imported Calendar";
   const events: ParsedEvent[] = [];
   let currentEvent: Partial<ParsedEvent> | null = null;
-  let startAllDay = false;
 
   for (const line of lines) {
     const colonIdx = line.indexOf(":");
@@ -103,7 +102,6 @@ function parseICS(icsText: string): {
       calName = unescapeICS(value);
     } else if (key === "BEGIN" && value === "VEVENT") {
       currentEvent = {};
-      startAllDay = false;
     } else if (key === "END" && value === "VEVENT" && currentEvent) {
       if (
         currentEvent.uid &&
@@ -135,19 +133,12 @@ function parseICS(icsText: string): {
           const { iso, allDay } = parseICSDateTime(value, params);
           currentEvent.startIso = iso;
           currentEvent.allDay = allDay;
-          startAllDay = allDay;
           break;
         }
         case "DTEND": {
           const { iso } = parseICSDateTime(value, params);
-          if (startAllDay) {
-            // iCal DTEND is exclusive for all-day; subtract 1 day to get inclusive end
-            const d = new Date(iso);
-            d.setUTCDate(d.getUTCDate() - 1);
-            currentEvent.endIso = d.toISOString();
-          } else {
-            currentEvent.endIso = iso;
-          }
+          // iCal DTEND is exclusive for all-day, same as how we store it
+          currentEvent.endIso = iso;
           break;
         }
       }
