@@ -1,20 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Bell, CalendarDays, Check, Pin, PinOff, Plus, Ticket, Trash2 } from "lucide-react";
+import { Bell, CalendarDays, Check, Pin, PinOff, Plus, Ticket, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dayKey, groupAgenda, type AgendaEvent } from "@/lib/agenda";
 import { urlFromText } from "@/lib/notes";
 import { buttonVariants } from "@/components/ui/button";
+import { useNow } from "@/hooks/useNow";
 import { UpcomingAgenda } from "@/components/agenda/UpcomingAgenda";
 
 export interface HomeBookmark {
   eventId: string;
   title: string;
   start: string; // ISO
+  end?: string | null; // ISO; lets a running event read "Now" instead of "Today"
   allDay: boolean;
   color: string;
   countdown: boolean;
@@ -38,6 +40,7 @@ interface HomeDashboardProps {
 
 const HOUR_MS = 3_600_000;
 const MAX_COUNTDOWNS = 4;
+const TICK_MS = 60_000;
 
 function hourIn(date: Date, timeZone: string): number {
   return Number(
@@ -67,13 +70,18 @@ function clockIn(iso: string, timeZone: string): string {
 
 /** Relative wording: "in 2 h", "Tomorrow 19:30", "in 5 days". */
 export function countdownLabel(
-  p: Pick<HomeBookmark, "start" | "allDay">,
+  p: Pick<HomeBookmark, "start" | "end" | "allDay">,
   now: Date,
   timeZone: string,
 ): string {
   const days = daysUntil(p.start, now, timeZone);
   const ms = new Date(p.start).getTime() - now.getTime();
-  if (days <= 0) {
+  // Never a negative countdown: running timed events read "Now", finished ones "Ended".
+  if (!p.allDay && ms <= 0 && p.end) {
+    return now.getTime() < new Date(p.end).getTime() ? "Now" : "Ended";
+  }
+  if (days < 0) return "Ended";
+  if (days === 0) {
     if (p.allDay || ms <= 0) return "Today";
     if (ms < HOUR_MS) return `in ${Math.max(Math.round(ms / 60_000), 1)} min`;
     return `in ${Math.round(ms / HOUR_MS)} h`;
@@ -103,10 +111,21 @@ const heading = "mb-3 text-sm font-semibold";
 export function HomeDashboard(props: HomeDashboardProps) {
   const { firstName, timeZone, events } = props;
   const router = useRouter();
-  const now = useMemo(() => new Date(props.nowIso), [props.nowIso]);
+  const now = useNow(TICK_MS, props.nowIso);
 
   const [bookmarks, setBookmarks] = useState(props.bookmarks);
   const [pinned, setPinned] = useState(props.countdowns);
+  // Resync local copies when the server props change (e.g. after router.refresh()).
+  const [seenBookmarks, setSeenBookmarks] = useState(props.bookmarks);
+  const [seenCountdowns, setSeenCountdowns] = useState(props.countdowns);
+  if (props.bookmarks !== seenBookmarks) {
+    setSeenBookmarks(props.bookmarks);
+    setBookmarks(props.bookmarks);
+  }
+  if (props.countdowns !== seenCountdowns) {
+    setSeenCountdowns(props.countdowns);
+    setPinned(props.countdowns);
+  }
   const [notes, setNotes] = useState(props.notes);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -123,13 +142,13 @@ export function HomeDashboard(props: HomeDashboardProps) {
   };
 
   async function setCountdown(b: HomeBookmark, countdown: boolean) {
-    const prevPinned = pinned;
-    const prevBookmarks = bookmarks;
+    setError(null);
+    const byStart = (x: HomeBookmark, y: HomeBookmark) => x.start.localeCompare(y.start);
     const next = { ...b, countdown };
     setBookmarks((list) => list.map((x) => (x.eventId === b.eventId ? next : x)));
     setPinned((list) =>
       countdown
-        ? list.some((x) => x.eventId === b.eventId) ? list : [...list, next].sort((x, y) => x.start.localeCompare(y.start))
+        ? list.some((x) => x.eventId === b.eventId) ? list : [...list, next].sort(byStart)
         : list.filter((x) => x.eventId !== b.eventId),
     );
     try {
@@ -140,8 +159,13 @@ export function HomeDashboard(props: HomeDashboardProps) {
       });
       if (!res.ok) throw new Error();
     } catch {
-      setPinned(prevPinned);
-      setBookmarks(prevBookmarks);
+      // Revert only this item so a concurrent toggle on another one survives.
+      setBookmarks((list) => list.map((x) => (x.eventId === b.eventId ? { ...x, countdown: b.countdown } : x)));
+      setPinned((list) =>
+        countdown
+          ? list.filter((x) => x.eventId !== b.eventId)
+          : list.some((x) => x.eventId === b.eventId) ? list : [...list, b].sort(byStart),
+      );
       setError("Could not update the countdown");
     }
   }
@@ -170,14 +194,19 @@ export function HomeDashboard(props: HomeDashboardProps) {
   }
 
   async function mutateNote(note: HomeNote, init: RequestInit, kind: "done" | "delete") {
-    const prev = notes;
-    const index = prev.findIndex((n) => n.id === note.id);
+    const index = notes.findIndex((n) => n.id === note.id);
+    setError(null);
     setNotes((l) => l.filter((n) => n.id !== note.id));
     try {
       const res = await fetch(`/api/notes/${note.id}`, init);
       if (!res.ok) throw new Error();
     } catch {
-      setNotes(prev);
+      setNotes((l) => {
+        if (l.some((n) => n.id === note.id)) return l;
+        const next = [...l];
+        next.splice(Math.min(Math.max(index, 0), next.length), 0, note);
+        return next;
+      });
       setError("Could not update the note");
       return;
     }
@@ -193,6 +222,7 @@ export function HomeDashboard(props: HomeDashboardProps) {
         next.splice(Math.min(Math.max(index, 0), next.length), 0, n);
         return next;
       });
+    setError(null);
     try {
       // A deleted note is gone server-side, so undo re-creates it (new id).
       const res =
@@ -234,9 +264,20 @@ export function HomeDashboard(props: HomeDashboardProps) {
       </header>
 
       {error && (
-        <p role="alert" className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm">
-          {error}
-        </p>
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm"
+        >
+          <span>{error}</span>
+          <button
+            type="button"
+            aria-label="Dismiss error"
+            onClick={() => setError(null)}
+            className="shrink-0 rounded p-1 hover:bg-accent"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
@@ -268,8 +309,8 @@ export function HomeDashboard(props: HomeDashboardProps) {
                       className="group relative overflow-hidden rounded-lg border bg-background p-3"
                     >
                       <span aria-hidden className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: p.color }} />
-                      <div className="pl-1">
-                        <div className="text-xl font-bold leading-none text-primary">
+                      <div className="min-w-0 pl-1 pr-6">
+                        <div className="truncate text-xl font-bold leading-none text-primary">
                           {label}
                         </div>
                         <div className="mt-1 truncate text-xs text-muted-foreground">{p.title}</div>
@@ -349,17 +390,21 @@ export function HomeDashboard(props: HomeDashboardProps) {
             </form>
             {notes.length > 0 && (
               <ul className="mt-3 space-y-1.5">
-                {notes.map((n) => (
+                {notes.map((n) => {
+                  // Temp rows have no server id yet; acting on them would 404 or orphan the note.
+                  const pending = n.id.startsWith("tmp-");
+                  return (
                   <li key={n.id} className="flex items-start gap-2 text-sm">
                     <button
                       type="button"
                       aria-label={`Mark done: ${n.text}`}
+                      disabled={pending}
                       onClick={() => mutateNote(n, {
                         method: "PATCH",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({ done: true }),
                       }, "done")}
-                      className="group/check mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-muted-foreground/60 hover:bg-accent"
+                      className="group/check mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-muted-foreground/60 hover:bg-accent disabled:opacity-50"
                     >
                       {/* Unchecked until hovered/focused, so it never looks already ticked. */}
                       <Check className="size-3 text-primary opacity-0 transition-opacity group-hover/check:opacity-60 group-focus-visible/check:opacity-60" />
@@ -378,13 +423,15 @@ export function HomeDashboard(props: HomeDashboardProps) {
                     <button
                       type="button"
                       aria-label={`Delete note: ${n.text}`}
+                      disabled={pending}
                       onClick={() => mutateNote(n, { method: "DELETE" }, "delete")}
-                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
+                      className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-50"
                     >
                       <Trash2 className="size-3.5" />
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </section>

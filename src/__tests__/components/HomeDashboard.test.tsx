@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
-import { HomeDashboard } from "@/components/home/HomeDashboard";
+import { HomeDashboard, countdownLabel } from "@/components/home/HomeDashboard";
 
 const TZ = "Asia/Hong_Kong";
 const NOW = "2026-10-26T02:00:00Z"; // 10:00 HK, Monday
@@ -23,7 +23,11 @@ const fetchMock = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", fetchMock);
+  // useNow catches up to the real clock after mount; pin it to the seed time.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date(NOW) });
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe("HomeDashboard", () => {
   it("renders the greeting, date and summary", () => {
@@ -88,5 +92,38 @@ describe("HomeDashboard", () => {
     fireEvent.click(screen.getByLabelText("Pin countdown for NCT 127"));
     expect(await screen.findByTestId("countdown-tile")).toBeTruthy();
     expect(fetchMock.mock.calls[0][0]).toBe("/api/bookmarks/a/countdown");
+  });
+
+  it("labels running and finished timed events", () => {
+    const now = new Date(NOW);
+    const ev = { allDay: false, start: "2026-10-26T01:00:00Z", end: "2026-10-26T03:00:00Z" };
+    expect(countdownLabel(ev, now, TZ)).toBe("Now");
+    expect(countdownLabel({ ...ev, end: "2026-10-26T01:30:00Z" }, now, TZ)).toBe("Ended");
+    expect(countdownLabel({ allDay: false, start: "2026-10-24T01:00:00Z" }, now, TZ)).toBe("Ended");
+  });
+
+  it("disables actions on pending temp notes", async () => {
+    fetchMock.mockReturnValue(new Promise(() => {}));
+    render(<HomeDashboard {...base} />);
+    fireEvent.change(screen.getByLabelText("Quick note"), { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    const del = await screen.findByLabelText("Delete note: hello");
+    expect((del as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Mark done: hello") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("rolls back only the failed pin and can dismiss the error", async () => {
+    fetchMock.mockResolvedValue({ ok: false });
+    render(
+      <HomeDashboard
+        {...base}
+        bookmarks={[{ eventId: "a", title: "NCT 127", start: "2026-11-07T10:00:00Z", allDay: false, color: "#f00", countdown: false }]}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Pin countdown for NCT 127"));
+    expect((await screen.findByRole("alert")).textContent).toContain("Could not update the countdown");
+    expect(screen.queryByTestId("countdown-tile")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Dismiss error"));
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
