@@ -16,6 +16,17 @@
 - fix(events): all-day end dates stored exclusive everywhere — form, FullCalendar, Google/.ics import, feed ([d1e280b])
 - fix(ui): mobile nav fits, theme switcher in the nav, themed top-center toasts, install banner clear of the + button, opaque theme menu, relative countdowns, sale times, note undo ([068d12f])
 - fix(calendar): time-ordered days, readable dark list rows and long-event bars, one view switcher, sidebar a11y labels, Esc closes the drawer ([5ef6318])
+- fix(events): reading an event requires calendar access; shareToken no longer leaks ([424913d])
+- fix(dates): all-day events no longer spill into the next day; one long-event rule for agenda, feed and push ([a7f96c6])
+- fix(push): page all subscribers, POST-only test push with cooldown, key validation, notes cap ([1f542e0])
+- fix(push): send only the most imminent due reminder per event ([d37ed51])
+- fix(ics-import): cap upload size, recurrence expansion and total events ([db935c9])
+- fix(home): live clock, safe quick-capture and pin rollbacks, Now/Ended countdowns ([f43b0d8])
+- fix(calendar): deep links don't stick, mini calendar follows, List shows multi-day once ([d8cd8fc], [3992ed3])
+- fix(ui): nav height via CSS var, toasts at bottom, safer feed copy ([1124ec4])
+- fix(shared): no Leave on site-wide calendars, broadcast-only share dialog ([991c6ab])
+- fix(pwa): install banner no longer blocks dialog buttons ([f8a8381])
+
 ### Changed
 - chore(theme): drop World Cup as the default skin and banner ([2d2b943])
 
